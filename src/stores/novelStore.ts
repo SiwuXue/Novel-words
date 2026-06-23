@@ -22,9 +22,19 @@ export const useNovelStore = defineStore('novel', () => {
   async function fetchOne(id: number) {
     loading.value = true
     try {
-      currentNovel.value = await invoke<Novel>('get_novel', { id })
+      // Guard: timeout 8s so loading never gets stuck forever
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('get_novel timeout')), 8000)
+      )
+      const result = await Promise.race([
+        invoke<Novel>('get_novel', { id }),
+        timeout,
+      ])
+      currentNovel.value = result
     } catch (e) {
-      console.error('Failed to fetch novel:', e)
+      console.error('[novelStore] fetchOne failed:', e)
+      currentNovel.value = null
+      throw e  // 上抛给 page 决定如何呈现错误
     } finally {
       loading.value = false
     }
