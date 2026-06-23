@@ -4,10 +4,11 @@
     title="导入文本文件"
     width="680px"
     :close-on-click-modal="false"
+    destroy-on-close
     @closed="emit('close')"
   >
     <!-- Step 1: choose file -->
-    <div v-if="step === 1" class="import-step">
+    <div v-show="step === 1" class="import-step">
       <div class="drop-zone" @click="selectFile">
         <el-icon :size="48" color="var(--text-secondary)"><FolderOpened /></el-icon>
         <p>点击选择 .txt / .md 文件</p>
@@ -25,7 +26,7 @@
     </div>
 
     <!-- Step 2: preview chapters & confirm -->
-    <div v-else-if="step === 2" class="import-step">
+    <div v-show="step === 2" class="import-step">
       <el-descriptions :column="2" border size="small">
         <el-descriptions-item label="检测书名">
           {{ result?.detectedTitle || '未检测到' }}
@@ -61,10 +62,12 @@
     </div>
 
     <!-- Error state -->
-    <div v-else class="import-step import-error">
-      <el-icon :size="48" color="var(--danger-color)"><CircleCloseFilled /></el-icon>
-      <p>{{ errorMsg }}</p>
-      <el-button @click="step = 1">重试</el-button>
+    <div v-show="step === 3" class="import-step">
+      <el-result icon="error" title="导入失败" :sub-title="errorMsg">
+        <template #extra>
+          <el-button type="primary" @click="step = 1">重试</el-button>
+        </template>
+      </el-result>
     </div>
   </el-dialog>
 </template>
@@ -74,7 +77,7 @@ import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { ElMessage } from 'element-plus'
-import { FolderOpened, CircleCloseFilled } from '@element-plus/icons-vue'
+import { FolderOpened } from '@element-plus/icons-vue'
 import type { ImportResult } from '@/types/novel'
 
 const emit = defineEmits<{
@@ -113,10 +116,12 @@ async function analyzeFile() {
   if (!filePath.value) return
   analyzing.value = true
   try {
-    result.value = await invoke<ImportResult>('import_text_file', { path: filePath.value })
+    const r = await invoke<ImportResult>('import_text_file', { path: filePath.value })
+    result.value = r
     step.value = 2
   } catch (e: any) {
-    errorMsg.value = typeof e === 'string' ? e : (e?.message || '分析失败')
+    console.error('[import_text_file] failed:', e)
+    errorMsg.value = String(e?.message || e || '未知错误')
     step.value = 3
   } finally {
     analyzing.value = false
@@ -138,7 +143,8 @@ async function handleImport() {
 
 <style scoped>
 .import-step {
-  min-height: 240px;
+  min-height: 320px;
+  padding: 20px 0;
 }
 .drop-zone {
   border: 2px dashed var(--border-color, #dcdfe6);

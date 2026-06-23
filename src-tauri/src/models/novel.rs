@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Novel {
     pub id: i64,
     pub title: String,
@@ -14,6 +15,7 @@ pub struct Novel {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Chapter {
     pub title: String,
     pub content: String,
@@ -21,6 +23,7 @@ pub struct Chapter {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ImportResult {
     pub chapters: Vec<Chapter>,
     pub raw_text: String,
