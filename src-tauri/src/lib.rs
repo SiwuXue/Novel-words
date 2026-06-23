@@ -6,6 +6,7 @@ mod utils;
 use db::DbState;
 use tauri::Manager;
 
+use commands::file_io::import_text_file;
 use commands::novel::{
     create_novel, delete_novel, get_all_novels, get_novel, search_novels, update_novel,
 };
@@ -41,7 +42,8 @@ pub fn run() {
             get_novel,
             update_novel,
             delete_novel,
-            search_novels
+            search_novels,
+            import_text_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

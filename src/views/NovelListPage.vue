@@ -17,6 +17,9 @@
         <el-button type="primary" @click="showCreateDialog">
           <el-icon><Plus /></el-icon> 新建小说
         </el-button>
+        <el-button @click="showImportDialog">
+          <el-icon><FolderOpened /></el-icon> 导入文件
+        </el-button>
       </div>
     </div>
 
@@ -70,6 +73,13 @@
       :novel="editingNovel"
       @submit="handleSubmit"
     />
+
+    <!-- Import Dialog -->
+    <ImportDialog
+      v-if="showImport"
+      @confirm="handleImportConfirm"
+      @close="showImport = false"
+    />
   </div>
 </template>
 
@@ -77,10 +87,11 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Plus, Star, StarFilled } from '@element-plus/icons-vue'
+import { Search, Plus, Star, StarFilled, FolderOpened } from '@element-plus/icons-vue'
 import { useNovelStore } from '@/stores/novelStore'
-import type { Novel } from '@/types/novel'
+import type { Novel, ImportResult } from '@/types/novel'
 import NovelFormDialog from '@/components/novel/NovelFormDialog.vue'
+import ImportDialog from '@/components/novel/ImportDialog.vue'
 
 const router = useRouter()
 const store = useNovelStore()
@@ -88,6 +99,7 @@ const store = useNovelStore()
 const searchQuery = ref('')
 const dialogVisible = ref(false)
 const editingNovel = ref<Novel | null>(null)
+const showImport = ref(false)
 
 onMounted(() => {
   store.fetchAll()
@@ -102,6 +114,29 @@ function showCreateDialog() {
   dialogVisible.value = true
 }
 
+function showImportDialog() {
+  showImport.value = true
+}
+
+async function handleImportConfirm(result: ImportResult, _filePath: string) {
+  // Create novel from import result first, then close dialog on success
+  try {
+    const novel = await store.create({
+      title: result.detectedTitle || '未命名小说',
+      author: '',
+      category: '其他',
+      rawText: result.rawText,
+      cleanedText: result.cleanedText,
+    })
+    showImport.value = false
+    if (novel) {
+      router.push(`/novels/${novel.id}`)
+    }
+  } catch (e: any) {
+    ElMessage.error(typeof e === 'string' ? e : (e?.message || '导入失败'))
+  }
+}
+
 function editNovel(novel: Novel) {
   editingNovel.value = novel
   dialogVisible.value = true
@@ -109,7 +144,12 @@ function editNovel(novel: Novel) {
 
 async function handleSubmit(data: { title: string; author: string; category: string; rawText: string }) {
   if (editingNovel.value) {
-    await store.update(editingNovel.value.id, data)
+    // Only update metadata fields; preserve rawText and cleanedText
+    await store.update(editingNovel.value.id, {
+      title: data.title,
+      author: data.author,
+      category: data.category,
+    })
     ElMessage.success('小说已更新')
   } else {
     const novel = await store.create(data)

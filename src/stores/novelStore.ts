@@ -43,8 +43,11 @@ export const useNovelStore = defineStore('novel', () => {
   }
 
   async function update(id: number, data: Partial<Novel>) {
-    const n = currentNovel.value
-    if (!n && !data) return
+    // currentNovel might be null when editing from list page; fall back to list
+    const n = currentNovel.value?.id === id
+      ? currentNovel.value
+      : novels.value.find(n => n.id === id)
+    if (!n) return
     const merged = { ...n, ...data }
     await invoke('update_novel', {
       id,

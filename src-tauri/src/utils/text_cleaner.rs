@@ -67,17 +67,9 @@ fn normalize_whitespace(text: &str) -> String {
 fn strip_special_chars(text: &str) -> String {
     text.chars()
         .filter(|c| {
-            matches!(
-                *c,
-                '\n' | '\r' | '\t' // keep whitespace
-                | '\u{0020}'..='\u{007E}' // ASCII printable
-                | '\u{0080}'..='\u{FFFF}' // CJK and other Unicode
-                | '\u{2000}'..='\u{206F}' // General punctuation
-                | '\u{3000}'..='\u{303F}' // CJK punctuation
-                | '\u{FF00}'..='\u{FFEF}' // Halfwidth/Fullwidth forms
-                | '\u{4E00}'..='\u{9FFF}' // CJK Unified
-                | '\u{3400}'..='\u{4DBF}' // CJK Extension A
-            )
+            // Keep: newline, tab, ASCII printable, and all Unicode above 0x7F
+            // (covers CJK, punctuation, fullwidth forms — everything useful)
+            matches!(*c, '\n' | '\r' | '\t' | '\u{0020}'..='\u{007E}' | '\u{0080}'..='\u{FFFF}')
         })
         .filter(|c| {
             // Exclude zero-width and invisible chars
