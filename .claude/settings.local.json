@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Read",
+      "Write",
+      "Bash(node *)",
+      "Bash(npm *)",
+      "Skill(update-config)",
+      "Skill(update-config:*)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)"
+    ]
+  },
+  "autoCompactThreshold": 50
+}

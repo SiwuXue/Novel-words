@@ -1,0 +1,17 @@
+html.dark {
+  --bg-primary: #1a1a2e;
+  --bg-secondary: #16213e;
+  --bg-sidebar: #0f1629;
+  --text-primary: #e0e0e0;
+  --text-secondary: #909399;
+  --border-color: #2c3e50;
+  --accent-color: #409eff;
+  --editor-bg: #1e2a3a;
+  --preview-bg: #16213e;
+  --danger-color: #f56c6c;
+  --success-color: #67c23a;
+  --warning-color: #e6a23c;
+  --highlight-color: #ff6b6b;
+  --highlight-mastered: #5aab5a;
+  --shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+}

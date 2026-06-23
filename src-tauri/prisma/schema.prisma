@@ -1,0 +1,66 @@
+generator client {
+    provider = "cargo prisma"
+    output   = "../src/prisma.rs"
+}
+
+datasource db {
+    provider = "sqlite"
+    url      = "file:./novel_words.db"
+}
+
+model Novel {
+    id           Int         @id @default(autoincrement())
+    title        String      @default("")
+    author       String      @default("")
+    category     String      @default("")
+    rawText      String      @default("")
+    cleanedText  String      @default("")
+    isFavorite   Boolean     @default(false)
+    createdAt    DateTime    @default(now())
+    updatedAt    DateTime    @updatedAt
+    vocabWords   VocabWord[]
+}
+
+model VocabBook {
+    id          Int         @id @default(autoincrement())
+    name        String
+    description String      @default("")
+    createdAt   DateTime    @default(now())
+    updatedAt   DateTime    @updatedAt
+    words       VocabWord[]
+}
+
+model VocabWord {
+    id              Int        @id @default(autoincrement())
+    vocabBookId     Int
+    vocabBook       VocabBook  @relation(fields: [vocabBookId], references: [id], onDelete: Cascade)
+    word            String
+    definition      String     @default("")
+    phonetic        String     @default("")
+    exampleSentence String     @default("")
+    novelId         Int?
+    novel           Novel?     @relation(fields: [novelId], references: [id], onDelete: SetNull)
+    proficiency     String     @default("unknown")
+    memoryTag       String     @default("")
+    createdAt       DateTime   @default(now())
+
+    @@index([vocabBookId])
+    @@index([novelId])
+}
+
+model PdfTemplate {
+    id             Int      @id @default(autoincrement())
+    name           String
+    paperSize      String   @default("A4")
+    fontFamily     String   @default("SimSun")
+    fontSize       Int      @default(14)
+    lineSpacing    Float    @default(1.5)
+    margins        String   @default("{\"top\":25,\"bottom\":25,\"left\":20,\"right\":20}")
+    annotationMode String   @default("appendix")
+    createdAt      DateTime @default(now())
+}
+
+model AppSetting {
+    key   String @id
+    value String
+}
