@@ -17,6 +17,9 @@ use commands::vocab_word::{
     create_vocab_word, delete_vocab_word, export_vocab_words_csv, get_highlight_words,
     get_vocab_words, import_vocab_words_csv, search_vocab_words, update_vocab_word,
 };
+use commands::pdf_template::{
+    create_pdf_template, delete_pdf_template, get_all_pdf_templates, update_pdf_template,
+};
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -63,6 +66,10 @@ pub fn run() {
             get_highlight_words,
             export_vocab_words_csv,
             import_vocab_words_csv,
+            create_pdf_template,
+            get_all_pdf_templates,
+            update_pdf_template,
+            delete_pdf_template,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

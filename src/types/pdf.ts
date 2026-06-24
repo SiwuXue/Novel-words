@@ -8,6 +8,7 @@ export interface PdfTemplate {
   margins: string // JSON: { top, bottom, left, right }
   annotationMode: 'inline' | 'sidebar' | 'appendix' | 'none'
   createdAt: string
+  updatedAt: string
 }
 
 export interface PdfTemplateFormData {

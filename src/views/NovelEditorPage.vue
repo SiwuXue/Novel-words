@@ -9,6 +9,13 @@
         <el-icon v-if="editorStore.saving" class="is-loading"><Loading /></el-icon>
         <template v-else>{{ editorStore.isDirty ? '未保存' : '已保存' }}</template>
       </span>
+      <el-button
+        v-if="loadState === 'loaded'"
+        size="small"
+        @click="exportPdfDialogVisible = true"
+      >
+        <el-icon><Printer /></el-icon> 导出 PDF
+      </el-button>
     </div>
 
     <!-- Loaded: three-column body -->
@@ -45,13 +52,16 @@
         </template>
       </el-result>
     </div>
+
+    <!-- PDF export dialog -->
+    <PdfExportDialog v-model="exportPdfDialogVisible" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Loading } from '@element-plus/icons-vue'
+import { ArrowLeft, Loading, Printer } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
 import { useNovelStore } from '@/stores/novelStore'
@@ -60,6 +70,7 @@ import type { HighlightWord } from '@/types/vocabWord'
 import NovelEditor from '@/components/novel/NovelEditor.vue'
 import ChapterList from '@/components/novel/ChapterList.vue'
 import PreviewPanel from '@/components/novel/PreviewPanel.vue'
+import PdfExportDialog from '@/components/pdf/PdfExportDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -70,6 +81,7 @@ const previewRef = ref<InstanceType<typeof PreviewPanel> | null>(null)
 
 const highlightBookId = ref<number | null>(null)
 const highlightWords = ref<HighlightWord[]>([])
+const exportPdfDialogVisible = ref(false)
 
 type LoadState = 'loading' | 'loaded' | 'error'
 const loadState = ref<LoadState>('loading')

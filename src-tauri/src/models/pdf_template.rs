@@ -11,4 +11,5 @@ pub struct PdfTemplate {
     pub margins: String,
     pub annotation_mode: String,
     pub created_at: String,
+    pub updated_at: String,
 }

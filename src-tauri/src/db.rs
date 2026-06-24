@@ -25,6 +25,11 @@ pub fn init_db(app_data_dir: &PathBuf) -> Result<DbState, String> {
     // Run DDL
     conn.execute_batch(CREATE_TABLES_SQL).map_err(|e| format!("建表失败: {}", e))?;
 
+    // Migrations for columns added after initial schema
+    let _ = conn.execute_batch(
+        "ALTER TABLE pdf_template ADD COLUMN updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'));",
+    );
+
     Ok(DbState {
         db: Mutex::new(conn),
     })
@@ -79,7 +84,8 @@ CREATE TABLE IF NOT EXISTS pdf_template (
     line_spacing    REAL    NOT NULL DEFAULT 1.5,
     margins         TEXT    NOT NULL DEFAULT '{\"top\":25,\"bottom\":25,\"left\":20,\"right\":20}',
     annotation_mode TEXT    NOT NULL DEFAULT 'appendix',
-    created_at      TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at      TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
 CREATE TABLE IF NOT EXISTS app_settings (
