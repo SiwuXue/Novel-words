@@ -10,6 +10,9 @@ use commands::file_io::import_text_file;
 use commands::novel::{
     create_novel, delete_novel, get_all_novels, get_novel, search_novels, update_novel,
 };
+use commands::vocab_book::{
+    create_vocab_book, delete_vocab_book, get_all_vocab_books, update_vocab_book,
+};
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -43,7 +46,11 @@ pub fn run() {
             update_novel,
             delete_novel,
             search_novels,
-            import_text_file
+            import_text_file,
+            create_vocab_book,
+            get_all_vocab_books,
+            update_vocab_book,
+            delete_vocab_book,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
