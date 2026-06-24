@@ -1,6 +1,6 @@
 <template>
   <el-switch
-    :model-value="isDark"
+    :model-value="settingsStore.theme === 'dark'"
     :active-icon="Moon"
     :inactive-icon="Sunny"
     @change="toggleTheme"
@@ -10,19 +10,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
 import { Sunny, Moon } from '@element-plus/icons-vue'
+import { useSettingsStore } from '@/stores/settingsStore'
 
-const isDark = computed(() => document.documentElement.classList.contains('dark'))
+const settingsStore = useSettingsStore()
 
 function toggleTheme() {
-  const html = document.documentElement
-  if (html.classList.contains('dark')) {
-    html.classList.remove('dark')
-    localStorage.setItem('theme', 'light')
-  } else {
-    html.classList.add('dark')
-    localStorage.setItem('theme', 'dark')
-  }
+  const next = settingsStore.theme === 'dark' ? 'light' : 'dark'
+  settingsStore.setTheme(next)
 }
 </script>

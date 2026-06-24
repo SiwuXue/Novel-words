@@ -78,6 +78,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { usePdfTemplateStore } from '@/stores/pdfTemplateStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
 import { useNovelStore } from '@/stores/novelStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import type { VocabWord } from '@/types/vocabWord'
 import type { PdfTemplate } from '@/types/pdf'
 import { exportPdf } from '@/utils/pdfExporter'
@@ -97,6 +98,7 @@ watch(visible, (v) => { emit('update:modelValue', v) })
 const templateStore = usePdfTemplateStore()
 const bookStore = useVocabBookStore()
 const novelStore = useNovelStore()
+const settingsStore = useSettingsStore()
 
 const selectedTemplateId = ref<number | null>(null)
 const selectedVocabBookId = ref<number | null>(null)
@@ -127,6 +129,13 @@ onMounted(async () => {
   // Pre-select first template if available
   if (templateStore.templates.length > 0) {
     selectedTemplateId.value = templateStore.templates[0].id
+  }
+  // Pre-select default vocab book from settings
+  if (
+    settingsStore.defaultVocabBookId &&
+    bookStore.books.some((b) => b.id === settingsStore.defaultVocabBookId)
+  ) {
+    selectedVocabBookId.value = settingsStore.defaultVocabBookId
   }
 })
 

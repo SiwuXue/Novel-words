@@ -44,9 +44,48 @@
         </el-table>
       </el-tab-pane>
 
-      <!-- General tab (placeholder for Step 14) -->
+      <!-- General tab -->
       <el-tab-pane label="通用" name="general">
-        <p class="tab-desc">通用设置将在后续版本中提供。</p>
+        <el-form label-width="120px">
+          <el-form-item label="主题">
+            <el-radio-group
+              :model-value="settingsStore.theme"
+              @change="onThemeChange"
+            >
+              <el-radio-button value="light">浅色</el-radio-button>
+              <el-radio-button value="dark">深色</el-radio-button>
+            </el-radio-group>
+          </el-form-item>
+
+          <el-form-item label="默认导出目录">
+            <div style="display:flex;gap:8px;width:100%;">
+              <el-input
+                :model-value="settingsStore.defaultExportFolder"
+                placeholder="未设置（默认使用系统下载目录）"
+                readonly
+                style="flex:1;"
+              />
+              <el-button @click="pickExportFolder">选择目录</el-button>
+            </div>
+          </el-form-item>
+
+          <el-form-item label="默认词汇本">
+            <el-select
+              :model-value="settingsStore.defaultVocabBookId"
+              @change="onDefaultVocabBookChange"
+              placeholder="未设置"
+              clearable
+              style="width:240px;"
+            >
+              <el-option
+                v-for="book in vocabBookStore.books"
+                :key="book.id"
+                :label="book.name"
+                :value="book.id"
+              />
+            </el-select>
+          </el-form-item>
+        </el-form>
       </el-tab-pane>
     </el-tabs>
 
@@ -110,9 +149,14 @@ import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { usePdfTemplateStore } from '@/stores/pdfTemplateStore'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { useVocabBookStore } from '@/stores/vocabBookStore'
 import type { PdfTemplate } from '@/types/pdf'
+import { open } from '@tauri-apps/plugin-dialog'
 
 const templateStore = usePdfTemplateStore()
+const settingsStore = useSettingsStore()
+const vocabBookStore = useVocabBookStore()
 
 const activeTab = ref('templates')
 const dialogVisible = ref(false)
@@ -225,8 +269,30 @@ async function confirmDelete(tpl: PdfTemplate) {
   }
 }
 
+function onThemeChange(t: 'light' | 'dark') {
+  settingsStore.setTheme(t)
+}
+
+async function pickExportFolder() {
+  try {
+    const selected = await open({ directory: true, multiple: false })
+    if (selected) {
+      await settingsStore.setDefaultExportFolder(selected)
+    }
+  } catch (e: any) {
+    ElMessage.error(String(e?.message || e || '选择目录失败'))
+  }
+}
+
+function onDefaultVocabBookChange(id: number | null) {
+  settingsStore.setDefaultVocabBookId(id)
+}
+
 onMounted(() => {
   templateStore.fetchAll()
+  if (vocabBookStore.books.length === 0) {
+    vocabBookStore.fetchAll()
+  }
 })
 </script>
 

@@ -20,6 +20,7 @@ use commands::vocab_word::{
 use commands::pdf_template::{
     create_pdf_template, delete_pdf_template, get_all_pdf_templates, update_pdf_template,
 };
+use commands::settings::{get_all_settings, get_setting, set_setting};
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -70,6 +71,9 @@ pub fn run() {
             get_all_pdf_templates,
             update_pdf_template,
             delete_pdf_template,
+            get_setting,
+            set_setting,
+            get_all_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
