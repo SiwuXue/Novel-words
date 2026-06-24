@@ -65,6 +65,7 @@ import Placeholder from '@tiptap/extension-placeholder'
 import { List, Tickets, RefreshLeft, RefreshRight } from '@element-plus/icons-vue'
 import { useEditorStore } from '@/stores/editorStore'
 import { plainTextToHtml } from '@/utils/editorHtml'
+import { cleanText } from '@/utils/textCleaner'
 
 const props = defineProps<{
   novelId: number
@@ -90,6 +91,22 @@ const editor = useEditor({
       placeholder: '开始编辑小说正文...',
     }),
   ],
+  editorProps: {
+    handlePaste: (_view, event) => {
+      // HTML paste: let Tiptap handle rich text natively
+      const html = event.clipboardData?.getData('text/html')
+      if (html) return false
+
+      // Plain-text paste: clean then insert as paragraphs
+      const text = event.clipboardData?.getData('text/plain')
+      if (!text) return false
+
+      const cleaned = cleanText(text)
+      const result = plainTextToHtml(cleaned)
+      editor.value?.commands.insertContent(result)
+      return true
+    },
+  },
   onUpdate({ editor }) {
     try {
       const html = editor.getHTML()
