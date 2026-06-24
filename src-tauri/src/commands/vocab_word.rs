@@ -1,5 +1,6 @@
 use crate::db::DbState;
-use crate::models::VocabWord;
+use crate::models::{HighlightWord, VocabWord};
+use std::collections::HashMap;
 use tauri::State;
 
 #[tauri::command]
@@ -124,4 +125,38 @@ fn row_to_vocab_word(row: &rusqlite::Row) -> rusqlite::Result<VocabWord> {
         memory_tag: row.get(8)?,
         created_at: row.get(9)?,
     })
+}
+
+#[tauri::command]
+pub fn get_highlight_words(
+    state: State<DbState>,
+    vocab_book_id: i64,
+) -> Result<Vec<HighlightWord>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let mut stmt = db
+        .prepare(
+            "SELECT word, definition, phonetic, example_sentence, proficiency FROM vocab_word WHERE vocab_book_id=?1 ORDER BY created_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows: Vec<HighlightWord> = stmt
+        .query_map(rusqlite::params![vocab_book_id], |row| {
+            Ok(HighlightWord {
+                word: row.get(0)?,
+                definition: row.get(1)?,
+                phonetic: row.get(2)?,
+                example_sentence: row.get(3)?,
+                proficiency: row.get(4)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    // Deduplicate by word, keeping the first occurrence
+    let mut seen: HashMap<String, HighlightWord> = HashMap::new();
+    for hw in rows {
+        seen.entry(hw.word.clone()).or_insert(hw);
+    }
+    Ok(seen.into_values().collect())
 }
