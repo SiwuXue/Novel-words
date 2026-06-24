@@ -6,9 +6,9 @@ import type { HighlightWord } from '@/types/vocabWord'
 const PLUGIN_KEY = new PluginKey('vocabHighlight')
 
 const PROFICIENCY_COLORS: Record<string, string> = {
-  unknown: '#e8e8e8',
-  familiar: '#fdf2e9',
-  mastered: '#e8f8e8',
+  unknown: '#fef08a',
+  familiar: '#dbeafe',
+  mastered: '#bbf7d0',
 }
 
 const PROFICIENCY_TEXTS: Record<string, string> = {
@@ -107,6 +107,7 @@ function escapeHtml(s: string): string {
 }
 
 function showTooltip(rect: DOMRect, hw: HighlightWord) {
+  console.log('[VocabHighlight] showTooltip:', hw.word)
   const tip = getTooltip()
   tip.innerHTML = `
     <div style="font-weight:600;margin-bottom:4px;">
@@ -168,8 +169,9 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
           apply(tr, oldState, _oldEditorState, newEditorState) {
             const wordsMap = buildWordsMap(extension.options.words)
             const wordsChanged = !mapsEqual(oldState.wordsMap, wordsMap)
+            const docChanged = tr.docChanged
 
-            if (!tr.docChanged && !wordsChanged) {
+            if (!docChanged && !wordsChanged) {
               return {
                 wordsMap,
                 decorations: oldState.decorations.map(tr.mapping, tr.doc),
@@ -177,6 +179,11 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
             }
 
             const decorations = buildDecorations(newEditorState.doc, extension.options.words)
+            const decoCount = decorations.find().length
+            console.log(
+              '[VocabHighlight] apply: docChanged=%s wordsChanged=%s wordCount=%s decoCount=%s',
+              docChanged, wordsChanged, wordsMap.size, decoCount,
+            )
             return { wordsMap, decorations }
           },
         },
@@ -195,14 +202,13 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
                 hideTooltip()
                 return false
               }
-              // Read the text content of the span as the word key
               const word = span.textContent?.trim()
               if (!word) return false
 
-              // Get the HighlightWord from the plugin state via the editor view
               const state = (_view as any).state
               const ps = PLUGIN_KEY.getState(state) as PluginState | undefined
               const hw = ps?.wordsMap.get(word)
+              console.log('[VocabHighlight] mouseover: word="%s" found=%s', word, !!hw)
               if (!hw) return false
 
               showTooltip(span.getBoundingClientRect(), hw)

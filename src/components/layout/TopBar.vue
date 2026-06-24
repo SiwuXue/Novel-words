@@ -1,6 +1,6 @@
 <template>
-  <header class="topbar">
-    <div class="topbar-left" data-tauri-drag-region>
+  <header class="topbar" data-tauri-drag-region>
+    <div class="topbar-left">
       <el-breadcrumb separator="/">
         <el-breadcrumb-item :to="{ path: '/' }">首页</el-breadcrumb-item>
         <el-breadcrumb-item v-if="currentPage">{{ currentPage }}</el-breadcrumb-item>
@@ -45,6 +45,15 @@ const currentPage = computed(() => {
   background: var(--bg-primary);
   border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
+  -webkit-app-region: drag;
+}
+.topbar :deep(.el-breadcrumb),
+.topbar :deep(.el-breadcrumb__item),
+.topbar :deep(.el-breadcrumb__inner),
+.topbar :deep(.el-switch),
+.topbar :deep(a),
+.topbar button {
+  -webkit-app-region: no-drag;
 }
 .topbar-left {
   flex: 1;

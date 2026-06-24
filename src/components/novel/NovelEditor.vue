@@ -243,12 +243,14 @@ function scrollToText(keyword: string): boolean {
 watch(
   () => props.highlightWords,
   (words) => {
+    console.log('[NovelEditor] highlightWords changed, count:', words.length)
     const ext = (editor.value as any)?.extensionManager?.extensions?.find(
       (e: any) => e.name === 'vocabHighlight',
     )
+    console.log('[NovelEditor] vocabHighlight ext found:', !!ext)
     if (ext) {
       ext.options.words = words
-      // Dispatch a no-op transaction to trigger decoration rebuild
+      console.log('[NovelEditor] ext.options.words set, dispatching meta tx')
       const view = (editor.value as any)?.view
       if (view) {
         view.dispatch(view.state.tr.setMeta('vocabHighlightRefresh', Date.now()))

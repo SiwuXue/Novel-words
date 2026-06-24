@@ -193,14 +193,17 @@ onMounted(() => {
 })
 
 watch(highlightBookId, async (bookId) => {
+  console.log('[NovelEditorPage] highlightBookId changed:', bookId)
   if (!bookId) {
     highlightWords.value = []
     return
   }
   try {
-    highlightWords.value = await invoke<HighlightWord[]>('get_highlight_words', {
+    const words = await invoke<HighlightWord[]>('get_highlight_words', {
       vocabBookId: bookId,
     })
+    console.log('[NovelEditorPage] get_highlight_words returned:', words.length, 'words')
+    highlightWords.value = words
   } catch (e) {
     console.error('[NovelEditorPage] get_highlight_words failed:', e)
     highlightWords.value = []
