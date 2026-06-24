@@ -26,13 +26,22 @@
         <span>设置</span>
       </el-menu-item>
     </el-menu>
+
+    <div class="sidebar-footer">
+      <button class="about-link" @click="showAbout = true">
+        <el-icon><InfoFilled /></el-icon>
+        <span>关于</span>
+      </button>
+      <AboutDialog v-model="showAbout" />
+    </div>
   </aside>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { HomeFilled, Document, Collection, Setting } from '@element-plus/icons-vue'
+import { HomeFilled, Document, Collection, Setting, InfoFilled } from '@element-plus/icons-vue'
+import AboutDialog from '@/components/common/AboutDialog.vue'
 
 const route = useRoute()
 const activeRoute = computed(() => {
@@ -41,6 +50,8 @@ const activeRoute = computed(() => {
   if (path.startsWith('/vocabulary')) return '/vocabulary'
   return path
 })
+
+const showAbout = ref(false)
 </script>
 
 <style scoped>
@@ -77,5 +88,30 @@ const activeRoute = computed(() => {
 .sidebar-menu .el-menu-item.is-active {
   color: var(--accent-color);
   background: rgba(64, 158, 255, 0.1);
+}
+
+.sidebar-footer {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+.about-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary, #909399);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.about-link:hover {
+  background: var(--bg-secondary, #f5f7fa);
+  color: var(--text-regular, #303133);
 }
 </style>

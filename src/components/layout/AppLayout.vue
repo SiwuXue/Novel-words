@@ -4,7 +4,11 @@
     <div class="main-area">
       <TopBar />
       <main class="main-content" :class="{ 'editor-mode': isEditorRoute }">
-        <RouterView />
+        <RouterView v-slot="{ Component, route: r }">
+          <Transition name="page-fade" mode="out-in">
+            <component :is="Component" :key="r.path" />
+          </Transition>
+        </RouterView>
       </main>
     </div>
   </div>

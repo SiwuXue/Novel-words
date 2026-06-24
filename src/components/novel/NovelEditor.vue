@@ -154,7 +154,6 @@ function loadContent(raw: string) {
   try {
     const html = plainTextToHtml(raw)
     editor.value.commands.setContent(html, { emitUpdate: false })
-    console.log('[NovelEditor] content loaded, length =', raw.length)
   } catch (e) {
     console.error('[NovelEditor] setContent failed:', e)
   }

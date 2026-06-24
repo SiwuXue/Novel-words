@@ -60,9 +60,9 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { ArrowLeft, Loading, Printer } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
 import { useNovelStore } from '@/stores/novelStore'
 import { useEditorStore } from '@/stores/editorStore'
@@ -162,7 +162,6 @@ async function loadNovel() {
     if (text) editorStore.loadChapters(text)
     loadState.value = 'loaded'
     await nextTick()
-    console.log('[NovelEditorPage] loaded, novel id =', store.currentNovel.id)
   } catch (e: any) {
     if (loadState.value === 'error') return
     errorMessage.value = String(e?.message || e || '未知错误')
@@ -190,7 +189,6 @@ function retry() {
 }
 
 onMounted(() => {
-  console.log('[NovelEditorPage] onMounted, route.params.id =', route.params.id)
   loadNovel()
 })
 
@@ -217,6 +215,24 @@ onBeforeUnmount(() => {
 function goBack() {
   router.push('/novels')
 }
+
+// Warn on leaving with unsaved changes
+onBeforeRouteLeave(async (_to, _from, next) => {
+  if (editorStore.isDirty) {
+    try {
+      await ElMessageBox.confirm(
+        '你有未保存的修改，确定离开吗？',
+        '未保存',
+        { confirmButtonText: '离开', cancelButtonText: '留下', type: 'warning' },
+      )
+      next()
+    } catch {
+      next(false)
+    }
+  } else {
+    next()
+  }
+})
 
 /**
  * Click handler for the chapter list. Waits two animation frames so any

@@ -3,7 +3,6 @@ mod db;
 mod models;
 mod utils;
 
-use db::DbState;
 use tauri::Manager;
 
 use commands::file_io::import_text_file;
@@ -21,11 +20,6 @@ use commands::pdf_template::{
     create_pdf_template, delete_pdf_template, get_all_pdf_templates, update_pdf_template,
 };
 use commands::settings::{get_all_settings, get_setting, set_setting};
-
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -47,7 +41,6 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            greet,
             create_novel,
             get_all_novels,
             get_novel,

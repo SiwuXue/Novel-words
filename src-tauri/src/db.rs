@@ -25,10 +25,22 @@ pub fn init_db(app_data_dir: &PathBuf) -> Result<DbState, String> {
     // Run DDL
     conn.execute_batch(CREATE_TABLES_SQL).map_err(|e| format!("建表失败: {}", e))?;
 
-    // Migrations for columns added after initial schema
-    let _ = conn.execute_batch(
-        "ALTER TABLE pdf_template ADD COLUMN updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'));",
-    );
+    // Migrations: only run when column doesn't exist yet
+    {
+        let has_col: bool = conn
+            .prepare("SELECT COUNT(*) > 0 FROM pragma_table_info('pdf_template') WHERE name = 'updated_at'")
+            .and_then(|mut s| s.query_row([], |r| r.get(0)))
+            .unwrap_or(false);
+        if !has_col {
+            // SQLite ALTER TABLE ADD COLUMN only allows constant defaults,
+            // so we add with '' then populate existing rows via UPDATE.
+            conn.execute_batch(
+                "ALTER TABLE pdf_template ADD COLUMN updated_at TEXT NOT NULL DEFAULT '';
+                 UPDATE pdf_template SET updated_at = datetime('now','localtime') WHERE updated_at = '';",
+            )
+            .map_err(|e| format!("迁移 pdf_template.updated_at 失败: {}", e))?;
+        }
+    }
 
     Ok(DbState {
         db: Mutex::new(conn),
