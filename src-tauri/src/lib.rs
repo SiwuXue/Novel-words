@@ -13,6 +13,9 @@ use commands::novel::{
 use commands::vocab_book::{
     create_vocab_book, delete_vocab_book, get_all_vocab_books, update_vocab_book,
 };
+use commands::vocab_word::{
+    create_vocab_word, delete_vocab_word, get_vocab_words, search_vocab_words, update_vocab_word,
+};
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -51,6 +54,11 @@ pub fn run() {
             get_all_vocab_books,
             update_vocab_book,
             delete_vocab_book,
+            create_vocab_word,
+            get_vocab_words,
+            update_vocab_word,
+            delete_vocab_word,
+            search_vocab_words,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
