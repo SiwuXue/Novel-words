@@ -1,6 +1,6 @@
 <template>
   <header class="topbar">
-    <div class="topbar-left">
+    <div class="topbar-left" data-tauri-drag-region>
       <el-breadcrumb separator="/">
         <el-breadcrumb-item :to="{ path: '/' }">首页</el-breadcrumb-item>
         <el-breadcrumb-item v-if="currentPage">{{ currentPage }}</el-breadcrumb-item>
