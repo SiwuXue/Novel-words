@@ -23,6 +23,12 @@
         <el-button type="primary" @click="showCreateDialog">
           <el-icon><Plus /></el-icon> 添加单词
         </el-button>
+        <el-button @click="handleExportCsv" :disabled="store.words.length === 0">
+          <el-icon><Download /></el-icon> 导出 CSV
+        </el-button>
+        <el-button @click="handleImportCsv">
+          <el-icon><Upload /></el-icon> 导入 CSV
+        </el-button>
       </div>
     </div>
 
@@ -87,8 +93,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Search, Plus } from '@element-plus/icons-vue'
+import { ArrowLeft, Search, Plus, Download, Upload } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { invoke } from '@tauri-apps/api/core'
+import { save, open } from '@tauri-apps/plugin-dialog'
 import { useVocabWordStore } from '@/stores/vocabWordStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
 import type { VocabWord, VocabWordFormData } from '@/types/vocabWord'
@@ -189,6 +197,43 @@ async function confirmDelete(word: VocabWord) {
 
 function goBack() {
   router.push('/vocabulary')
+}
+
+async function handleExportCsv() {
+  try {
+    const filePath = await save({
+      filters: [{ name: 'CSV', extensions: ['csv'] }],
+      defaultPath: `${book.value?.name || 'words'}.csv`,
+    })
+    if (!filePath) return // user cancelled
+
+    await invoke('export_vocab_words_csv', {
+      vocabBookId: bookId.value,
+      filePath,
+    })
+    ElMessage.success('导出成功')
+  } catch (e: any) {
+    ElMessage.error(String(e?.message || e || '导出失败'))
+  }
+}
+
+async function handleImportCsv() {
+  try {
+    const filePath = await open({
+      filters: [{ name: 'CSV', extensions: ['csv'] }],
+      multiple: false,
+    })
+    if (!filePath) return // user cancelled
+
+    const count = await invoke<number>('import_vocab_words_csv', {
+      vocabBookId: bookId.value,
+      filePath,
+    })
+    ElMessage.success(`已导入 ${count} 个单词`)
+    await store.fetchAll(bookId.value)
+  } catch (e: any) {
+    ElMessage.error(String(e?.message || e || '导入失败'))
+  }
 }
 </script>
 

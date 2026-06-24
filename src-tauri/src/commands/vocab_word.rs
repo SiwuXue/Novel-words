@@ -160,3 +160,88 @@ pub fn get_highlight_words(
     }
     Ok(seen.into_values().collect())
 }
+
+#[tauri::command]
+pub fn export_vocab_words_csv(
+    state: State<DbState>,
+    vocab_book_id: i64,
+    file_path: String,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let mut stmt = db
+        .prepare(
+            "SELECT word, definition, phonetic, example_sentence, proficiency, memory_tag FROM vocab_word WHERE vocab_book_id=?1 ORDER BY created_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let mut wtr = csv::Writer::from_path(&file_path)
+        .map_err(|e| format!("无法创建文件: {}", e))?;
+
+    wtr.write_record(&["word", "definition", "phonetic", "example_sentence", "proficiency", "memory_tag"])
+        .map_err(|e| format!("写入 CSV 失败: {}", e))?;
+
+    let rows = stmt
+        .query_map(rusqlite::params![vocab_book_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+
+    for row in rows {
+        let (w, d, p, es, prof, mt) = row.map_err(|e| e.to_string())?;
+        wtr.write_record(&[&w, &d, &p, &es, &prof, &mt])
+            .map_err(|e| format!("写入 CSV 失败: {}", e))?;
+    }
+
+    wtr.flush().map_err(|e| format!("CSV flush 失败: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn import_vocab_words_csv(
+    state: State<DbState>,
+    vocab_book_id: i64,
+    file_path: String,
+) -> Result<u32, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let mut rdr =
+        csv::Reader::from_path(&file_path).map_err(|e| format!("无法打开文件: {}", e))?;
+
+    let mut count: u32 = 0;
+
+    for result in rdr.records() {
+        let record = result.map_err(|e| format!("CSV 解析失败: {}", e))?;
+
+        let word = record.get(0).unwrap_or("").trim();
+        if word.is_empty() {
+            continue;
+        }
+
+        let definition = record.get(1).unwrap_or("").trim();
+        let phonetic = record.get(2).unwrap_or("").trim();
+        let example_sentence = record.get(3).unwrap_or("").trim();
+        let proficiency_raw = record.get(4).unwrap_or("").trim();
+        let memory_tag = record.get(5).unwrap_or("").trim();
+
+        let proficiency = match proficiency_raw {
+            "familiar" | "mastered" => proficiency_raw,
+            _ => "unknown",
+        };
+
+        db.execute(
+            "INSERT INTO vocab_word (vocab_book_id, word, definition, phonetic, example_sentence, proficiency, memory_tag) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![vocab_book_id, word, definition, phonetic, example_sentence, proficiency, memory_tag],
+        )
+        .map_err(|e| format!("导入单词 '{}' 失败: {}", word, e))?;
+
+        count += 1;
+    }
+
+    Ok(count)
+}
