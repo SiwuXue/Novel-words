@@ -19,3 +19,11 @@ export interface VocabWordFormData {
   proficiency: 'unknown' | 'familiar' | 'mastered'
   memoryTag: string
 }
+
+export interface HighlightWord {
+  word: string
+  definition: string
+  phonetic: string
+  exampleSentence: string
+  proficiency: 'unknown' | 'familiar' | 'mastered'
+}

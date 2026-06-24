@@ -2,6 +2,21 @@
   <div class="novel-editor-wrapper">
     <!-- Toolbar -->
     <div class="editor-toolbar" v-if="editor">
+      <el-select
+        :model-value="highlightBookId"
+        placeholder="选择词汇本高亮"
+        clearable
+        size="small"
+        style="width: 160px; margin-right: 8px;"
+        @update:model-value="emit('update:highlightBookId', $event as number | null)"
+      >
+        <el-option
+          v-for="b in vocabBookStore.books"
+          :key="b.id"
+          :label="b.name"
+          :value="b.id"
+        />
+      </el-select>
       <el-button-group class="toolbar-group">
         <el-button size="small" :type="editor.isActive('bold') ? 'primary' : 'default'" @click="editor.chain().focus().toggleBold().run()">
           <strong>B</strong>
@@ -64,19 +79,27 @@ import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import { List, Tickets, RefreshLeft, RefreshRight } from '@element-plus/icons-vue'
 import { useEditorStore } from '@/stores/editorStore'
+import { useVocabBookStore } from '@/stores/vocabBookStore'
 import { plainTextToHtml } from '@/utils/editorHtml'
 import { cleanText } from '@/utils/textCleaner'
+import { VocabHighlight } from '@/extensions/VocabHighlight'
+import type { HighlightWord } from '@/types/vocabWord'
 
 const props = defineProps<{
   novelId: number
   content: string
+  highlightWords: HighlightWord[]
+  highlightBookId: number | null
 }>()
 
 const emit = defineEmits<{
   (e: 'update:content', html: string): void
+  (e: 'update:highlightBookId', id: number | null): void
 }>()
 
 const store = useEditorStore()
+const vocabBookStore = useVocabBookStore()
+vocabBookStore.fetchAll()
 
 // Initialize Tiptap with empty content; load the novel body asynchronously
 // once the editor is mounted so the initial parse doesn't block the main
@@ -89,6 +112,9 @@ const editor = useEditor({
     }),
     Placeholder.configure({
       placeholder: '开始编辑小说正文...',
+    }),
+    VocabHighlight.configure({
+      words: props.highlightWords,
     }),
   ],
   editorProps: {
@@ -213,6 +239,24 @@ function scrollToText(keyword: string): boolean {
     return false
   }
 }
+
+// Keep VocabHighlight extension in sync when highlightWords change externally
+watch(
+  () => props.highlightWords,
+  (words) => {
+    const ext = (editor.value as any)?.extensionManager?.extensions?.find(
+      (e: any) => e.name === 'vocabHighlight',
+    )
+    if (ext) {
+      ext.options.words = words
+      // Dispatch a no-op transaction to trigger decoration rebuild
+      const view = (editor.value as any)?.view
+      if (view) {
+        view.dispatch(view.state.tr.setMeta('vocabHighlightRefresh', Date.now()))
+      }
+    }
+  },
+)
 
 defineExpose({ scrollToText })
 </script>

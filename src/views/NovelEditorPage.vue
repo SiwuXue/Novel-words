@@ -22,7 +22,10 @@
         ref="editorRef"
         :novel-id="currentNovelId"
         :content="editorContent"
+        :highlight-words="highlightWords"
+        :highlight-book-id="highlightBookId"
         @update:content="onEditorContentChange"
+        @update:highlight-book-id="highlightBookId = $event"
       />
       <PreviewPanel ref="previewRef" :html="previewHtml" />
     </div>
@@ -46,12 +49,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Loading } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { invoke } from '@tauri-apps/api/core'
 import { useNovelStore } from '@/stores/novelStore'
 import { useEditorStore } from '@/stores/editorStore'
+import type { HighlightWord } from '@/types/vocabWord'
 import NovelEditor from '@/components/novel/NovelEditor.vue'
 import ChapterList from '@/components/novel/ChapterList.vue'
 import PreviewPanel from '@/components/novel/PreviewPanel.vue'
@@ -62,6 +67,9 @@ const store = useNovelStore()
 const editorStore = useEditorStore()
 const editorRef = ref<InstanceType<typeof NovelEditor> | null>(null)
 const previewRef = ref<InstanceType<typeof PreviewPanel> | null>(null)
+
+const highlightBookId = ref<number | null>(null)
+const highlightWords = ref<HighlightWord[]>([])
 
 type LoadState = 'loading' | 'loaded' | 'error'
 const loadState = ref<LoadState>('loading')
@@ -172,6 +180,21 @@ function retry() {
 onMounted(() => {
   console.log('[NovelEditorPage] onMounted, route.params.id =', route.params.id)
   loadNovel()
+})
+
+watch(highlightBookId, async (bookId) => {
+  if (!bookId) {
+    highlightWords.value = []
+    return
+  }
+  try {
+    highlightWords.value = await invoke<HighlightWord[]>('get_highlight_words', {
+      vocabBookId: bookId,
+    })
+  } catch (e) {
+    console.error('[NovelEditorPage] get_highlight_words failed:', e)
+    highlightWords.value = []
+  }
 })
 
 onBeforeUnmount(() => {
