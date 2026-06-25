@@ -21,6 +21,9 @@ use commands::pdf_template::{
     create_pdf_template, delete_pdf_template, get_all_pdf_templates, get_builtin_templates,
     update_pdf_template,
 };
+use commands::chapter::{
+    delete_chapters_by_novel, get_chapters, save_chapters, update_chapter_title,
+};
 use commands::pdf_export::export_pdf;
 use commands::settings::{get_all_settings, get_setting, set_setting};
 
@@ -68,6 +71,10 @@ pub fn run() {
             update_pdf_template,
             delete_pdf_template,
             get_builtin_templates,
+            save_chapters,
+            get_chapters,
+            update_chapter_title,
+            delete_chapters_by_novel,
             export_pdf,
             get_setting,
             set_setting,

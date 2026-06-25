@@ -1,5 +1,5 @@
 use crate::db::DbState;
-use crate::models::novel::Novel;
+use crate::models::novel::{Chapter, Novel};
 use crate::models::pdf_template::PdfTemplate;
 use crate::models::vocab_word::VocabWord;
 use crate::pdf;
@@ -95,9 +95,52 @@ pub fn export_pdf(
         Vec::new()
     };
 
+    // Load chapters (fallback to full-text if none in DB)
+    let chapters: Vec<Chapter> = {
+        let mut stmt = db
+            .prepare(
+                "SELECT id, novel_id, title, content, sort_order, created_at FROM chapter WHERE novel_id = ?1 ORDER BY sort_order",
+            )
+            .map_err(|e| format!("查询章节失败: {}", e))?;
+        let rows: Vec<Chapter> = stmt
+            .query_map(rusqlite::params![novel_id], |row| {
+                Ok(Chapter {
+                    id: row.get(0)?,
+                    novel_id: row.get(1)?,
+                    title: row.get(2)?,
+                    content: row.get(3)?,
+                    sort_order: row.get(4)?,
+                    start_index: 0,
+                    created_at: row.get(5)?,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        if rows.is_empty() {
+            // Fallback: one chapter with full novel text
+            let text = if !novel.cleaned_text.is_empty() {
+                &novel.cleaned_text
+            } else {
+                &novel.raw_text
+            };
+            vec![Chapter {
+                id: 0,
+                novel_id,
+                title: "全文".into(),
+                content: text.clone(),
+                sort_order: 0,
+                start_index: 0,
+                created_at: String::new(),
+            }]
+        } else {
+            rows
+        }
+    };
+
     drop(db);
 
-    pdf::generate_pdf(&novel, &template, &vocabs, &output_path)?;
+    pdf::generate_pdf(&novel, &template, &vocabs, &chapters, &output_path)?;
 
     Ok(output_path)
 }
