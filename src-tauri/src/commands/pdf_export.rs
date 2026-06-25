@@ -40,7 +40,7 @@ pub fn export_pdf(
     // Load template or use defaults
     let template = if let Some(tid) = template_id {
         db.query_row(
-            "SELECT id, name, paper_size, font_family, font_size, line_spacing, margins, annotation_mode, created_at, updated_at
+            "SELECT id, name, paper_size, font_family, font_size, line_spacing, margins, annotation_mode, template_type, is_builtin, created_at, updated_at
              FROM pdf_template WHERE id = ?1",
             rusqlite::params![tid],
             |row| {
@@ -53,8 +53,10 @@ pub fn export_pdf(
                     line_spacing: row.get(5)?,
                     margins: row.get(6)?,
                     annotation_mode: row.get(7)?,
-                    created_at: row.get(8)?,
-                    updated_at: row.get(9)?,
+                    template_type: row.get(8)?,
+                    is_builtin: row.get::<_, i32>(9)? != 0,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
                 })
             },
         )
@@ -81,6 +83,7 @@ pub fn export_pdf(
                     phonetic: row.get(4)?,
                     example_sentence: row.get(5)?,
                     novel_id: row.get(6)?,
+                    chapter_id: None,
                     proficiency: row.get(7)?,
                     memory_tag: row.get(8)?,
                     created_at: row.get(9)?,
@@ -109,6 +112,8 @@ fn default_template() -> PdfTemplate {
         line_spacing: 1.5,
         margins: r#"{"top":25,"bottom":25,"left":20,"right":20}"#.to_string(),
         annotation_mode: "appendix".to_string(),
+        template_type: "appendix".to_string(),
+        is_builtin: false,
         created_at: String::new(),
         updated_at: String::new(),
     }

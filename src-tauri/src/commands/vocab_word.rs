@@ -121,6 +121,7 @@ fn row_to_vocab_word(row: &rusqlite::Row) -> rusqlite::Result<VocabWord> {
         phonetic: row.get(4)?,
         example_sentence: row.get(5)?,
         novel_id: row.get(6)?,
+        chapter_id: None,
         proficiency: row.get(7)?,
         memory_tag: row.get(8)?,
         created_at: row.get(9)?,

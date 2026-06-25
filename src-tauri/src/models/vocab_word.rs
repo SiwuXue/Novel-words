@@ -9,6 +9,7 @@ pub struct VocabWord {
     pub phonetic: String,
     pub example_sentence: String,
     pub novel_id: Option<i64>,
+    pub chapter_id: Option<i64>,
     pub proficiency: String,
     pub memory_tag: String,
     pub created_at: String,

@@ -29,7 +29,7 @@ pub fn get_all_pdf_templates(state: State<DbState>) -> Result<Vec<PdfTemplate>, 
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let mut stmt = db
         .prepare(
-            "SELECT id, name, paper_size, font_family, font_size, line_spacing, margins, annotation_mode, created_at, updated_at FROM pdf_template ORDER BY created_at DESC",
+            "SELECT id, name, paper_size, font_family, font_size, line_spacing, margins, annotation_mode, template_type, is_builtin, created_at, updated_at FROM pdf_template ORDER BY created_at DESC",
         )
         .map_err(|e| e.to_string())?;
 
@@ -86,7 +86,7 @@ pub fn delete_pdf_template(state: State<DbState>, id: i64) -> Result<(), String>
 
 fn get_pdf_template_by_id(db: &rusqlite::Connection, id: i64) -> Result<PdfTemplate, String> {
     db.query_row(
-        "SELECT id, name, paper_size, font_family, font_size, line_spacing, margins, annotation_mode, created_at, updated_at FROM pdf_template WHERE id=?1",
+        "SELECT id, name, paper_size, font_family, font_size, line_spacing, margins, annotation_mode, template_type, is_builtin, created_at, updated_at FROM pdf_template WHERE id=?1",
         rusqlite::params![id],
         row_to_pdf_template,
     )
@@ -103,7 +103,9 @@ fn row_to_pdf_template(row: &rusqlite::Row) -> rusqlite::Result<PdfTemplate> {
         line_spacing: row.get(5)?,
         margins: row.get(6)?,
         annotation_mode: row.get(7)?,
-        created_at: row.get(8)?,
-        updated_at: row.get(9)?,
+        template_type: row.get(8)?,
+        is_builtin: row.get::<_, i32>(9)? != 0,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
     })
 }
