@@ -5,6 +5,7 @@ import type { PdfTemplate, PdfTemplateFormData } from '@/types/pdf'
 
 export const usePdfTemplateStore = defineStore('pdfTemplate', () => {
   const templates = ref<PdfTemplate[]>([])
+  const builtinTemplates = ref<PdfTemplate[]>([])
   const loading = ref(false)
 
   async function fetchAll() {
@@ -18,6 +19,15 @@ export const usePdfTemplateStore = defineStore('pdfTemplate', () => {
     }
   }
 
+  async function fetchBuiltin() {
+    if (builtinTemplates.value.length > 0) return
+    try {
+      builtinTemplates.value = await invoke<PdfTemplate[]>('get_builtin_templates')
+    } catch (e) {
+      console.error('[pdfTemplateStore] fetchBuiltin failed:', e)
+    }
+  }
+
   async function create(data: PdfTemplateFormData) {
     const tpl = await invoke<PdfTemplate>('create_pdf_template', {
       name: data.name,
@@ -26,7 +36,9 @@ export const usePdfTemplateStore = defineStore('pdfTemplate', () => {
       fontSize: data.fontSize,
       lineSpacing: data.lineSpacing,
       margins: data.margins,
-      annotationMode: data.annotationMode,
+      annotationMode: data.annotationMode || 'appendix',
+      templateType: data.templateType || 'appendix',
+      isBuiltin: data.isBuiltin || false,
     })
     templates.value.unshift(tpl)
     return tpl
@@ -41,7 +53,9 @@ export const usePdfTemplateStore = defineStore('pdfTemplate', () => {
       fontSize: data.fontSize,
       lineSpacing: data.lineSpacing,
       margins: data.margins,
-      annotationMode: data.annotationMode,
+      annotationMode: data.annotationMode || 'appendix',
+      templateType: data.templateType || 'appendix',
+      isBuiltin: data.isBuiltin || false,
     })
     const idx = templates.value.findIndex((t) => t.id === id)
     if (idx !== -1) {
@@ -54,6 +68,8 @@ export const usePdfTemplateStore = defineStore('pdfTemplate', () => {
         lineSpacing: data.lineSpacing,
         margins: data.margins,
         annotationMode: data.annotationMode,
+        templateType: data.templateType,
+        isBuiltin: data.isBuiltin || false,
       }
     }
   }
@@ -63,5 +79,5 @@ export const usePdfTemplateStore = defineStore('pdfTemplate', () => {
     templates.value = templates.value.filter((t) => t.id !== id)
   }
 
-  return { templates, loading, fetchAll, create, update, remove }
+  return { templates, builtinTemplates, loading, fetchAll, fetchBuiltin, create, update, remove }
 })

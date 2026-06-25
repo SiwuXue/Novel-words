@@ -151,7 +151,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { usePdfTemplateStore } from '@/stores/pdfTemplateStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
-import type { PdfTemplate } from '@/types/pdf'
+import type { PdfTemplate, PdfTemplateFormData } from '@/types/pdf'
 import { open } from '@tauri-apps/plugin-dialog'
 
 const templateStore = usePdfTemplateStore()
@@ -174,6 +174,8 @@ const form = reactive({
   fontSize: 14,
   lineSpacing: 1.5,
   annotationMode: 'appendix' as 'inline' | 'sidebar' | 'appendix' | 'none',
+  templateType: 'appendix' as PdfTemplateFormData['templateType'],
+  isBuiltin: false,
   margins: JSON.stringify({ top: 25, bottom: 25, left: 20, right: 20 }),
 })
 
@@ -200,6 +202,8 @@ function showCreate() {
   form.fontSize = 14
   form.lineSpacing = 1.5
   form.annotationMode = 'appendix'
+  form.templateType = 'appendix'
+  form.isBuiltin = false
   form.margins = defaultMargins
   dialogVisible.value = true
 }
@@ -212,7 +216,9 @@ function editTemplate(tpl: PdfTemplate) {
   form.fontFamily = tpl.fontFamily
   form.fontSize = tpl.fontSize
   form.lineSpacing = tpl.lineSpacing
-  form.annotationMode = tpl.annotationMode
+  form.annotationMode = tpl.annotationMode as 'inline' | 'sidebar' | 'appendix' | 'none'
+  form.templateType = tpl.templateType as PdfTemplateFormData['templateType']
+  form.isBuiltin = tpl.isBuiltin || false
   form.margins = tpl.margins
   dialogVisible.value = true
 }
@@ -233,6 +239,8 @@ async function handleSubmit() {
         lineSpacing: form.lineSpacing,
         margins: form.margins,
         annotationMode: form.annotationMode,
+        templateType: form.templateType,
+        isBuiltin: form.isBuiltin,
       })
       ElMessage.success('模板已更新')
     } else {
@@ -244,6 +252,8 @@ async function handleSubmit() {
         lineSpacing: form.lineSpacing,
         margins: form.margins,
         annotationMode: form.annotationMode,
+        templateType: form.templateType,
+        isBuiltin: form.isBuiltin,
       })
       ElMessage.success('模板已创建')
     }

@@ -19,9 +19,13 @@ export interface NovelFormData {
 }
 
 export interface Chapter {
+  id: number
+  novelId: number
   title: string
   content: string
+  sortOrder: number
   startIndex: number
+  createdAt: string
 }
 
 export interface ImportResult {

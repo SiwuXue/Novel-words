@@ -2,19 +2,46 @@
   <el-dialog
     v-model="visible"
     title="导出 PDF"
-    width="480px"
+    width="560px"
     :close-on-click-modal="false"
   >
-    <el-form label-width="90px">
-      <el-form-item label="PDF 模板">
-        <el-select v-model="selectedTemplateId" placeholder="选择模板" style="width:100%">
-          <el-option
-            v-for="tpl in templateStore.templates"
-            :key="tpl.id"
-            :label="tpl.name"
-            :value="tpl.id"
-          />
-        </el-select>
+    <el-form label-width="80px">
+      <el-form-item label="排版模板">
+        <div class="template-selector">
+          <!-- Built-in templates -->
+          <div class="template-group">
+            <div class="group-label">内置模板</div>
+            <div
+              v-for="tpl in builtinTemplates"
+              :key="'b-' + tpl.id"
+              class="template-card"
+              :class="{ selected: selectedTemplateId === tpl.id }"
+              @click="selectTemplate(tpl)"
+            >
+              <div class="tpl-name">{{ tpl.name }}</div>
+              <div class="tpl-desc">{{ templateDesc(tpl) }}</div>
+              <el-tag size="small" type="info">内置</el-tag>
+            </div>
+          </div>
+
+          <!-- User templates -->
+          <div class="template-group">
+            <div class="group-label">我的模板</div>
+            <div
+              v-for="tpl in userTemplates"
+              :key="'u-' + tpl.id"
+              class="template-card"
+              :class="{ selected: selectedTemplateId === tpl.id }"
+              @click="selectTemplate(tpl)"
+            >
+              <div class="tpl-name">{{ tpl.name }}</div>
+              <div class="tpl-desc">{{ tpl.paperSize }} · {{ tpl.fontSize }}px · 行距{{ tpl.lineSpacing }}</div>
+            </div>
+            <el-button v-if="selectedBuiltin" text type="primary" size="small" @click="saveAsCustom">
+              从「{{ selectedBuiltin.name }}」另存为我的模板
+            </el-button>
+          </div>
+        </div>
       </el-form-item>
 
       <el-form-item label="词汇本">
@@ -33,29 +60,16 @@
         </el-select>
       </el-form-item>
 
-      <template v-if="currentTemplate">
-        <el-divider content-position="left">模板设置</el-divider>
-        <el-form-item label="纸张大小">
-          <span class="setting-value">{{ currentTemplate.paperSize }}</span>
-        </el-form-item>
-        <el-form-item label="字体">
-          <span class="setting-value">{{ currentTemplate.fontFamily }}</span>
-        </el-form-item>
-        <el-form-item label="字号">
-          <span class="setting-value">{{ currentTemplate.fontSize }}px</span>
-        </el-form-item>
-        <el-form-item label="行距">
-          <span class="setting-value">{{ currentTemplate.lineSpacing }}</span>
-        </el-form-item>
-        <el-form-item label="注释模式">
-          <el-tag size="small">{{
-            annotationModeLabel(currentTemplate.annotationMode)
-          }}</el-tag>
-        </el-form-item>
+      <template v-if="selectedTemplate">
+        <el-divider content-position="left">模板参数</el-divider>
+        <el-form-item label="纸张">{{ selectedTemplate.paperSize }}</el-form-item>
+        <el-form-item label="字体">{{ selectedTemplate.fontFamily }}</el-form-item>
+        <el-form-item label="字号">{{ selectedTemplate.fontSize }}px</el-form-item>
+        <el-form-item label="行距">{{ selectedTemplate.lineSpacing }}</el-form-item>
       </template>
       <el-alert
         v-else
-        title="尚未创建 PDF 模板，将使用默认设置导出"
+        title="选择一个模板后显示参数"
         type="info"
         :closable="false"
         show-icon
@@ -80,6 +94,7 @@ import { usePdfTemplateStore } from '@/stores/pdfTemplateStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
 import { useNovelStore } from '@/stores/novelStore'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { TEMPLATE_TYPE_LABELS } from '@/types/pdf'
 import type { PdfTemplate } from '@/types/pdf'
 
 const props = defineProps<{
@@ -103,33 +118,35 @@ const selectedTemplateId = ref<number | null>(null)
 const selectedVocabBookId = ref<number | null>(null)
 const exporting = ref(false)
 
-const currentTemplate = computed<PdfTemplate | null>(() => {
-  if (!selectedTemplateId.value) return null
-  return templateStore.templates.find((t) => t.id === selectedTemplateId.value) || null
-})
+const builtinTemplates = computed(() => templateStore.builtinTemplates)
+const userTemplates = computed(() => templateStore.templates.filter(t => !t.isBuiltin))
 
-function annotationModeLabel(mode: string): string {
-  switch (mode) {
-    case 'inline': return '行内标注'
-    case 'sidebar': return '侧边栏'
-    case 'appendix': return '文末附录'
-    case 'none': return '无注释'
-    default: return mode
-  }
+const selectedTemplate = ref<PdfTemplate | null>(null)
+const selectedBuiltin = computed(() =>
+  selectedTemplate.value?.isBuiltin ? selectedTemplate.value : null
+)
+
+function templateDesc(tpl: PdfTemplate): string {
+  const label = TEMPLATE_TYPE_LABELS[tpl.templateType] || tpl.templateType
+  return label.split(' — ')[1] || label
+}
+
+function selectTemplate(tpl: PdfTemplate) {
+  selectedTemplate.value = tpl
+  // Use negative id for builtin → Rust skips DB lookup
+  selectedTemplateId.value = tpl.isBuiltin ? null : tpl.id
 }
 
 onMounted(async () => {
-  if (templateStore.templates.length === 0) {
-    await templateStore.fetchAll()
-  }
+  await templateStore.fetchBuiltin()
+  await templateStore.fetchAll()
   if (bookStore.books.length === 0) {
     await bookStore.fetchAll()
   }
-  // Pre-select first template if available
-  if (templateStore.templates.length > 0) {
-    selectedTemplateId.value = templateStore.templates[0].id
+  // Default select first builtin
+  if (builtinTemplates.value.length > 0) {
+    selectTemplate(builtinTemplates.value[0])
   }
-  // Pre-select default vocab book from settings
   if (
     settingsStore.defaultVocabBookId &&
     bookStore.books.some((b) => b.id === settingsStore.defaultVocabBookId)
@@ -138,6 +155,11 @@ onMounted(async () => {
   }
 })
 
+function saveAsCustom() {
+  // Emit event for parent to open PdfTemplateFormDialog
+  ElMessage.info('请前往设置页从内置模板创建自定义模板')
+}
+
 async function handleExport() {
   const novel = novelStore.currentNovel
   if (!novel) {
@@ -145,13 +167,11 @@ async function handleExport() {
     return
   }
 
-  // Ask user where to save the PDF
   const filePath = await save({
     defaultPath: `${novel.title || 'export'}.pdf`,
     filters: [{ name: 'PDF', extensions: ['pdf'] }],
   })
-
-  if (!filePath) return // User cancelled
+  if (!filePath) return
 
   exporting.value = true
   try {
@@ -172,8 +192,30 @@ async function handleExport() {
 </script>
 
 <style scoped>
-.setting-value {
+.template-selector { width: 100%; }
+.template-group { margin-bottom: 16px; }
+.group-label {
+  font-size: 13px;
   color: var(--text-secondary, #909399);
-  font-size: 14px;
+  margin-bottom: 8px;
+  font-weight: 500;
 }
+.template-card {
+  border: 1px solid var(--border-color, #dcdfe6);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: border-color 0.2s;
+}
+.template-card:hover { border-color: var(--accent-color, #409eff); }
+.template-card.selected {
+  border-color: var(--accent-color, #409eff);
+  background: var(--accent-light, #ecf5ff);
+}
+.tpl-name { font-weight: 600; white-space: nowrap; }
+.tpl-desc { flex: 1; font-size: 12px; color: var(--text-secondary, #909399); }
 </style>

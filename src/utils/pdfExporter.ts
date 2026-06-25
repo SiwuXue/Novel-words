@@ -1,3 +1,7 @@
+/**
+ * @deprecated 此文件已废弃。PDF 导出统一走 Rust printpdf 后端。
+ * 保留仅供可能的回退参考，不再维护。
+ */
 import html2pdf from 'html2pdf.js'
 import type { Novel } from '@/types/novel'
 import type { PdfTemplate } from '@/types/pdf'

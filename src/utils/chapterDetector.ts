@@ -2,10 +2,6 @@ import type { Chapter } from '@/types/novel'
 
 /**
  * Frontend port of `src-tauri/src/utils/chapter_detector.rs`.
- *
- * Used by the editor sidebar to derive chapter titles without sending the
- * (potentially 1.7MB+) text over IPC. Only `title` and `startIndex` are
- * returned — chapter bodies are not duplicated into the array.
  */
 const PATTERNS = [
   '第',
@@ -56,20 +52,42 @@ export function detectChapters(text: string): Chapter[] {
     if (!isHeading(line)) continue
     const title = line.trim()
     if (foundFirst) {
-      // Previous chapter's heading is finalized; body lives before this line
-      chapters.push({ title: lastTitle, content: '', startIndex: lastPos })
+      chapters.push({
+        id: 0,
+        novelId: 0,
+        title: lastTitle,
+        content: '',
+        sortOrder: chapters.length,
+        startIndex: lastPos,
+        createdAt: '',
+      })
     } else {
       foundFirst = true
     }
     lastTitle = title
-    // Skip past heading line
     lastPos = lineStart + line.length
   }
 
   if (foundFirst) {
-    chapters.push({ title: lastTitle, content: '', startIndex: lastPos })
+    chapters.push({
+      id: 0,
+      novelId: 0,
+      title: lastTitle,
+      content: '',
+      sortOrder: chapters.length,
+      startIndex: lastPos,
+      createdAt: '',
+    })
   } else if (text.trim()) {
-    chapters.push({ title: '全文', content: '', startIndex: 0 })
+    chapters.push({
+      id: 0,
+      novelId: 0,
+      title: '全文',
+      content: '',
+      sortOrder: 0,
+      startIndex: 0,
+      createdAt: '',
+    })
   }
 
   return chapters
