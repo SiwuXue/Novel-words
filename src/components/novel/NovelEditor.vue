@@ -75,6 +75,7 @@
 <script setup lang="ts">
 import { ref, watch, onBeforeUnmount } from 'vue'
 import { useEditor, EditorContent } from '@tiptap/vue-3'
+import type { EditorView } from '@tiptap/pm/view'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import { List, Tickets, RefreshLeft, RefreshRight } from '@element-plus/icons-vue'
@@ -82,7 +83,7 @@ import { useEditorStore } from '@/stores/editorStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
 import { plainTextToHtml } from '@/utils/editorHtml'
 import { cleanText } from '@/utils/textCleaner'
-import { VocabHighlight } from '@/extensions/VocabHighlight'
+import { VocabHighlight, setVocabHighlightWords, refreshVocabHighlight } from '@/extensions/VocabHighlight'
 import type { HighlightWord } from '@/types/vocabWord'
 
 const props = defineProps<{
@@ -192,13 +193,17 @@ watch(
 
 onBeforeUnmount(() => {
   if (!editor.value) return
-  try {
-    const html = editor.value.getHTML()
-    if (html) {
-      store.flushSave(props.novelId, html)
+  // HMR may trigger unmount after the editor has already been partially torn
+  // down (schema destroyed). Guard isDestroyed to avoid getHTML failures.
+  if (!editor.value.isDestroyed) {
+    try {
+      const html = editor.value.getHTML()
+      if (html) {
+        store.flushSave(props.novelId, html)
+      }
+    } catch (e) {
+      console.warn('[NovelEditor] flushSave failed (non-fatal):', e)
     }
-  } catch (e) {
-    console.warn('[NovelEditor] flushSave failed (non-fatal):', e)
   }
   try {
     editor.value.destroy()
@@ -243,18 +248,10 @@ function scrollToText(keyword: string): boolean {
 watch(
   () => props.highlightWords,
   (words) => {
-    console.log('[NovelEditor] highlightWords changed, count:', words.length)
-    const ext = (editor.value as any)?.extensionManager?.extensions?.find(
-      (e: any) => e.name === 'vocabHighlight',
-    )
-    console.log('[NovelEditor] vocabHighlight ext found:', !!ext)
-    if (ext) {
-      ext.options.words = words
-      console.log('[NovelEditor] ext.options.words set, dispatching meta tx')
-      const view = (editor.value as any)?.view
-      if (view) {
-        view.dispatch(view.state.tr.setMeta('vocabHighlightRefresh', Date.now()))
-      }
+    setVocabHighlightWords(words)
+    const view = (editor.value as any)?.view as EditorView | undefined
+    if (view) {
+      refreshVocabHighlight(view)
     }
   },
 )

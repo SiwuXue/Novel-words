@@ -75,13 +75,12 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
+import { save } from '@tauri-apps/plugin-dialog'
 import { usePdfTemplateStore } from '@/stores/pdfTemplateStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
 import { useNovelStore } from '@/stores/novelStore'
 import { useSettingsStore } from '@/stores/settingsStore'
-import type { VocabWord } from '@/types/vocabWord'
 import type { PdfTemplate } from '@/types/pdf'
-import { exportPdf } from '@/utils/pdfExporter'
 
 const props = defineProps<{
   modelValue: boolean
@@ -146,39 +145,28 @@ async function handleExport() {
     return
   }
 
+  // Ask user where to save the PDF
+  const filePath = await save({
+    defaultPath: `${novel.title || 'export'}.pdf`,
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  })
+
+  if (!filePath) return // User cancelled
+
   exporting.value = true
   try {
-    // Get vocab words if a book is selected
-    let vocabs: VocabWord[] = []
-    if (selectedVocabBookId.value) {
-      vocabs = await invoke<VocabWord[]>('get_vocab_words', {
-        vocabBookId: selectedVocabBookId.value,
-      })
-    }
-
-    // Build or use default template
-    const tpl = currentTemplate.value || getDefaultTemplate()
-    await exportPdf(novel, tpl, vocabs)
+    await invoke<string>('export_pdf', {
+      novelId: novel.id,
+      templateId: selectedTemplateId.value,
+      vocabBookId: selectedVocabBookId.value,
+      outputPath: filePath,
+    })
     ElMessage.success('PDF 已导出')
+    visible.value = false
   } catch (e: any) {
     ElMessage.error(String(e?.message || e || '导出失败'))
   } finally {
     exporting.value = false
-  }
-}
-
-function getDefaultTemplate(): PdfTemplate {
-  return {
-    id: 0,
-    name: '默认',
-    paperSize: 'A4',
-    fontFamily: 'SimSun',
-    fontSize: 14,
-    lineSpacing: 1.5,
-    margins: '{"top":25,"bottom":25,"left":20,"right":20}',
-    annotationMode: 'appendix',
-    createdAt: '',
-    updatedAt: '',
   }
 }
 </script>

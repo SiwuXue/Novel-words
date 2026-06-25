@@ -4,3 +4,4 @@ pub mod vocab_word;
 pub mod pdf_template;
 pub mod settings;
 pub mod file_io;
+pub mod pdf_export;

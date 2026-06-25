@@ -1,6 +1,7 @@
 import { Extension } from '@tiptap/core'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
+import type { EditorView } from '@tiptap/pm/view'
 import type { HighlightWord } from '@/types/vocabWord'
 
 const PLUGIN_KEY = new PluginKey('vocabHighlight')
@@ -21,6 +22,27 @@ interface PluginState {
   wordsMap: Map<string, HighlightWord>
   decorations: DecorationSet
 }
+
+// ---- Module-level words store ----
+// Stored at module level so the plugin always reads the latest words
+// regardless of Tiptap's extension instance lifecycle. This avoids
+// object-identity issues between extensionManager.extensions and the
+// closure captured in addProseMirrorPlugins().
+
+let currentWords: HighlightWord[] = []
+
+export function setVocabHighlightWords(words: HighlightWord[]): void {
+  currentWords = words
+}
+
+export function refreshVocabHighlight(view: EditorView): void {
+  const newState = view.state.apply(
+    view.state.tr.setMeta('vocabHighlightRefresh', Date.now()),
+  )
+  view.updateState(newState)
+}
+
+// ---- Position search ----
 
 /**
  * Iterate every text node in the document, find all occurrences of `word`,
@@ -107,7 +129,6 @@ function escapeHtml(s: string): string {
 }
 
 function showTooltip(rect: DOMRect, hw: HighlightWord) {
-  console.log('[VocabHighlight] showTooltip:', hw.word)
   const tip = getTooltip()
   tip.innerHTML = `
     <div style="font-weight:600;margin-bottom:4px;">
@@ -119,7 +140,6 @@ function showTooltip(rect: DOMRect, hw: HighlightWord) {
     ${hw.exampleSentence ? `<div style="color:#909399;font-size:12px;margin-top:2px;">例句：${escapeHtml(hw.exampleSentence)}</div>` : ''}
   `
 
-  // Position above the target element
   const top = rect.top - tip.offsetHeight - 6
   const left = rect.left + rect.width / 2 - tip.offsetWidth / 2
 
@@ -151,7 +171,8 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
   },
 
   addProseMirrorPlugins() {
-    const extension = this
+    // Seed the module-level store from initial options
+    currentWords = this.options.words
 
     return [
       new Plugin<PluginState>({
@@ -159,7 +180,7 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
 
         state: {
           init(_config, _editorState) {
-            const wordsMap = buildWordsMap(extension.options.words)
+            const wordsMap = buildWordsMap(currentWords)
             return {
               wordsMap,
               decorations: DecorationSet.empty,
@@ -167,23 +188,17 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
           },
 
           apply(tr, oldState, _oldEditorState, newEditorState) {
-            const wordsMap = buildWordsMap(extension.options.words)
+            const wordsMap = buildWordsMap(currentWords)
             const wordsChanged = !mapsEqual(oldState.wordsMap, wordsMap)
-            const docChanged = tr.docChanged
 
-            if (!docChanged && !wordsChanged) {
+            if (!tr.docChanged && !wordsChanged) {
               return {
                 wordsMap,
                 decorations: oldState.decorations.map(tr.mapping, tr.doc),
               }
             }
 
-            const decorations = buildDecorations(newEditorState.doc, extension.options.words)
-            const decoCount = decorations.find().length
-            console.log(
-              '[VocabHighlight] apply: docChanged=%s wordsChanged=%s wordCount=%s decoCount=%s',
-              docChanged, wordsChanged, wordsMap.size, decoCount,
-            )
+            const decorations = buildDecorations(newEditorState.doc, currentWords)
             return { wordsMap, decorations }
           },
         },
@@ -208,7 +223,6 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
               const state = (_view as any).state
               const ps = PLUGIN_KEY.getState(state) as PluginState | undefined
               const hw = ps?.wordsMap.get(word)
-              console.log('[VocabHighlight] mouseover: word="%s" found=%s', word, !!hw)
               if (!hw) return false
 
               showTooltip(span.getBoundingClientRect(), hw)
@@ -227,7 +241,6 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
         },
 
         view() {
-          // Ensure tooltip DOM is created
           getTooltip()
           return {
             destroy() {

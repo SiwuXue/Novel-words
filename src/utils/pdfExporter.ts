@@ -2,6 +2,7 @@ import html2pdf from 'html2pdf.js'
 import type { Novel } from '@/types/novel'
 import type { PdfTemplate } from '@/types/pdf'
 import type { VocabWord } from '@/types/vocabWord'
+import { looksLikeHtml } from './editorHtml'
 
 interface Margins {
   top: number
@@ -213,7 +214,32 @@ function buildBody(
 }
 
 /**
- * Build the complete HTML document for PDF generation.
+ * Strip HTML tags to extract plain text. Used when cleanedText has been
+ * overwritten with HTML by the editor autosave.
+ */
+function stripHtml(html: string): string {
+  // Remove HTML tags but preserve paragraph breaks
+  let text = html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<\/h[1-6]>/gi, '\n\n')
+    .replace(/<\/li>/gi, '\n')
+    .replace(/<\/div>/gi, '\n')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+  // Collapse excessive newlines
+  text = text.replace(/\n{3,}/g, '\n\n')
+  return text.trim()
+}
+
+/**
+ * Build the HTML body content for PDF generation.
+ * Only outputs body content (no doctype/html/head tags) because the result
+ * is set via container.innerHTML which strips structural tags.
  */
 function buildHtml(
   novel: Novel,
@@ -223,22 +249,23 @@ function buildHtml(
   const title = escapeHtml(novel.title || '未命名')
   const author = escapeHtml(novel.author || '')
   const date = formatDate(novel.updatedAt || novel.createdAt || '')
-  const text = novel.cleanedText || novel.rawText || ''
+
+  // cleanedText may have been overwritten with HTML by editor autosave.
+  // Detect HTML and strip tags to recover plain text.
+  let raw = novel.cleanedText || novel.rawText || ''
+  const text = looksLikeHtml(raw) ? stripHtml(raw) : raw
 
   const lineHeight = template.lineSpacing || 1.5
-  const fontFamily = template.fontFamily || 'SimSun'
+  const fontFamily = template.fontFamily || 'SimSun, serif'
   const fontSize = template.fontSize || 14
 
-  const body = buildBody(text, vocabs, template.annotationMode, lineHeight)
+  const bodyHtml = buildBody(text, vocabs, template.annotationMode, lineHeight)
 
-  return `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
+  return `
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    font-family: ${fontFamily}, serif;
+    font-family: ${fontFamily};
     font-size: ${fontSize}px;
     line-height: ${lineHeight};
     color: #222;
@@ -261,17 +288,13 @@ function buildHtml(
     page-break-after: always;
   }
 </style>
-</head>
-<body>
 <div class="title-page">
   <h1>${title}</h1>
   <p class="meta">${author}</p>
   <p class="meta">${date}</p>
 </div>
 <div class="page-break"></div>
-${body}
-</body>
-</html>`
+${bodyHtml}`
 }
 
 /**
@@ -302,12 +325,16 @@ export async function exportPdf(
     pagebreak: { mode: ['css', 'legacy'] },
   }
 
+  // html2canvas needs the element to be visible and in-viewport.
+  // Keep it fully visible during capture — the operation is near-instant.
   const container = document.createElement('div')
   container.innerHTML = html
-  container.style.position = 'absolute'
-  container.style.left = '-9999px'
-  container.style.top = '0'
+  container.style.cssText =
+    'position:fixed;top:0;left:0;width:210mm;background:#fff;z-index:99999;'
   document.body.appendChild(container)
+
+  // Give the browser one frame to lay out the element
+  await new Promise((r) => requestAnimationFrame(r))
 
   try {
     await html2pdf().set(opt).from(container).save()
