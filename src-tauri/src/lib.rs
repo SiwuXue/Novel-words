@@ -18,7 +18,8 @@ use commands::vocab_word::{
     get_vocab_words, import_vocab_words_csv, search_vocab_words, update_vocab_word,
 };
 use commands::pdf_template::{
-    create_pdf_template, delete_pdf_template, get_all_pdf_templates, update_pdf_template,
+    create_pdf_template, delete_pdf_template, get_all_pdf_templates, get_builtin_templates,
+    update_pdf_template,
 };
 use commands::pdf_export::export_pdf;
 use commands::settings::{get_all_settings, get_setting, set_setting};
@@ -66,6 +67,7 @@ pub fn run() {
             get_all_pdf_templates,
             update_pdf_template,
             delete_pdf_template,
+            get_builtin_templates,
             export_pdf,
             get_setting,
             set_setting,
