@@ -18,20 +18,14 @@ pub fn render(ctx: &mut PdfContext, chapters: &[Chapter], vocabs: &[VocabWord]) 
 
     for (ci, chapter) in chapters.iter().enumerate() {
         if ci > 0 {
-            ctx.new_page();
+            ctx.new_page_for_chapter();
             draw_divider(ctx, divider_x);
         }
         if !chapter.title.is_empty() {
             ctx.draw_text(&chapter.title, ctx.margins.left, ctx.current_y, ctx.font_size + 2.0);
             ctx.current_y -= ctx.line_height * 1.5;
         }
-        for para in chapter.content.split("\n\n") {
-            let trimmed = para.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let single_line = trimmed.replace('\n', " ");
-
+        for single_line in super::split_paragraphs(&chapter.content) {
             // Words whose meaning appears in this paragraph
             let found = words_found_in_text(&single_line, vocabs);
 
@@ -73,8 +67,8 @@ pub fn render(ctx: &mut PdfContext, chapters: &[Chapter], vocabs: &[VocabWord]) 
 fn draw_divider(ctx: &mut PdfContext, divider_x: f32) {
     ctx.draw_line(
         divider_x,
-        ctx.margins.top,
+        ctx.paper_height - ctx.margins.top,
         divider_x,
-        ctx.paper_height - ctx.margins.bottom,
+        ctx.margins.bottom,
     );
 }

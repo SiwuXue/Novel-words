@@ -8,24 +8,18 @@ use crate::models::vocab_word::VocabWord;
 pub fn render(ctx: &mut PdfContext, chapters: &[Chapter], vocabs: &[VocabWord]) {
     for (ci, chapter) in chapters.iter().enumerate() {
         if ci > 0 {
-            ctx.new_page();
+            ctx.new_page_for_chapter();
         }
         if !chapter.title.is_empty() {
             ctx.draw_text(&chapter.title, ctx.margins.left, ctx.current_y, ctx.font_size + 2.0);
             ctx.current_y -= ctx.line_height * 1.5;
         }
-        for para in chapter.content.split("\n\n") {
-            let trimmed = para.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let single_line = trimmed.replace('\n', " ");
-            render_annotated_paragraph(ctx, &single_line, vocabs);
-            ctx.current_y -= ctx.line_height * 0.4;
-
+        for para in super::split_paragraphs(&chapter.content) {
             if ctx.remaining_height() < ctx.line_height * 2.0 {
                 ctx.new_page();
             }
+            render_annotated_paragraph(ctx, &para, vocabs);
+            ctx.current_y -= ctx.line_height * 0.4;
         }
     }
 }

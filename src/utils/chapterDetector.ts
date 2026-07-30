@@ -51,49 +51,61 @@ function lineStarts(text: string): Array<[number, string]> {
 }
 
 export function detectChapters(text: string): Chapter[] {
-  const chapters: Chapter[] = []
-  let lastPos = 0
-  let lastTitle = ''
-  let foundFirst = false
-
+  // Collect all heading positions first: (charOffsetOfLineStart, title, contentStart)
+  const headings: Array<{ lineStart: number; title: string; contentStart: number }> = []
   for (const [lineStart, line] of lineStarts(text)) {
     if (!isHeading(line)) continue
-    const title = line.trim()
-    if (foundFirst) {
-      chapters.push({
-        id: 0,
-        novelId: 0,
-        title: lastTitle,
-        content: '',
-        sortOrder: chapters.length,
-        startIndex: lastPos,
-        createdAt: '',
-      })
-    } else {
-      foundFirst = true
-    }
-    lastTitle = title
-    lastPos = lineStart + line.length
+    headings.push({
+      lineStart,
+      title: line.trim(),
+      contentStart: lineStart + line.length,
+    })
   }
 
-  if (foundFirst) {
+  // No headings at all → whole text as one chapter.
+  if (headings.length === 0) {
+    if (!text.trim()) return []
+    return [
+      {
+        id: 0,
+        novelId: 0,
+        title: '全文',
+        content: text.trim(),
+        sortOrder: 0,
+        startIndex: 0,
+        createdAt: '',
+      },
+    ]
+  }
+
+  const chapters: Chapter[] = []
+
+  // Preamble: any content before the first heading (e.g. book title / author).
+  const preamble = text.slice(0, headings[0].lineStart).trim()
+  if (preamble) {
     chapters.push({
       id: 0,
       novelId: 0,
-      title: lastTitle,
-      content: '',
-      sortOrder: chapters.length,
-      startIndex: lastPos,
-      createdAt: '',
-    })
-  } else if (text.trim()) {
-    chapters.push({
-      id: 0,
-      novelId: 0,
-      title: '全文',
-      content: '',
+      title: '前言',
+      content: preamble,
       sortOrder: 0,
       startIndex: 0,
+      createdAt: '',
+    })
+  }
+
+  // Each heading's content runs until the next heading's line start.
+  for (let i = 0; i < headings.length; i++) {
+    const h = headings[i]
+    const end = i + 1 < headings.length ? headings[i + 1].lineStart : text.length
+    const content = text.slice(h.contentStart, end).trim()
+    chapters.push({
+      id: 0,
+      novelId: 0,
+      title: h.title,
+      content,
+      sortOrder: chapters.length,
+      startIndex: h.lineStart,
       createdAt: '',
     })
   }

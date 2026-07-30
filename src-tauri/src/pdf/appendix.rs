@@ -13,7 +13,7 @@ pub fn render(ctx: &mut PdfContext, chapters: &[Chapter], vocabs: &[VocabWord]) 
     for (ci, chapter) in chapters.iter().enumerate() {
         // Each chapter starts on a fresh page (except the first, which follows the title page).
         if ci > 0 {
-            ctx.new_page();
+            ctx.new_page_for_chapter();
         }
         // Chapter heading
         if !chapter.title.is_empty() {
@@ -25,16 +25,9 @@ pub fn render(ctx: &mut PdfContext, chapters: &[Chapter], vocabs: &[VocabWord]) 
         }
 
         // Render clean, wrapped body text
-        for para in chapter.content.split("\n\n") {
-            let trimmed = para.trim();
-            if trimmed.is_empty() { continue; }
-            let single_line = trimmed.replace('\n', " ");
-            ctx.draw_text_wrapped(&single_line, ctx.margins.left, ctx.usable_width, ctx.font_size);
+        for para in super::split_paragraphs(&chapter.content) {
+            ctx.draw_text_wrapped(&para, ctx.margins.left, ctx.usable_width, ctx.font_size);
             ctx.current_y -= ctx.line_height * 0.4;
-
-            if ctx.remaining_height() < ctx.line_height * 2.0 {
-                ctx.new_page();
-            }
         }
 
         // Words whose Chinese meaning appears in this chapter

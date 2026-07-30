@@ -15,7 +15,7 @@ pub fn render(ctx: &mut PdfContext, chapters: &[Chapter], vocabs: &[VocabWord]) 
 
     for (ci, chapter) in chapters.iter().enumerate() {
         if ci > 0 {
-            ctx.new_page();
+            ctx.new_page_for_chapter();
         }
         let heading = format!("{} · 单词对照背诵", chapter.title);
         ctx.draw_text(&heading, ctx.margins.left, ctx.current_y, ctx.font_size + 2.0);
@@ -23,11 +23,7 @@ pub fn render(ctx: &mut PdfContext, chapters: &[Chapter], vocabs: &[VocabWord]) 
 
         draw_divider(ctx, divider_x);
 
-        for para in chapter.content.split("\n\n") {
-            let trimmed = para.trim();
-            if trimmed.is_empty() { continue; }
-            let single_line = trimmed.replace('\n', " ");
-
+        for single_line in super::split_paragraphs(&chapter.content) {
             let found = words_found_in_text(&single_line, vocabs);
 
             // Left: wrapped Chinese paragraph within the left column
@@ -62,8 +58,8 @@ pub fn render(ctx: &mut PdfContext, chapters: &[Chapter], vocabs: &[VocabWord]) 
 fn draw_divider(ctx: &mut PdfContext, divider_x: f32) {
     ctx.draw_line(
         divider_x,
-        ctx.margins.top,
+        ctx.paper_height - ctx.margins.top,
         divider_x,
-        ctx.paper_height - ctx.margins.bottom,
+        ctx.margins.bottom,
     );
 }

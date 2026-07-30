@@ -104,12 +104,6 @@ impl Margins {
     }
 }
 
-/// Helper: convert top-left Y coordinate (mm from top) to bottom-left (mm from bottom).
-/// printpdf uses bottom-left origin.
-fn bl_y(y_mm: f32, paper_h: f32) -> f32 {
-    paper_h - y_mm
-}
-
 fn make_point(x_mm: f32, y_mm: f32) -> Point {
     Point::new(Mm(x_mm), Mm(y_mm))
 }
@@ -150,11 +144,26 @@ impl PdfContext {
         self.current_y = self.paper_height - self.margins.top;
     }
 
+    /// Start a fresh page for a new chapter, but avoid emitting a blank page when
+    /// the current page has nothing drawn on it yet (e.g. right after another
+    /// chapter already forced a page break).
+    pub fn new_page_for_chapter(&mut self) {
+        if self.current_ops.is_empty() {
+            // Current page is empty — just reset the cursor to the top, don't push
+            // an empty page.
+            self.current_y = self.paper_height - self.margins.top;
+        } else {
+            self.new_page();
+        }
+    }
+
     pub fn remaining_height(&self) -> f32 {
         self.current_y - self.margins.bottom
     }
 
-    /// Draw text at top-left (x_mm, y_mm) where y is distance from top.
+    /// Draw text at (x_mm, y_mm) where y is the distance from the BOTTOM of the
+    /// page (matching `current_y`; larger y = higher up). printpdf uses a
+    /// bottom-left origin, so this maps straight through without flipping.
     /// Splits the text into runs by font: characters the CJK font can render use
     /// the CJK font; the rest (Latin letters, IPA phonetic symbols) use the Latin
     /// font, so symbols like ˈ ə ʌ ð ʃ don't turn into tofu boxes.
@@ -162,7 +171,7 @@ impl PdfContext {
         if text.is_empty() {
             return;
         }
-        let bottom_y = bl_y(y_mm, self.paper_height);
+        let bottom_y = y_mm;
         let mut cursor_x = x_mm;
 
         // Group consecutive chars that share the same font into runs.
@@ -234,7 +243,10 @@ impl PdfContext {
     }
 
     /// Wrap text within `max_width` mm, drawing each line at `x_mm` from the left,
-    /// advancing `current_y` downward by `line_height` per line.
+    /// advancing `current_y` downward by `line_height` per line. Automatically
+    /// starts a new page when the text runs past the bottom margin, so long
+    /// paragraphs (or whole chapters with no blank-line breaks) don't overflow
+    /// off the page.
     /// Returns the number of lines drawn.
     pub fn draw_text_wrapped(
         &mut self,
@@ -250,6 +262,10 @@ impl PdfContext {
         let lines = wrap_text_to_lines(text, max_width, font_size);
         let count = lines.len();
         for line in &lines {
+            // Page break when the next line would cross the bottom margin.
+            if self.current_y - self.line_height < self.margins.bottom {
+                self.new_page();
+            }
             self.draw_text(line, x_mm, self.current_y, font_size);
             self.current_y -= self.line_height;
         }
@@ -281,9 +297,10 @@ impl PdfContext {
         }
     }
 
-    /// Draw rectangle border at top-left coordinates.
+    /// Draw rectangle border. `y` is distance from the bottom of the page (top
+    /// edge of the row); the rectangle extends downward by `h`.
     pub fn draw_rect_border(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        let bottom = bl_y(y, self.paper_height);
+        let bottom = y;
         let black = Color::Greyscale(Greyscale { percent: 0.0, icc_profile: None });
         self.current_ops.push(Op::SetOutlineColor { col: black.clone() });
         self.current_ops.push(Op::SetOutlineThickness { pt: Pt(0.5) });
@@ -300,10 +317,10 @@ impl PdfContext {
         });
     }
 
-    /// Draw line at top-left coordinates.
+    /// Draw line. `y1` and `y2` are distances from the bottom of the page.
     pub fn draw_line(&mut self, x1: f32, y1: f32, x2: f32, y2: f32) {
-        let by1 = bl_y(y1, self.paper_height);
-        let by2 = bl_y(y2, self.paper_height);
+        let by1 = y1;
+        let by2 = y2;
         let black = Color::Greyscale(Greyscale { percent: 0.0, icc_profile: None });
         self.current_ops.push(Op::SetOutlineColor { col: black });
         self.current_ops.push(Op::SetOutlineThickness { pt: Pt(0.5) });
@@ -324,6 +341,28 @@ fn paper_dims(size: &str) -> (f32, f32) {
         "A5" => (148.0, 210.0),
         _ => (210.0, 297.0),
     }
+}
+
+/// Split a chapter's body into paragraphs. Novels vary: some separate paragraphs
+/// with blank lines ("\n\n"), others with a single "\n" per paragraph. If there
+/// are no blank-line breaks, fall back to splitting on every newline so each
+/// line becomes its own paragraph (instead of the whole chapter collapsing into
+/// one giant block).
+pub fn split_paragraphs(content: &str) -> Vec<String> {
+    let has_blank_line = content.contains("\n\n") || content.contains("\r\n\r\n");
+    let parts: Vec<String> = if has_blank_line {
+        content
+            .split("\n\n")
+            .map(|p| p.replace('\r', "").replace('\n', " "))
+            .collect()
+    } else {
+        content.lines().map(|l| l.to_string()).collect()
+    };
+    parts
+        .into_iter()
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty())
+        .collect()
 }
 
 pub fn generate_pdf(
@@ -389,11 +428,13 @@ pub fn generate_pdf(
         current_ops: Vec::new(),
     };
 
-    // 3. Render title
+    // 3. Render title (y is now bottom-based, matching current_y)
+    let title_y = paper_h - margins.top - 5.0;
+    let author_y = paper_h - margins.top - 25.0;
     let title_str = if novel.title.is_empty() { "未命名" } else { &novel.title };
-    ctx.draw_text(title_str, margins.left, margins.top + 5.0, font_size + 4.0);
+    ctx.draw_text(title_str, margins.left, title_y, font_size + 4.0);
     if !novel.author.is_empty() {
-        ctx.draw_text(&novel.author, margins.left, margins.top + 25.0, font_size);
+        ctx.draw_text(&novel.author, margins.left, author_y, font_size);
     }
 
     ctx.new_page();
