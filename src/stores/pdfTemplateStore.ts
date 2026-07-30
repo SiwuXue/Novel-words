@@ -36,8 +36,8 @@ export const usePdfTemplateStore = defineStore('pdfTemplate', () => {
       fontSize: data.fontSize,
       lineSpacing: data.lineSpacing,
       margins: data.margins,
-      annotationMode: data.annotationMode || 'appendix',
-      templateType: data.templateType || 'appendix',
+      annotationMode: data.annotationMode || 'inline',
+      templateType: data.templateType || 'intensive',
       isBuiltin: data.isBuiltin || false,
     })
     templates.value.unshift(tpl)
@@ -53,8 +53,8 @@ export const usePdfTemplateStore = defineStore('pdfTemplate', () => {
       fontSize: data.fontSize,
       lineSpacing: data.lineSpacing,
       margins: data.margins,
-      annotationMode: data.annotationMode || 'appendix',
-      templateType: data.templateType || 'appendix',
+      annotationMode: data.annotationMode || 'inline',
+      templateType: data.templateType || 'intensive',
       isBuiltin: data.isBuiltin || false,
     })
     const idx = templates.value.findIndex((t) => t.id === id)

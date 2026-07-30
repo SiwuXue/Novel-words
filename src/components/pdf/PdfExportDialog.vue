@@ -205,7 +205,7 @@ async function handleExport() {
     const result = await invoke<string>('export_pdf', {
       novelId: novel.id,
       templateId: selectedTemplateId.value,
-      templateType: selectedTemplate.value?.templateType || 'appendix',
+      templateType: selectedTemplate.value?.templateType || 'intensive',
       vocabBookId: selectedVocabBookId.value,
       outputPath: filePath,
     })

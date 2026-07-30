@@ -2,7 +2,6 @@ mod font;
 mod matcher;
 mod intensive;
 mod sidebar;
-mod appendix;
 mod recitation;
 mod dictation;
 
@@ -454,10 +453,9 @@ pub fn generate_pdf(
     match template.template_type.as_str() {
         "intensive" => intensive::render(&mut ctx, chapters, vocabs),
         "sidebar" => sidebar::render(&mut ctx, chapters, vocabs),
-        "appendix" => appendix::render(&mut ctx, chapters, vocabs),
         "recitation" => recitation::render(&mut ctx, chapters, vocabs),
         "dictation" => dictation::render(&mut ctx, chapters, vocabs),
-        _ => appendix::render(&mut ctx, chapters, vocabs),
+        _ => intensive::render(&mut ctx, chapters, vocabs),
     };
 
     // 5. Add PDF bookmarks for chapter navigation

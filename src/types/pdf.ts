@@ -7,7 +7,7 @@ export interface PdfTemplate {
   lineSpacing: number
   margins: string // JSON: { top, bottom, left, right }
   annotationMode: string // deprecated, kept for backward compat
-  templateType: 'intensive' | 'sidebar' | 'appendix' | 'recitation' | 'dictation'
+  templateType: 'intensive' | 'sidebar' | 'recitation' | 'dictation'
   isBuiltin: boolean
   createdAt: string
   updatedAt: string
@@ -21,14 +21,13 @@ export interface PdfTemplateFormData {
   lineSpacing: number
   margins: string
   annotationMode: string
-  templateType: 'intensive' | 'sidebar' | 'appendix' | 'recitation' | 'dictation'
+  templateType: 'intensive' | 'sidebar' | 'recitation' | 'dictation'
   isBuiltin: boolean
 }
 
 export const TEMPLATE_TYPE_LABELS: Record<string, string> = {
-  intensive: '精读版 — 行间小字注释',
+  intensive: '精读版 — 行间注释 + 词汇表',
   sidebar: '侧边注释版 — 右侧单词栏',
-  appendix: '单词附录版 — 文末章节汇总',
   recitation: '背诵专用版 — 左右对照自测',
   dictation: '默写空白版 — 填空默写',
 }
