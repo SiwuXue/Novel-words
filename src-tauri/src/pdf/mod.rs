@@ -9,6 +9,76 @@ use printpdf::*;
 use std::fs::File;
 use std::io::Write;
 
+/// Measure the width (mm) of a single character at the given font size.
+fn measure_char_width(ch: char, font_size: f32) -> f32 {
+    if ch == '…' { font_size * 0.3528 } // approx same as a CJK char
+    else if ch.is_ascii() { font_size * 0.55 * 0.3528 }
+    else { font_size * 0.3528 }
+}
+
+/// Split `text` into lines that each fit within `max_width` mm.
+/// Returns owned strings to avoid borrow conflicts.
+fn wrap_text_to_lines(text: &str, max_width: f32, font_size: f32) -> Vec<String> {
+    if text.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = Vec::new();
+    let mut remaining = text;
+    while !remaining.is_empty() {
+        let (line_end, rest_start) = split_line_at_width(remaining, max_width, font_size);
+        if line_end == 0 {
+            // Fallback: emit one char at a time
+            lines.push(remaining[..remaining.chars().next().map(|c| c.len_utf8()).unwrap_or(1)].to_string());
+            remaining = &remaining[remaining.chars().next().map(|c| c.len_utf8()).unwrap_or(1)..];
+            continue;
+        }
+        lines.push(remaining[..line_end].to_string());
+        if rest_start >= remaining.len() {
+            break;
+        }
+        remaining = &remaining[rest_start..];
+    }
+    lines
+}
+
+/// Find the split point for one line of `text` that fits within `max_width` mm.
+/// Returns (line_end_byte_index, rest_start_byte_index).
+fn split_line_at_width(text: &str, max_width: f32, font_size: f32) -> (usize, usize) {
+    let mut last_break = 0;
+    let mut last_width_ok = 0;
+    let mut cum_width = 0.0f32;
+
+    for (i, ch) in text.char_indices() {
+        let ch_w = measure_char_width(ch, font_size);
+        cum_width += ch_w;
+        if cum_width <= max_width {
+            last_width_ok = i + ch.len_utf8();
+            // CJK chars can break anywhere; spaces are natural break points
+            if !ch.is_ascii() || ch == ' ' {
+                last_break = i + ch.len_utf8();
+            }
+        } else {
+            let break_at = if last_break > 0 { last_break } else { last_width_ok };
+            let break_at = if break_at == 0 { text.len() } else { break_at };
+            // Trim trailing space from line
+            let line_end = if break_at > 0 && text[..break_at].ends_with(' ') {
+                break_at - 1
+            } else {
+                break_at
+            };
+            // Skip leading space on remainder
+            let rest_start = if break_at < text.len() && text[break_at..].starts_with(' ') {
+                break_at + 1
+            } else {
+                break_at
+            };
+            return (line_end, rest_start);
+        }
+    }
+    // Entire text fits on one line
+    (text.len(), text.len())
+}
+
 use crate::models::novel::{Chapter, Novel};
 use crate::models::pdf_template::PdfTemplate;
 use crate::models::vocab_word::VocabWord;
@@ -103,6 +173,54 @@ impl PdfContext {
             w += if ch.is_ascii() { font_size * 0.55 } else { font_size };
         }
         w * 0.3528
+    }
+
+    /// Wrap text within `max_width` mm, drawing each line at `x_mm` from the left,
+    /// advancing `current_y` downward by `line_height` per line.
+    /// Returns the number of lines drawn.
+    pub fn draw_text_wrapped(
+        &mut self,
+        text: &str,
+        x_mm: f32,
+        max_width: f32,
+        font_size: f32,
+    ) -> usize {
+        if text.is_empty() {
+            return 0;
+        }
+        // Split into owned strings first to avoid borrow conflicts with draw_text
+        let lines = wrap_text_to_lines(text, max_width, font_size);
+        let count = lines.len();
+        for line in &lines {
+            self.draw_text(line, x_mm, self.current_y, font_size);
+            self.current_y -= self.line_height;
+        }
+        count
+    }
+
+    /// Truncate text to fit within `max_width` mm, appending "…" if truncated.
+    /// Returns an owned String.
+    pub fn truncate_text(&self, text: &str, max_width: f32, font_size: f32) -> String {
+        let mut cum_w = 0.0f32;
+        let mut end_idx = 0;
+        for (i, ch) in text.char_indices() {
+            let ch_w = measure_char_width(ch, font_size);
+            if cum_w + ch_w > max_width {
+                break;
+            }
+            cum_w += ch_w;
+            end_idx = i + ch.len_utf8();
+        }
+        if end_idx < text.len() {
+            let mut s = text[..end_idx].to_string();
+            let ellipsis_w = measure_char_width('…', font_size);
+            if cum_w + ellipsis_w <= max_width {
+                s.push('…');
+            }
+            s
+        } else {
+            text.to_string()
+        }
     }
 
     /// Draw rectangle border at top-left coordinates.

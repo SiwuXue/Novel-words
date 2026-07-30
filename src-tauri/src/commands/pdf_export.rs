@@ -10,6 +10,7 @@ pub fn export_pdf(
     state: State<DbState>,
     novel_id: i64,
     template_id: Option<i64>,
+    template_type: Option<String>,
     vocab_book_id: Option<i64>,
     output_path: String,
 ) -> Result<String, String> {
@@ -38,7 +39,7 @@ pub fn export_pdf(
         .map_err(|e| format!("查询小说失败: {}", e))?;
 
     // Load template or use defaults
-    let template = if let Some(tid) = template_id {
+    let mut template = if let Some(tid) = template_id {
         db.query_row(
             "SELECT id, name, paper_size, font_family, font_size, line_spacing, margins, annotation_mode, template_type, is_builtin, created_at, updated_at
              FROM pdf_template WHERE id = ?1",
@@ -64,6 +65,12 @@ pub fn export_pdf(
     } else {
         default_template()
     };
+
+    // Override template type for builtin templates (template_id is null,
+    // so we fell back to default; frontend passes the real type)
+    if let Some(tt) = template_type {
+        template.template_type = tt;
+    }
 
     // Load vocab words if a book is selected
     let vocabs: Vec<VocabWord> = if let Some(book_id) = vocab_book_id {

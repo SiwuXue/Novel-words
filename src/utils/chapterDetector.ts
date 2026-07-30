@@ -27,17 +27,25 @@ function isHeading(line: string): boolean {
   return PATTERNS.some((p) => trimmed.startsWith(p))
 }
 
-/** Yield (byte_offset, line_content) pairs for each line in the text. */
+/**
+ * Yield (char_offset, line_content) pairs for each line in the text.
+ * Handles \n, \r\n, and standalone \r line endings.
+ * Offsets are JavaScript string indices (UTF-16 code units).
+ */
 function lineStarts(text: string): Array<[number, string]> {
   const result: Array<[number, string]> = []
-  const lines = text.split(/\r?\n/)
-  let pos = 0
-  for (const line of lines) {
-    while (pos < text.length && (text[pos] === '\n' || text[pos] === '\r')) {
-      pos++
+  let lineStart = 0
+  for (let i = 0; i <= text.length; i++) {
+    const ch = i < text.length ? text[i] : '\n' // treat EOF as newline
+    if (ch === '\n' || ch === '\r') {
+      const line = text.slice(lineStart, i)
+      result.push([lineStart, line])
+      // Skip \r\n sequence
+      if (ch === '\r' && i + 1 < text.length && text[i + 1] === '\n') {
+        i++ // skip \n
+      }
+      lineStart = i + 1
     }
-    result.push([pos, line])
-    pos += line.length
   }
   return result
 }

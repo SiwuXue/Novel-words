@@ -74,6 +74,9 @@ fn find_words_in_line<'a>(
     let lower = line.to_lowercase();
     let mut found: Vec<&VocabWord> = Vec::new();
     for (key, v) in word_map {
+        if key.is_empty() {
+            continue;
+        }
         if lower.contains(key.as_str()) {
             found.push(*v);
         }

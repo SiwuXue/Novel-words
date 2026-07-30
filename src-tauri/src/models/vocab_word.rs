@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct VocabWord {
     pub id: i64,
     pub vocab_book_id: i64,
@@ -16,6 +17,7 @@ pub struct VocabWord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HighlightWord {
     pub word: String,
     pub definition: String,

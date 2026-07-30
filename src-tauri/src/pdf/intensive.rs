@@ -40,18 +40,27 @@ fn render_annotated_line(
     let lower = line.to_lowercase();
     let mut matches: Vec<(usize, usize, &VocabWord)> = Vec::new();
 
-    // Find all word matches with word-boundary check
+    // Find all word matches
     for v in word_map.values() {
         let word_lower = v.word.to_lowercase();
+        if word_lower.is_empty() {
+            continue;
+        }
         let mut start = 0;
         while let Some(pos) = lower[start..].find(&word_lower) {
             let abs_pos = start + pos;
             let end = abs_pos + v.word.len();
-            // Simple boundary check: treat CJK as always at boundary
-            let left_ok = abs_pos == 0;
-            let right_ok = end >= lower.len();
+            // For CJK: treat as boundary-free, match at any position
+            let left_ok = abs_pos == 0
+                || !lower[..abs_pos].ends_with(|c: char| c.is_alphanumeric());
+            let right_ok = end >= lower.len()
+                || !lower[end..].starts_with(|c: char| c.is_alphanumeric());
             if left_ok && right_ok {
                 matches.push((abs_pos, end, v));
+            }
+            // Guard against empty-word infinite loop (end == start)
+            if end <= start {
+                break;
             }
             start = end;
         }

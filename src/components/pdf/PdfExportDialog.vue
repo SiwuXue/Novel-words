@@ -160,6 +160,16 @@ function saveAsCustom() {
   ElMessage.info('请前往设置页从内置模板创建自定义模板')
 }
 
+/** Remove characters that are invalid in Windows file names. */
+function sanitizeFilename(name: string): string {
+  return name
+    .replace(/[<>:"/\\|?*]/g, '_')
+    .replace(/[\x00-\x1f]/g, '')
+    .trim()
+    .replace(/\.+$/, '')
+    .slice(0, 200) || 'export'
+}
+
 async function handleExport() {
   const novel = novelStore.currentNovel
   if (!novel) {
@@ -167,23 +177,43 @@ async function handleExport() {
     return
   }
 
-  const filePath = await save({
-    defaultPath: `${novel.title || 'export'}.pdf`,
-    filters: [{ name: 'PDF', extensions: ['pdf'] }],
-  })
-  if (!filePath) return
+  console.log('[PdfExport] opening save dialog...')
+  let filePath: string | null = null
+  try {
+    filePath = await save({
+      defaultPath: `${sanitizeFilename(novel.title || 'export')}.pdf`,
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    })
+  } catch (e: any) {
+    console.error('[PdfExport] save dialog failed:', e)
+    ElMessage.error('打开保存对话框失败: ' + String(e?.message || e))
+    return
+  }
+  if (!filePath) {
+    console.log('[PdfExport] user cancelled save dialog')
+    return
+  }
 
+  console.log('[PdfExport] invoking export_pdf...', {
+    novelId: novel.id,
+    templateId: selectedTemplateId.value,
+    templateType: selectedTemplate.value?.templateType,
+    outputPath: filePath,
+  })
   exporting.value = true
   try {
-    await invoke<string>('export_pdf', {
+    const result = await invoke<string>('export_pdf', {
       novelId: novel.id,
       templateId: selectedTemplateId.value,
+      templateType: selectedTemplate.value?.templateType || 'appendix',
       vocabBookId: selectedVocabBookId.value,
       outputPath: filePath,
     })
+    console.log('[PdfExport] export_pdf succeeded:', result)
     ElMessage.success('PDF 已导出')
     visible.value = false
   } catch (e: any) {
+    console.error('[PdfExport] export_pdf failed:', e)
     ElMessage.error(String(e?.message || e || '导出失败'))
   } finally {
     exporting.value = false

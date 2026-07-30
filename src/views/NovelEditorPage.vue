@@ -159,7 +159,7 @@ async function loadNovel() {
     }
     const text = store.currentNovel.cleanedText || store.currentNovel.rawText || ''
     editorContentOverride.value = text
-    if (text) editorStore.loadChapters(text)
+    if (text) await editorStore.loadChapters(id, text)
     loadState.value = 'loaded'
     await nextTick()
   } catch (e: any) {
