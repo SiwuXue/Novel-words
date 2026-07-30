@@ -1,28 +1,27 @@
-//! Intensive reading template: inline small-font annotation after each vocab word.
+//! Intensive reading template: inline English-word annotation after the Chinese
+//! term whose (chosen) definition matches. Body text wraps to page width.
+use super::matcher::find_matches_in_line;
 use super::PdfContext;
 use crate::models::novel::Chapter;
 use crate::models::vocab_word::VocabWord;
 
 pub fn render(ctx: &mut PdfContext, chapters: &[Chapter], vocabs: &[VocabWord]) {
-    // Sort vocabs by word length descending for longest-match-first
-    let mut sorted: Vec<&VocabWord> = vocabs.iter().collect();
-    sorted.sort_by(|a, b| b.word.len().cmp(&a.word.len()));
-
-    let word_map: std::collections::HashMap<String, &VocabWord> = sorted
-        .iter()
-        .map(|v| (v.word.to_lowercase(), *v))
-        .collect();
-
-    for chapter in chapters {
+    for (ci, chapter) in chapters.iter().enumerate() {
+        if ci > 0 {
+            ctx.new_page();
+        }
+        if !chapter.title.is_empty() {
+            ctx.draw_text(&chapter.title, ctx.margins.left, ctx.current_y, ctx.font_size + 2.0);
+            ctx.current_y -= ctx.line_height * 1.5;
+        }
         for para in chapter.content.split("\n\n") {
             let trimmed = para.trim();
             if trimmed.is_empty() {
                 continue;
             }
             let single_line = trimmed.replace('\n', " ");
-
-            render_annotated_line(ctx, &single_line, &word_map, &sorted);
-            ctx.current_y -= ctx.line_height;
+            render_annotated_paragraph(ctx, &single_line, vocabs);
+            ctx.current_y -= ctx.line_height * 0.4;
 
             if ctx.remaining_height() < ctx.line_height * 2.0 {
                 ctx.new_page();
@@ -31,86 +30,72 @@ pub fn render(ctx: &mut PdfContext, chapters: &[Chapter], vocabs: &[VocabWord]) 
     }
 }
 
-fn render_annotated_line(
-    ctx: &mut PdfContext,
-    line: &str,
-    word_map: &std::collections::HashMap<String, &VocabWord>,
-    _sorted: &[&VocabWord],
-) {
-    let lower = line.to_lowercase();
-    let mut matches: Vec<(usize, usize, &VocabWord)> = Vec::new();
+/// Render one paragraph, wrapping to page width, drawing a small superscript
+/// English word after each matched Chinese term.
+fn render_annotated_paragraph(ctx: &mut PdfContext, line: &str, vocabs: &[VocabWord]) {
+    let matches = find_matches_in_line(line, vocabs);
 
-    // Find all word matches
-    for v in word_map.values() {
-        let word_lower = v.word.to_lowercase();
-        if word_lower.is_empty() {
-            continue;
-        }
-        let mut start = 0;
-        while let Some(pos) = lower[start..].find(&word_lower) {
-            let abs_pos = start + pos;
-            let end = abs_pos + v.word.len();
-            // For CJK: treat as boundary-free, match at any position
-            let left_ok = abs_pos == 0
-                || !lower[..abs_pos].ends_with(|c: char| c.is_alphanumeric());
-            let right_ok = end >= lower.len()
-                || !lower[end..].starts_with(|c: char| c.is_alphanumeric());
-            if left_ok && right_ok {
-                matches.push((abs_pos, end, v));
-            }
-            // Guard against empty-word infinite loop (end == start)
-            if end <= start {
-                break;
-            }
-            start = end;
-        }
-    }
-    matches.sort_by_key(|m| m.0);
-
-    // Remove overlapping matches
-    let mut filtered: Vec<(usize, usize, &VocabWord)> = Vec::new();
-    for m in matches {
-        if !filtered.iter().any(|f| m.0 < f.1 && f.0 < m.1) {
-            filtered.push(m);
-        }
-    }
-
-    if filtered.is_empty() {
-        ctx.draw_text(line, ctx.margins.left, ctx.current_y, ctx.font_size);
+    // No matches: fall back to plain wrapped text.
+    if matches.is_empty() {
+        ctx.draw_text_wrapped(line, ctx.margins.left, ctx.usable_width, ctx.font_size);
         return;
     }
 
+    let max_x = ctx.margins.left + ctx.usable_width;
     let mut x = ctx.margins.left;
-    let mut last = 0;
-    for (start, end, v) in &filtered {
-        // Draw text before match
-        if *start > last {
-            let pre = &line[last..*start];
-            let w = ctx.measure_text_width(pre, ctx.font_size);
-            ctx.draw_text(pre, x, ctx.current_y, ctx.font_size);
-            x += w;
+    let mut last = 0usize;
+
+    // Helper closure can't borrow ctx mutably twice, so inline the wrapping logic.
+    let draw_segment = |ctx: &mut PdfContext, x: &mut f32, seg: &str| {
+        // Draw char by char so we can wrap mid-segment.
+        for ch in seg.chars() {
+            let cw = ctx.measure_text_width(&ch.to_string(), ctx.font_size);
+            if *x + cw > max_x {
+                ctx.current_y -= ctx.line_height;
+                *x = ctx.margins.left;
+                if ctx.remaining_height() < ctx.line_height * 2.0 {
+                    ctx.new_page();
+                }
+            }
+            ctx.draw_text(&ch.to_string(), *x, ctx.current_y, ctx.font_size);
+            *x += cw;
         }
+    };
 
-        // Draw the matched word
-        let matched_text = &line[*start..*end];
-        let mw = ctx.measure_text_width(matched_text, ctx.font_size);
-        ctx.draw_text(matched_text, x, ctx.current_y, ctx.font_size);
+    for m in &matches {
+        // Text before the match
+        if m.start > last {
+            let pre = &line[last..m.start];
+            draw_segment(ctx, &mut x, pre);
+        }
+        // The matched Chinese term
+        let matched = &line[m.start..m.end];
+        draw_segment(ctx, &mut x, matched);
 
-        // Draw annotation as small superscript
-        let def = if v.phonetic.is_empty() {
-            v.definition.clone()
+        // Annotation: the English word (+ phonetic) as small superscript
+        let ann = if m.word.phonetic.is_empty() {
+            format!("[{}]", m.word.word)
         } else {
-            format!("/{}/ {}", v.phonetic, v.definition)
+            format!("[{} /{}/]", m.word.word, m.word.phonetic)
         };
-        let ann = format!("【{}】", def);
-        ctx.draw_text(&ann, x + mw, ctx.current_y + 1.0, ctx.small_font_size);
-        x += mw + ctx.measure_text_width(&ann, ctx.small_font_size);
+        let aw = ctx.measure_text_width(&ann, ctx.small_font_size);
+        if x + aw > max_x {
+            ctx.current_y -= ctx.line_height;
+            x = ctx.margins.left;
+            if ctx.remaining_height() < ctx.line_height * 2.0 {
+                ctx.new_page();
+            }
+        }
+        ctx.draw_text(&ann, x, ctx.current_y + 1.0, ctx.small_font_size);
+        x += aw;
 
-        last = *end;
+        last = m.end;
     }
 
-    // Draw remaining text
+    // Remaining text after the last match
     if last < line.len() {
-        ctx.draw_text(&line[last..], x, ctx.current_y, ctx.font_size);
+        let rest = &line[last..];
+        draw_segment(ctx, &mut x, rest);
     }
+    ctx.current_y -= ctx.line_height;
 }

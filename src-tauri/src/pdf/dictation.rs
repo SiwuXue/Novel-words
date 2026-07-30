@@ -1,28 +1,27 @@
-//! Dictation template: Chinese text with blank lines replacing vocab words.
+//! Dictation template: Chinese body text with matched terms replaced by blanks,
+//! plus an answer key (English word + Chinese term). Body wraps to page width.
+use super::matcher::{extract_cn_terms, find_matches_in_line};
 use super::PdfContext;
 use crate::models::novel::Chapter;
 use crate::models::vocab_word::VocabWord;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 pub fn render(ctx: &mut PdfContext, chapters: &[Chapter], vocabs: &[VocabWord]) {
-    let word_map: HashMap<String, &VocabWord> = vocabs
-        .iter()
-        .map(|v| (v.word.to_lowercase(), v))
-        .collect();
-
-    let mut sorted: Vec<&VocabWord> = vocabs.iter().collect();
-    sorted.sort_by(|a, b| b.word.len().cmp(&a.word.len()));
-
-    for chapter in chapters {
+    for (ci, chapter) in chapters.iter().enumerate() {
+        if ci > 0 {
+            ctx.new_page();
+        }
+        if !chapter.title.is_empty() {
+            ctx.draw_text(&chapter.title, ctx.margins.left, ctx.current_y, ctx.font_size + 2.0);
+            ctx.current_y -= ctx.line_height * 1.5;
+        }
         for para in chapter.content.split("\n\n") {
             let trimmed = para.trim();
             if trimmed.is_empty() { continue; }
             let single_line = trimmed.replace('\n', " ");
 
-            render_dictation_line(ctx, &single_line, &word_map, &sorted);
-            ctx.current_y -= ctx.line_height;
-            // Extra space for handwriting
-            ctx.current_y -= ctx.line_height * 0.5;
+            render_dictation_paragraph(ctx, &single_line, vocabs);
+            ctx.current_y -= ctx.line_height * 0.6;
 
             if ctx.remaining_height() < ctx.line_height * 3.0 {
                 ctx.new_page();
@@ -30,7 +29,7 @@ pub fn render(ctx: &mut PdfContext, chapters: &[Chapter], vocabs: &[VocabWord]) 
         }
     }
 
-    // Answer key on new page
+    // Answer key on a new page
     ctx.new_page();
     ctx.draw_text("参考答案", ctx.margins.left, ctx.current_y, ctx.font_size + 4.0);
     ctx.current_y -= ctx.line_height * 2.0;
@@ -42,82 +41,57 @@ pub fn render(ctx: &mut PdfContext, chapters: &[Chapter], vocabs: &[VocabWord]) 
         .collect();
 
     for w in &unique {
-        let ph = if w.phonetic.is_empty() { "—" } else { &w.phonetic };
-        let def = if w.definition.is_empty() { "—" } else { &w.definition };
-        let line = format!("{}  {}  {}", w.word, ph, def);
-        ctx.draw_text(&line, ctx.margins.left, ctx.current_y, ctx.small_font_size);
-        ctx.current_y -= ctx.line_height * 0.7;
-        if ctx.remaining_height() < ctx.line_height {
+        let term = extract_cn_terms(&w.definition).join("/");
+        let term = if term.is_empty() { w.definition.clone() } else { term };
+        let line = format!("{}  ({})  {}", w.word, w.phonetic, term);
+        ctx.draw_text_wrapped(&line, ctx.margins.left, ctx.usable_width, ctx.small_font_size);
+        if ctx.remaining_height() < ctx.line_height * 1.5 {
             ctx.new_page();
         }
     }
 }
 
-fn render_dictation_line(
-    ctx: &mut PdfContext,
-    line: &str,
-    _word_map: &HashMap<String, &VocabWord>,
-    sorted: &[&VocabWord],
-) {
-    let lower = line.to_lowercase();
-    let mut matches: Vec<(usize, usize, &VocabWord)> = Vec::new();
+fn render_dictation_paragraph(ctx: &mut PdfContext, line: &str, vocabs: &[VocabWord]) {
+    let matches = find_matches_in_line(line, vocabs);
 
-    // Find all word matches
-    for v in sorted {
-        let word_lower = v.word.to_lowercase();
-        if word_lower.is_empty() {
-            continue;
-        }
-        let mut start = 0;
-        while let Some(pos) = lower[start..].find(&word_lower) {
-            let abs_pos = start + pos;
-            let end = abs_pos + v.word.len();
-            // For CJK: treat as boundary-free, match at any position
-            let left_ok = abs_pos == 0
-                || !lower[..abs_pos].ends_with(|c: char| c.is_alphanumeric());
-            let right_ok = end >= lower.len()
-                || !lower[end..].starts_with(|c: char| c.is_alphanumeric());
-            if left_ok && right_ok {
-                matches.push((abs_pos, end, v));
-            }
-            // Guard against empty-word infinite loop (end == start)
-            if end <= start {
-                break;
-            }
-            start = end;
-        }
-    }
-    matches.sort_by_key(|m| m.0);
-
-    // Remove overlapping
-    let mut filtered: Vec<(usize, usize, &VocabWord)> = Vec::new();
-    for m in matches {
-        if !filtered.iter().any(|f| m.0 < f.1 && f.0 < m.1) {
-            filtered.push(m);
-        }
+    if matches.is_empty() {
+        ctx.draw_text_wrapped(line, ctx.margins.left, ctx.usable_width, ctx.font_size);
+        return;
     }
 
+    let max_x = ctx.margins.left + ctx.usable_width;
     let mut x = ctx.margins.left;
-    let mut last = 0;
+    let mut last = 0usize;
 
-    for (start, end, _v) in &filtered {
-        // Text before match
-        if *start > last {
-            let pre = &line[last..*start];
-            ctx.draw_text(pre, x, ctx.current_y, ctx.font_size);
-            x += ctx.measure_text_width(pre, ctx.font_size);
+    let draw_segment = |ctx: &mut PdfContext, x: &mut f32, seg: &str| {
+        for ch in seg.chars() {
+            let cw = ctx.measure_text_width(&ch.to_string(), ctx.font_size);
+            if *x + cw > max_x {
+                ctx.current_y -= ctx.line_height;
+                *x = ctx.margins.left;
+                if ctx.remaining_height() < ctx.line_height * 2.0 {
+                    ctx.new_page();
+                }
+            }
+            ctx.draw_text(&ch.to_string(), *x, ctx.current_y, ctx.font_size);
+            *x += cw;
         }
+    };
 
-        // Blank underline
-        let blank = "_".repeat((end - start) * 2); // ~2 underscores per char
-        ctx.draw_text(&blank, x, ctx.current_y, ctx.font_size);
-        x += ctx.measure_text_width(&blank, ctx.font_size);
-
-        last = *end;
+    for m in &matches {
+        if m.start > last {
+            let pre = &line[last..m.start];
+            draw_segment(ctx, &mut x, pre);
+        }
+        // Blank underline sized ~ to the term length
+        let blank = "_".repeat(m.term_len * 2);
+        draw_segment(ctx, &mut x, &blank);
+        last = m.end;
     }
 
-    // Remaining text
     if last < line.len() {
-        ctx.draw_text(&line[last..], x, ctx.current_y, ctx.font_size);
+        let rest = &line[last..];
+        draw_segment(ctx, &mut x, rest);
     }
+    ctx.current_y -= ctx.line_height;
 }

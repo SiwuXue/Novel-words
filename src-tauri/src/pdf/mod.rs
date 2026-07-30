@@ -1,4 +1,5 @@
 mod font;
+mod matcher;
 mod intensive;
 mod sidebar;
 mod appendix;
@@ -124,6 +125,9 @@ fn make_line_point(x_mm: f32, y_mm: f32) -> LinePoint {
 pub struct PdfContext {
     pub doc: PdfDocument,
     pub font_id: FontId,
+    pub latin_font_id: FontId,
+    /// Parsed CJK font, used to test glyph coverage per character.
+    pub cjk_parsed: ParsedFont,
     pub font_size: f32,
     pub small_font_size: f32,
     pub line_height: f32,
@@ -151,20 +155,74 @@ impl PdfContext {
     }
 
     /// Draw text at top-left (x_mm, y_mm) where y is distance from top.
+    /// Splits the text into runs by font: characters the CJK font can render use
+    /// the CJK font; the rest (Latin letters, IPA phonetic symbols) use the Latin
+    /// font, so symbols like ˈ ə ʌ ð ʃ don't turn into tofu boxes.
     pub fn draw_text(&mut self, text: &str, x_mm: f32, y_mm: f32, size: f32) {
+        if text.is_empty() {
+            return;
+        }
         let bottom_y = bl_y(y_mm, self.paper_height);
+        let mut cursor_x = x_mm;
+
+        // Group consecutive chars that share the same font into runs.
+        let mut run = String::new();
+        let mut run_is_latin = false;
+        let mut run_started = false;
+
+        for ch in text.chars() {
+            let use_latin = self.prefer_latin(ch);
+            if run_started && use_latin != run_is_latin {
+                self.emit_run(&run, cursor_x, bottom_y, size, run_is_latin);
+                cursor_x += self.run_width(&run, size, run_is_latin);
+                run.clear();
+            }
+            run.push(ch);
+            run_is_latin = use_latin;
+            run_started = true;
+        }
+        if !run.is_empty() {
+            self.emit_run(&run, cursor_x, bottom_y, size, run_is_latin);
+        }
+    }
+
+    /// Should this char be drawn with the Latin font rather than the CJK font?
+    /// Non-CJK codepoints (ASCII, IPA, Latin punctuation) go to the Latin font.
+    fn prefer_latin(&self, ch: char) -> bool {
+        // CJK ideographs & common CJK punctuation always use the CJK font.
+        let c = ch as u32;
+        let is_cjk = matches!(c,
+            0x4E00..=0x9FFF | 0x3400..=0x4DBF | 0xF900..=0xFAFF | 0x3000..=0x303F | 0xFF00..=0xFFEF
+        );
+        if is_cjk {
+            return false;
+        }
+        // For everything else, prefer Latin if the CJK font lacks the glyph.
+        self.cjk_parsed.lookup_glyph_index(c).is_none()
+    }
+
+    fn emit_run(&mut self, run: &str, x_mm: f32, bottom_y: f32, size: f32, is_latin: bool) {
+        let font = if is_latin { self.latin_font_id.clone() } else { self.font_id.clone() };
         self.current_ops.push(Op::StartTextSection);
         self.current_ops.push(Op::SetFont {
-            font: PdfFontHandle::External(self.font_id.clone()),
+            font: PdfFontHandle::External(font),
             size: Pt(size),
         });
         self.current_ops.push(Op::SetTextCursor {
             pos: make_point(x_mm, bottom_y),
         });
         self.current_ops.push(Op::ShowText {
-            items: vec![TextItem::Text(text.to_string())],
+            items: vec![TextItem::Text(run.to_string())],
         });
         self.current_ops.push(Op::EndTextSection);
+    }
+
+    fn run_width(&self, run: &str, size: f32, is_latin: bool) -> f32 {
+        let mut w = 0.0f32;
+        for ch in run.chars() {
+            w += if is_latin || ch.is_ascii() { size * 0.55 } else { size };
+        }
+        w * 0.3528
     }
 
     pub fn measure_text_width(&self, text: &str, font_size: f32) -> f32 {
@@ -284,11 +342,26 @@ pub fn generate_pdf(
     let parsed_font = ParsedFont::from_bytes(&font_bytes, 0, &mut warnings)
         .ok_or_else(|| format!("解析字体失败: {}", font_path))?;
 
+    // Latin/IPA font (for English words + phonetic symbols). Fall back to the CJK
+    // font if none found, so rendering still works (just with tofu for IPA).
+    let latin_path = font::find_latin_font();
+    let parsed_latin = latin_path
+        .as_ref()
+        .and_then(|p| std::fs::read(p).ok())
+        .and_then(|b| {
+            let mut w = Vec::new();
+            ParsedFont::from_bytes(&b, 0, &mut w)
+        });
+
     // 2. Create document
     let mut doc = PdfDocument::new(
         if novel.title.is_empty() { "未命名" } else { &novel.title },
     );
     let font_id = doc.add_font(&parsed_font);
+    let latin_font_id = match &parsed_latin {
+        Some(pf) => doc.add_font(pf),
+        None => font_id.clone(),
+    };
 
     let margins = Margins::from_json(&template.margins);
     let (paper_w, paper_h) = paper_dims(&template.paper_size);
@@ -301,6 +374,8 @@ pub fn generate_pdf(
     let mut ctx = PdfContext {
         doc,
         font_id,
+        latin_font_id,
+        cjk_parsed: parsed_font,
         font_size,
         small_font_size: font_size * 0.65,
         line_height,
