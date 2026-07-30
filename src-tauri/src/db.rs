@@ -78,6 +78,25 @@ pub fn init_db(app_data_dir: &PathBuf) -> Result<DbState, String> {
         }
     }
 
+    // Migration: enforce unique (vocab_book_id, word) — dedup existing rows first,
+    // keeping the earliest id, then create a unique index.
+    {
+        let has_index: bool = conn
+            .prepare("SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='index' AND name='idx_vocab_word_unique'")
+            .and_then(|mut s| s.query_row([], |r| r.get(0)))
+            .unwrap_or(false);
+        if !has_index {
+            conn.execute_batch(
+                "DELETE FROM vocab_word
+                 WHERE id NOT IN (
+                     SELECT MIN(id) FROM vocab_word GROUP BY vocab_book_id, word
+                 );
+                 CREATE UNIQUE INDEX idx_vocab_word_unique ON vocab_word (vocab_book_id, word);",
+            )
+            .map_err(|e| format!("迁移 vocab_word 唯一索引失败: {}", e))?;
+        }
+    }
+
     Ok(DbState {
         db: Mutex::new(conn),
     })

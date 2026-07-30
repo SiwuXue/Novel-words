@@ -23,6 +23,13 @@
         <el-button type="primary" @click="showCreateDialog">
           <el-icon><Plus /></el-icon> 添加单词
         </el-button>
+        <el-button
+          type="danger"
+          :disabled="selectedRows.length === 0"
+          @click="handleBatchDelete"
+        >
+          <el-icon><Delete /></el-icon> 批量删除{{ selectedRows.length ? ` (${selectedRows.length})` : '' }}
+        </el-button>
         <el-button @click="handleExportCsv" :disabled="store.words.length === 0">
           <el-icon><Download /></el-icon> 导出 CSV
         </el-button>
@@ -49,7 +56,9 @@
       stripe
       style="width: 100%"
       empty-text="词汇本还没有单词，点击「添加单词」开始"
+      @selection-change="handleSelectionChange"
     >
+      <el-table-column type="selection" width="48" />
       <el-table-column prop="word" label="单词" min-width="120" />
       <el-table-column prop="phonetic" label="音标" width="140">
         <template #default="{ row }">
@@ -93,7 +102,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Search, Plus, Download, Upload } from '@element-plus/icons-vue'
+import { ArrowLeft, Search, Plus, Download, Upload, Delete } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
 import { save, open } from '@tauri-apps/plugin-dialog'
@@ -113,6 +122,7 @@ const searchQuery = ref('')
 const proficiencyFilter = ref<'all' | 'unknown' | 'familiar' | 'mastered'>('all')
 const dialogVisible = ref(false)
 const editingWord = ref<VocabWord | null>(null)
+const selectedRows = ref<VocabWord[]>([])
 
 const book = computed(() =>
   bookStore.books.find((b) => b.id === bookId.value) || null,
@@ -195,6 +205,27 @@ async function confirmDelete(word: VocabWord) {
   }
 }
 
+function handleSelectionChange(rows: VocabWord[]) {
+  selectedRows.value = rows
+}
+
+async function handleBatchDelete() {
+  const rows = selectedRows.value
+  if (rows.length === 0) return
+  try {
+    await ElMessageBox.confirm(
+      `确定删除选中的 ${rows.length} 个单词吗？`,
+      '批量删除',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' },
+    )
+    const count = await store.removeMany(rows.map((r) => r.id))
+    selectedRows.value = []
+    ElMessage.success(`已删除 ${count} 个单词`)
+  } catch {
+    // user cancelled
+  }
+}
+
 function goBack() {
   router.push('/vocabulary')
 }
@@ -225,11 +256,17 @@ async function handleImportCsv() {
     })
     if (!filePath) return // user cancelled
 
-    const count = await invoke<number>('import_vocab_words_csv', {
-      vocabBookId: bookId.value,
-      filePath,
-    })
-    ElMessage.success(`已导入 ${count} 个单词`)
+    const result = await invoke<{ imported: number; skipped: number }>(
+      'import_vocab_words_csv',
+      {
+        vocabBookId: bookId.value,
+        filePath,
+      },
+    )
+    const msg = result.skipped > 0
+      ? `已导入 ${result.imported} 个单词，跳过 ${result.skipped} 个重复`
+      : `已导入 ${result.imported} 个单词`
+    ElMessage.success(msg)
     await store.fetchAll(bookId.value)
   } catch (e: any) {
     ElMessage.error(String(e?.message || e || '导入失败'))
