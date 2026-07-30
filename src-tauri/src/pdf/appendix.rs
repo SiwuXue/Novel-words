@@ -17,6 +17,7 @@ pub fn render(ctx: &mut PdfContext, chapters: &[Chapter], vocabs: &[VocabWord]) 
         }
         // Chapter heading
         if !chapter.title.is_empty() {
+            ctx.record_bookmark(&chapter.title);
             ctx.draw_text(&chapter.title, ctx.margins.left, ctx.current_y, ctx.font_size + 2.0);
             ctx.current_y -= ctx.line_height * 1.5;
             if ctx.remaining_height() < ctx.line_height * 2.0 {

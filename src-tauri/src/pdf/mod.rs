@@ -130,6 +130,9 @@ pub struct PdfContext {
     pub usable_height: f32,
     pub current_y: f32,     // mm from TOP of page
     pub page_count: usize,
+    /// Pairs of (chapter_title, page_index) recorded during rendering, used to
+    /// add PDF bookmarks at the end.
+    bookmarks: Vec<(String, usize)>,
     pub paper_width: f32,
     pub paper_height: f32,
     current_ops: Vec<Op>,
@@ -155,6 +158,13 @@ impl PdfContext {
         } else {
             self.new_page();
         }
+    }
+
+    /// Record the current page as the start of a chapter with the given title,
+    /// so a PDF bookmark (outline entry) can be created later.
+    pub fn record_bookmark(&mut self, title: &str) {
+        let page_idx = self.doc.pages.len().saturating_sub(1);
+        self.bookmarks.push((title.to_string(), page_idx));
     }
 
     pub fn remaining_height(&self) -> f32 {
@@ -426,6 +436,7 @@ pub fn generate_pdf(
         paper_width: paper_w,
         paper_height: paper_h,
         current_ops: Vec::new(),
+        bookmarks: Vec::new(),
     };
 
     // 3. Render title (y is now bottom-based, matching current_y)
@@ -449,7 +460,12 @@ pub fn generate_pdf(
         _ => appendix::render(&mut ctx, chapters, vocabs),
     };
 
-    // 5. Finalize last page
+    // 5. Add PDF bookmarks for chapter navigation
+    for (title, page) in &ctx.bookmarks {
+        ctx.doc.add_bookmark(title, *page);
+    }
+
+    // 6. Finalize last page
     if !ctx.current_ops.is_empty() {
         let ops = std::mem::take(&mut ctx.current_ops);
         ctx.doc.pages.push(PdfPage::new(Mm(paper_w), Mm(paper_h), ops));
