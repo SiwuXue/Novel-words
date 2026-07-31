@@ -94,22 +94,37 @@ fn render_annotated_paragraph(ctx: &mut PdfContext, line: &str, vocabs: &[VocabW
         let matched = &line[m.start..m.end];
         draw_segment(ctx, &mut x, matched);
 
-        // Annotation: the English word (+ phonetic) as small superscript
-        let ann = if m.word.phonetic.is_empty() {
-            format!("[{}]", m.word.word)
+        // Annotation: the English word (highlighted background) + phonetic
+        // (plain). `word_only` is the highlighted part, `tail` is the rest
+        // (brackets + optional phonetic) drawn without a background.
+        let word_only = m.word.word.clone();
+        let tail = if m.word.phonetic.is_empty() {
+            "]".to_string()
         } else {
-            format!("[{} /{}/]", m.word.word, m.word.phonetic)
+            format!(" /{}/]", m.word.phonetic)
         };
-        let aw = ctx.measure_text_width(&ann, ctx.small_font_size);
-        if x + aw > max_x {
+        let word_w = ctx.measure_text_width(&word_only, ctx.small_font_size);
+        let tail_w = ctx.measure_text_width(&tail, ctx.small_font_size);
+        let ann_w = word_w + tail_w;
+        if x + ann_w > max_x {
             ctx.current_y -= ctx.line_height;
             x = ctx.margins.left;
             if ctx.remaining_height() < ctx.line_height * 2.0 {
                 ctx.new_page();
             }
         }
-        ctx.draw_text(&ann, x, ctx.current_y + 1.0, ctx.small_font_size);
-        x += aw;
+        ctx.draw_text("[", x, ctx.current_y + 1.0, ctx.small_font_size);
+        let x_after_bracket = x + ctx.measure_text_width("[", ctx.small_font_size);
+        ctx.draw_text_highlighted(
+            &word_only,
+            x_after_bracket,
+            ctx.current_y + 1.0,
+            ctx.small_font_size,
+            super::highlight_color_for(&m.word.proficiency),
+        );
+        let x_after_word = x_after_bracket + word_w;
+        ctx.draw_text(&tail, x_after_word, ctx.current_y + 1.0, ctx.small_font_size);
+        x += ann_w;
 
         last = m.end;
     }
@@ -151,7 +166,13 @@ fn draw_vocab_table(ctx: &mut PdfContext, words: &[&VocabWord]) {
         let y = ctx.current_y;
         ctx.draw_rect_border(x, y, col1_w, row_h);
         let word_disp = ctx.truncate_text(&w.word, col1_w - 4.0, ctx.small_font_size);
-        ctx.draw_text(&word_disp, x + 2.0, y - 2.0, ctx.small_font_size);
+        ctx.draw_text_highlighted(
+            &word_disp,
+            x + 2.0,
+            y - 2.0,
+            ctx.small_font_size,
+            super::highlight_color_for(&w.proficiency),
+        );
 
         ctx.draw_rect_border(x + col1_w, y, col2_w, row_h);
         let ph_raw = if w.phonetic.is_empty() { "—" } else { &w.phonetic };

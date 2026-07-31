@@ -6,42 +6,11 @@
     :close-on-click-modal="false"
   >
     <el-form label-width="80px">
-      <el-form-item label="排版模板">
-        <div class="template-selector">
-          <!-- Built-in templates -->
-          <div class="template-group">
-            <div class="group-label">内置模板</div>
-            <div
-              v-for="tpl in builtinTemplates"
-              :key="'b-' + tpl.id"
-              class="template-card"
-              :class="{ selected: selectedTemplateId === tpl.id }"
-              @click="selectTemplate(tpl)"
-            >
-              <div class="tpl-name">{{ tpl.name }}</div>
-              <div class="tpl-desc">{{ templateDesc(tpl) }}</div>
-              <el-tag size="small" type="info">内置</el-tag>
-            </div>
-          </div>
-
-          <!-- User templates -->
-          <div class="template-group">
-            <div class="group-label">我的模板</div>
-            <div
-              v-for="tpl in userTemplates"
-              :key="'u-' + tpl.id"
-              class="template-card"
-              :class="{ selected: selectedTemplateId === tpl.id }"
-              @click="selectTemplate(tpl)"
-            >
-              <div class="tpl-name">{{ tpl.name }}</div>
-              <div class="tpl-desc">{{ tpl.paperSize }} · {{ tpl.fontSize }}px · 行距{{ tpl.lineSpacing }}</div>
-            </div>
-            <el-button v-if="selectedBuiltin" text type="primary" size="small" @click="saveAsCustom">
-              从「{{ selectedBuiltin.name }}」另存为我的模板
-            </el-button>
-          </div>
-        </div>
+      <el-form-item label="排版模板" v-if="selectedTemplate">
+        <el-tag>{{ selectedTemplate.name }}</el-tag>
+        <span style="margin-left:8px;font-size:12px;color:var(--text-secondary)">
+          {{ selectedTemplate.paperSize }} · {{ selectedTemplate.fontSize }}px · 行距{{ selectedTemplate.lineSpacing }}
+        </span>
       </el-form-item>
 
       <el-form-item label="词汇本">
@@ -59,21 +28,6 @@
           />
         </el-select>
       </el-form-item>
-
-      <template v-if="selectedTemplate">
-        <el-divider content-position="left">模板参数</el-divider>
-        <el-form-item label="纸张">{{ selectedTemplate.paperSize }}</el-form-item>
-        <el-form-item label="字体">{{ selectedTemplate.fontFamily }}</el-form-item>
-        <el-form-item label="字号">{{ selectedTemplate.fontSize }}px</el-form-item>
-        <el-form-item label="行距">{{ selectedTemplate.lineSpacing }}</el-form-item>
-      </template>
-      <el-alert
-        v-else
-        title="选择一个模板后显示参数"
-        type="info"
-        :closable="false"
-        show-icon
-      />
     </el-form>
 
     <template #footer>
@@ -93,12 +47,12 @@ import { save } from '@tauri-apps/plugin-dialog'
 import { usePdfTemplateStore } from '@/stores/pdfTemplateStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
 import { useNovelStore } from '@/stores/novelStore'
-import { useSettingsStore } from '@/stores/settingsStore'
-import { TEMPLATE_TYPE_LABELS } from '@/types/pdf'
 import type { PdfTemplate } from '@/types/pdf'
 
 const props = defineProps<{
   modelValue: boolean
+  templateType?: string
+  vocabBookId?: number | null
 }>()
 
 const emit = defineEmits<{
@@ -112,28 +66,17 @@ watch(visible, (v) => { emit('update:modelValue', v) })
 const templateStore = usePdfTemplateStore()
 const bookStore = useVocabBookStore()
 const novelStore = useNovelStore()
-const settingsStore = useSettingsStore()
 
 const selectedTemplateId = ref<number | null>(null)
 const selectedVocabBookId = ref<number | null>(null)
 const exporting = ref(false)
 
 const builtinTemplates = computed(() => templateStore.builtinTemplates)
-const userTemplates = computed(() => templateStore.templates.filter(t => !t.isBuiltin))
 
 const selectedTemplate = ref<PdfTemplate | null>(null)
-const selectedBuiltin = computed(() =>
-  selectedTemplate.value?.isBuiltin ? selectedTemplate.value : null
-)
-
-function templateDesc(tpl: PdfTemplate): string {
-  const label = TEMPLATE_TYPE_LABELS[tpl.templateType] || tpl.templateType
-  return label.split(' — ')[1] || label
-}
 
 function selectTemplate(tpl: PdfTemplate) {
   selectedTemplate.value = tpl
-  // Use negative id for builtin → Rust skips DB lookup
   selectedTemplateId.value = tpl.isBuiltin ? null : tpl.id
 }
 
@@ -143,22 +86,14 @@ onMounted(async () => {
   if (bookStore.books.length === 0) {
     await bookStore.fetchAll()
   }
-  // Default select first builtin
-  if (builtinTemplates.value.length > 0) {
-    selectTemplate(builtinTemplates.value[0])
-  }
-  if (
-    settingsStore.defaultVocabBookId &&
-    bookStore.books.some((b) => b.id === settingsStore.defaultVocabBookId)
-  ) {
-    selectedVocabBookId.value = settingsStore.defaultVocabBookId
-  }
+  // Pre-select from parent props
+  selectedVocabBookId.value = props.vocabBookId ?? null
+  // Find the builtin template matching the given type
+  const tpl = builtinTemplates.value.find(
+    (t) => t.templateType === (props.templateType || 'intensive'),
+  ) ?? builtinTemplates.value[0]
+  if (tpl) selectTemplate(tpl)
 })
-
-function saveAsCustom() {
-  // Emit event for parent to open PdfTemplateFormDialog
-  ElMessage.info('请前往设置页从内置模板创建自定义模板')
-}
 
 /** Remove characters that are invalid in Windows file names. */
 function sanitizeFilename(name: string): string {

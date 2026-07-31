@@ -16,6 +16,22 @@ fn measure_char_width(ch: char, font_size: f32) -> f32 {
     else { font_size * 0.3528 }
 }
 
+/// Highlight background color for a word's proficiency. Pastel tones so the
+/// text on top remains readable in black. These RGB values are kept in sync
+/// with `src/utils/proficiencyColors.ts` (frontend preview) — when you change
+/// one, change the other.
+pub fn highlight_color_for(proficiency: &str) -> Color {
+    match proficiency {
+        // unknown — #f9c7c7 (soft red)
+        "unknown" => Color::Rgb(Rgb::new(0xF9 as f32 / 255.0, 0xC7 as f32 / 255.0, 0xC7 as f32 / 255.0, None)),
+        // familiar — #fceba6 (soft yellow)
+        "familiar" => Color::Rgb(Rgb::new(0xFC as f32 / 255.0, 0xEB as f32 / 255.0, 0xA6 as f32 / 255.0, None)),
+        // mastered — #c7ebc7 (soft green)
+        "mastered" => Color::Rgb(Rgb::new(0xC7 as f32 / 255.0, 0xEB as f32 / 255.0, 0xC7 as f32 / 255.0, None)),
+        _ => Color::Rgb(Rgb::new(0xF9 as f32 / 255.0, 0xC7 as f32 / 255.0, 0xC7 as f32 / 255.0, None)),
+    }
+}
+
 /// Split `text` into lines that each fit within `max_width` mm.
 /// Returns owned strings to avoid borrow conflicts.
 fn wrap_text_to_lines(text: &str, max_width: f32, font_size: f32) -> Vec<String> {
@@ -241,6 +257,46 @@ impl PdfContext {
             w += if is_latin || ch.is_ascii() { size * 0.55 } else { size };
         }
         w * 0.3528
+    }
+
+    /// Draw text with a colored highlight rectangle behind it. The rectangle
+    /// sits at the baseline of the text and extends slightly above and below
+    /// so the text reads clearly. Use `highlight_color_for(proficiency)` to
+    /// pick the right palette color.
+    pub fn draw_text_highlighted(
+        &mut self,
+        text: &str,
+        x_mm: f32,
+        y_mm: f32,
+        size: f32,
+        bg: Color,
+    ) -> f32 {
+        let w = self.measure_text_width(text, size);
+        if w <= 0.0 {
+            return 0.0;
+        }
+        // Slight padding around the text so the highlight band looks natural.
+        let pad_x = 0.6;
+        let pad_y = size * 0.18;
+        let rect_w = w + pad_x * 2.0;
+        let rect_h = size * 0.3528 + pad_y * 2.0;
+        // y_mm is bottom-based; rectangle top edge is up by `rect_h`.
+        let bottom = y_mm - pad_y;
+        let mm_to_pt = 2.8346;
+        self.current_ops.push(Op::SetFillColor { col: bg });
+        self.current_ops.push(Op::DrawRectangle {
+            rectangle: Rect {
+                x: Pt((x_mm - pad_x) * mm_to_pt),
+                y: Pt((bottom - rect_h) * mm_to_pt),
+                width: Pt(rect_w * mm_to_pt),
+                height: Pt(rect_h * mm_to_pt),
+                mode: Some(PaintMode::Fill),
+                winding_order: None,
+            },
+        });
+        // Draw the text itself on top (default color).
+        self.draw_text(text, x_mm, y_mm, size);
+        w
     }
 
     pub fn measure_text_width(&self, text: &str, font_size: f32) -> f32 {

@@ -39,14 +39,15 @@
       </div>
     </div>
 
-    <!-- Proficiency tabs -->
+    <!-- Proficiency filter (multi-select: only show checked categories) -->
     <div class="filter-tabs">
-      <el-radio-group v-model="proficiencyFilter" size="small">
-        <el-radio-button value="all">全部</el-radio-button>
-        <el-radio-button value="unknown">生疏</el-radio-button>
-        <el-radio-button value="familiar">熟悉</el-radio-button>
-        <el-radio-button value="mastered">已掌握</el-radio-button>
-      </el-radio-group>
+      <el-checkbox-group v-model="proficiencyFilter" size="small">
+        <el-checkbox-button value="unknown">生疏</el-checkbox-button>
+        <el-checkbox-button value="familiar">熟悉</el-checkbox-button>
+        <el-checkbox-button value="mastered">已掌握</el-checkbox-button>
+        <el-button size="small" link @click="proficiencyFilter = ['unknown','familiar','mastered']">全选</el-button>
+        <el-button size="small" link @click="proficiencyFilter = ['unknown','familiar']">只看薄弱</el-button>
+      </el-checkbox-group>
     </div>
 
     <!-- Word table -->
@@ -119,7 +120,10 @@ const bookStore = useVocabBookStore()
 const bookId = computed(() => Number(route.params.id))
 
 const searchQuery = ref('')
-const proficiencyFilter = ref<'all' | 'unknown' | 'familiar' | 'mastered'>('all')
+const proficiencyFilter = ref<('unknown' | 'familiar' | 'mastered')[]>([
+  'unknown',
+  'familiar',
+])
 const dialogVisible = ref(false)
 const editingWord = ref<VocabWord | null>(null)
 const selectedRows = ref<VocabWord[]>([])
@@ -130,9 +134,11 @@ const book = computed(() =>
 
 const filteredWords = computed(() => {
   let list = store.words
-  // filter by proficiency
-  if (proficiencyFilter.value !== 'all') {
-    list = list.filter((w) => w.proficiency === proficiencyFilter.value)
+  // filter by proficiency (multi-select: only show checked)
+  if (proficiencyFilter.value.length > 0) {
+    list = list.filter((w) =>
+      proficiencyFilter.value.includes(w.proficiency as 'unknown' | 'familiar' | 'mastered'),
+    )
   }
   // filter by search query
   const q = searchQuery.value.trim().toLowerCase()
@@ -155,10 +161,10 @@ onMounted(async () => {
   store.fetchAll(bookId.value)
 })
 
-function proficiencyType(p: string): 'info' | 'warning' | 'success' {
+function proficiencyType(p: string): 'danger' | 'warning' | 'success' {
   if (p === 'mastered') return 'success'
   if (p === 'familiar') return 'warning'
-  return 'info'
+  return 'danger'
 }
 
 function proficiencyLabel(p: string): string {
