@@ -34,9 +34,18 @@ pub fn highlight_color_for(proficiency: &str) -> Color {
 
 /// Text colors for the intensive reading template.
 /// `Rgb::new` is not a const fn, so these are exposed as helper functions.
+/// NOTE: When changing these, mirror the change in `src/utils/proficiencyColors.ts::PROFICIENCY_TEXT`.
 #[inline]
 pub fn text_red() -> Color {
     Color::Rgb(Rgb::new(0xCC as f32 / 255.0, 0x00 as f32 / 255.0, 0x00 as f32 / 255.0, None))
+}
+#[inline]
+pub fn text_orange() -> Color {
+    Color::Rgb(Rgb::new(0xE6 as f32 / 255.0, 0x7E as f32 / 255.0, 0x22 as f32 / 255.0, None))
+}
+#[inline]
+pub fn text_gray_color() -> Color {
+    Color::Rgb(Rgb::new(0x66 as f32 / 255.0, 0x66 as f32 / 255.0, 0x66 as f32 / 255.0, None))
 }
 #[inline]
 pub fn text_purple() -> Color {
@@ -49,6 +58,19 @@ pub fn text_black() -> Color {
 #[inline]
 pub fn text_gray() -> Color {
     Color::Greyscale(Greyscale { percent: 40.0, icc_profile: None })
+}
+
+/// Return the text color for a given proficiency level (intensive reading).
+/// - unknown → red (needs study)
+/// - familiar → orange (familiar but needs reinforcement)
+/// - mastered → gray (already mastered, low priority)
+#[inline]
+pub fn text_color_for_proficiency(proficiency: &str) -> Color {
+    match proficiency {
+        "familiar" => text_orange(),
+        "mastered" => text_gray_color(),
+        _ => text_red(), // unknown or any other value → red
+    }
 }
 
 /// Split `text` into lines that each fit within `max_width` mm.

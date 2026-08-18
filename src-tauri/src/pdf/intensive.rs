@@ -1,10 +1,10 @@
 //! Intensive reading template: two-pass learning structure.
-//! Step 1: English word (red) + Chinese definition (purple) inline after the
+//! Step 1: English word (by proficiency color) + Chinese definition (purple) inline after the
 //!         matched Chinese term is replaced.
 //! Step 2: Same content but the definition area is a blank bracket pair so
 //!         learners can recall the meaning from context.
 use super::matcher::{find_matches_in_line, words_found_in_text};
-use super::{text_black, text_gray, text_purple, text_red, PdfContext};
+use super::{text_black, text_gray, text_purple, text_red, text_color_for_proficiency, PdfContext};
 use crate::models::novel::Chapter;
 use crate::models::vocab_word::VocabWord;
 use printpdf::Color;
@@ -103,7 +103,7 @@ fn draw_step1_header(ctx: &mut PdfContext) {
     let title = "Step 1：在语境中背单词";
     ctx.draw_text_colored(title, ctx.margins.left, ctx.current_y, ctx.font_size + 1.0, text_black());
     ctx.current_y -= ctx.line_height * 0.8;
-    let desc = "请仔细阅读下文，注意红色单词及其对应的中文释义。";
+    let desc = "请仔细阅读下文，注意英文单词及其对应的中文释义。红色=生疏，橙色=熟悉，灰色=已掌握。";
     ctx.draw_text_colored(desc, ctx.margins.left, ctx.current_y, ctx.small_font_size, text_gray());
     ctx.current_y -= ctx.line_height * 1.3;
 }
@@ -128,7 +128,7 @@ fn draw_step2_header(ctx: &mut PdfContext) {
     let title = "Step 2：看单词回忆词义";
     ctx.draw_text_colored(title, ctx.margins.left, ctx.current_y, ctx.font_size + 1.0, text_black());
     ctx.current_y -= ctx.line_height * 0.8;
-    let desc = "请再次阅读下文，尝试回忆红色单词对应的中文意思。";
+    let desc = "请再次阅读下文，尝试回忆英文单词对应的中文意思。";
     ctx.draw_text_colored(desc, ctx.margins.left, ctx.current_y, ctx.small_font_size, text_gray());
     ctx.current_y -= ctx.line_height * 1.3;
 }
@@ -171,9 +171,9 @@ fn render_annotated_paragraph_step1(ctx: &mut PdfContext, line: &str, vocabs: &[
         }
         // Skip the original Chinese term — it's replaced by English + definition.
 
-        // English word (red)
+        // English word (by proficiency)
         let en = &m.word.word;
-        draw_segment(ctx, &mut x, max_x, en, text_red());
+        draw_segment(ctx, &mut x, max_x, en, text_color_for_proficiency(&m.word.proficiency));
 
         // Full-width left paren (black)
         draw_segment(ctx, &mut x, max_x, "（", text_black());
@@ -214,9 +214,9 @@ fn render_annotated_paragraph_step2(ctx: &mut PdfContext, line: &str, vocabs: &[
         }
         // Skip the original Chinese term.
 
-        // English word (red)
+        // English word (by proficiency)
         let en = &m.word.word;
-        draw_segment(ctx, &mut x, max_x, en, text_red());
+        draw_segment(ctx, &mut x, max_x, en, text_color_for_proficiency(&m.word.proficiency));
 
         // Blank full-width parens: estimate width from definition length
         let def_len = if m.word.definition.is_empty() {

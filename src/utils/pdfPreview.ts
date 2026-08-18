@@ -12,7 +12,7 @@
 import type { Chapter } from '@/types/novel'
 import type { VocabWord } from '@/types/vocabWord'
 import type { PdfTemplate } from '@/types/pdf'
-import { highlightFor } from './proficiencyColors'
+import { highlightFor, textColorFor } from './proficiencyColors'
 import { looksLikeHtml } from './editorHtml'
 
 /* ------------------------------------------------------------------ *
@@ -114,7 +114,7 @@ export function splitParagraphs(content: string): string[] {
 }
 
 /**
- * Step 1 paragraph: matched Chinese → English (red) + （definition purple）.
+ * Step 1 paragraph: matched Chinese → English (by proficiency) + （definition purple）.
  * The original Chinese term is dropped and replaced.
  */
 function renderParagraphStep1(para: string, words: VocabWord[]): string {
@@ -129,8 +129,9 @@ function renderParagraphStep1(para: string, words: VocabWord[]): string {
     // Skip the original matched Chinese term (m.start..m.end). Replace it:
     const en = escapeHtml(m.word.word)
     const def = escapeHtml(m.word.definition || '—')
+    const enColor = textColorFor(m.word.proficiency)
     out.push(
-      `<span class="vocab-en">${en}</span><span class="vocab-paren">（</span><span class="vocab-def">${def}</span><span class="vocab-paren">）</span>`,
+      `<span class="vocab-en" style="color:${enColor}">${en}</span><span class="vocab-paren">（</span><span class="vocab-def">${def}</span><span class="vocab-paren">）</span>`,
     )
     last = m.end
   }
@@ -139,7 +140,7 @@ function renderParagraphStep1(para: string, words: VocabWord[]): string {
 }
 
 /**
- * Step 2 paragraph: matched Chinese → English (red) + （blank bracket）.
+ * Step 2 paragraph: matched Chinese → English (by proficiency) + （blank bracket）.
  */
 function renderParagraphStep2(para: string, words: VocabWord[]): string {
   const matches = findMatchesInLine(para, words)
@@ -153,8 +154,9 @@ function renderParagraphStep2(para: string, words: VocabWord[]): string {
     const en = escapeHtml(m.word.word)
     const defLen = Math.max((m.word.definition || '').length, 4)
     const blank = Array(defLen + 1).join('\u3000') // ideographic space
+    const enColor = textColorFor(m.word.proficiency)
     out.push(
-      `<span class="vocab-en">${en}</span><span class="vocab-blank">（${blank}）</span>`,
+      `<span class="vocab-en" style="color:${enColor}">${en}</span><span class="vocab-blank">（${blank}）</span>`,
     )
     last = m.end
   }
@@ -268,7 +270,7 @@ function buildIntensive(
 
     // Step 1
     parts.push(`<div class="step-title">Step 1：在语境中背单词</div>`)
-    parts.push(`<div class="step-desc">请仔细阅读下文，注意红色单词及其对应的中文释义。</div>`)
+    parts.push(`<div class="step-desc">请仔细阅读下文，注意英文单词及其对应的中文释义。红色=生疏，橙色=熟悉，灰色=已掌握。</div>`)
     for (const para of splitParagraphs(body)) {
       parts.push(`<p>${renderParagraphStep1(para, words)}</p>`)
     }
@@ -276,7 +278,7 @@ function buildIntensive(
 
     // Step 2
     parts.push(`<div class="step-title">Step 2：看单词回忆词义</div>`)
-    parts.push(`<div class="step-desc">请再次阅读下文，尝试回忆红色单词对应的中文意思。</div>`)
+    parts.push(`<div class="step-desc">请再次阅读下文，尝试回忆英文单词对应的中文意思。</div>`)
     for (const para of splitParagraphs(body)) {
       parts.push(`<p>${renderParagraphStep2(para, words)}</p>`)
     }
@@ -297,9 +299,9 @@ function buildSidebar(
       const found = wordsFoundInText(para, words)
       const wordList = found.length > 0
         ? found.map((w) => {
-            const c = highlightFor(w.proficiency)
-            return `<div class="sw"><span class="vocab-word" style="background:${c.bg};color:${c.text};border-radius:3px;padding:0 3px;">${escapeHtml(w.word)}</span> ${escapeHtml(w.definition || '')}</div>`
-          }).join('')
+          const c = highlightFor(w.proficiency)
+          return `<div class="sw"><span class="vocab-word" style="background:${c.bg};color:${c.text};border-radius:3px;padding:0 3px;">${escapeHtml(w.word)}</span> ${escapeHtml(w.definition || '')}</div>`
+        }).join('')
         : '<span style="color:#ccc">—</span>'
       parts.push(
         `<div class="sidebar-row"><div class="sidebar-body"><p>${escapeHtml(para)}</p></div><div class="sidebar-words">${wordList}</div></div>`,
@@ -322,9 +324,9 @@ function buildRecitation(
       const found = wordsFoundInText(para, words)
       const wordList = found.length > 0
         ? found.map((w) => {
-            const c = highlightFor(w.proficiency)
-            return `<div class="sw"><span class="vocab-word" style="background:${c.bg};color:${c.text};border-radius:3px;padding:0 3px;">${escapeHtml(w.word)} ${escapeHtml(w.definition || '')}</span></div>`
-          }).join('')
+          const c = highlightFor(w.proficiency)
+          return `<div class="sw"><span class="vocab-word" style="background:${c.bg};color:${c.text};border-radius:3px;padding:0 3px;">${escapeHtml(w.word)} ${escapeHtml(w.definition || '')}</span></div>`
+        }).join('')
         : '<span style="color:#ccc">—</span>'
       parts.push(
         `<div class="sidebar-row"><div class="sidebar-body"><p>${escapeHtml(para)}</p></div><div class="sidebar-words">${wordList}</div></div>`,
@@ -374,9 +376,8 @@ function buildDictation(
     const answers = unique
       .map((w) => {
         const c = highlightFor(w.proficiency)
-        return `<span class="dict-answer"><span class="vocab-word" style="background:${c.bg};color:${c.text};border-radius:3px;padding:0 3px;">${escapeHtml(w.word)}</span> ${
-          w.phonetic ? `/${escapeHtml(w.phonetic)}/ ` : ''
-        }${escapeHtml(w.definition || '—')}</span>`
+        return `<span class="dict-answer"><span class="vocab-word" style="background:${c.bg};color:${c.text};border-radius:3px;padding:0 3px;">${escapeHtml(w.word)}</span> ${w.phonetic ? `/${escapeHtml(w.phonetic)}/ ` : ''
+          }${escapeHtml(w.definition || '—')}</span>`
       })
       .join(' · ')
     parts.push(

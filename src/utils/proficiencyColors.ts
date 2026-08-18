@@ -16,15 +16,30 @@ export interface ProficiencyColor {
 }
 
 export const PROFICIENCY_HIGHLIGHT: Record<Proficiency, ProficiencyColor> = {
-  unknown:  { bg: '#f9c7c7', text: '#222222' }, // 浅红
+  unknown: { bg: '#f9c7c7', text: '#222222' }, // 浅红
   familiar: { bg: '#fceba6', text: '#222222' }, // 浅黄
   mastered: { bg: '#c7ebc7', text: '#222222' }, // 浅绿
 }
 
-/** Return the color for an arbitrary proficiency string, defaulting to unknown. */
+/** Text color for intensive reading mode (inline annotations). */
+export const PROFICIENCY_TEXT: Record<Proficiency, string> = {
+  unknown: '#CC0000', // 红色 — 生疏，需重点学习
+  familiar: '#E67E22', // 橙色 — 熟悉，次重点
+  mastered: '#666666', // 灰色 — 已掌握，可略过
+}
+
+/** Return the highlight color for an arbitrary proficiency string. */
 export function highlightFor(proficiency: string | undefined): ProficiencyColor {
   if (proficiency === 'mastered' || proficiency === 'familiar') {
     return PROFICIENCY_HIGHLIGHT[proficiency]
   }
   return PROFICIENCY_HIGHLIGHT.unknown
+}
+
+/** Return the text color for intensive reading annotations. */
+export function textColorFor(proficiency: string | undefined): string {
+  if (proficiency === 'mastered' || proficiency === 'familiar') {
+    return PROFICIENCY_TEXT[proficiency]
+  }
+  return PROFICIENCY_TEXT.unknown
 }
