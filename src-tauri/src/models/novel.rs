@@ -17,9 +17,13 @@ pub struct Novel {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Chapter {
+    pub id: i64,
+    pub novel_id: i64,
     pub title: String,
     pub content: String,
+    pub sort_order: i32,
     pub start_index: usize,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

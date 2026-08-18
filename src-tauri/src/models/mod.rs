@@ -4,7 +4,7 @@ pub mod settings;
 pub mod vocab_book;
 pub mod vocab_word;
 
-pub use novel::Novel;
+pub use novel::{Chapter, Novel};
 pub use pdf_template::PdfTemplate;
 pub use settings::AppSetting;
 pub use vocab_book::VocabBook;

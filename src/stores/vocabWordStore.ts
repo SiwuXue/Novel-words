@@ -59,6 +59,14 @@ export const useVocabWordStore = defineStore('vocabWord', () => {
     words.value = words.value.filter((w) => w.id !== id)
   }
 
+  async function removeMany(ids: number[]) {
+    if (ids.length === 0) return 0
+    const count = await invoke<number>('delete_vocab_words', { ids })
+    const idSet = new Set(ids)
+    words.value = words.value.filter((w) => !idSet.has(w.id))
+    return count
+  }
+
   async function search(bookId: number, query: string) {
     loading.value = true
     try {
@@ -73,5 +81,5 @@ export const useVocabWordStore = defineStore('vocabWord', () => {
     }
   }
 
-  return { words, loading, fetchAll, create, update, remove, search }
+  return { words, loading, fetchAll, create, update, remove, removeMany, search }
 })

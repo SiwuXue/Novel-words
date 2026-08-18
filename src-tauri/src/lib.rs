@@ -14,11 +14,16 @@ use commands::vocab_book::{
     create_vocab_book, delete_vocab_book, get_all_vocab_books, update_vocab_book,
 };
 use commands::vocab_word::{
-    create_vocab_word, delete_vocab_word, export_vocab_words_csv, get_highlight_words,
-    get_vocab_words, import_vocab_words_csv, search_vocab_words, update_vocab_word,
+    create_vocab_word, delete_vocab_word, delete_vocab_words, export_vocab_words_csv,
+    get_highlight_words, get_vocab_words, import_vocab_words_csv, search_vocab_words,
+    update_vocab_word,
 };
 use commands::pdf_template::{
-    create_pdf_template, delete_pdf_template, get_all_pdf_templates, update_pdf_template,
+    create_pdf_template, delete_pdf_template, get_all_pdf_templates, get_builtin_templates,
+    update_pdf_template,
+};
+use commands::chapter::{
+    delete_chapters_by_novel, get_chapters, save_chapters, update_chapter_title,
 };
 use commands::pdf_export::export_pdf;
 use commands::settings::{get_all_settings, get_setting, set_setting};
@@ -58,6 +63,7 @@ pub fn run() {
             get_vocab_words,
             update_vocab_word,
             delete_vocab_word,
+            delete_vocab_words,
             search_vocab_words,
             get_highlight_words,
             export_vocab_words_csv,
@@ -66,6 +72,11 @@ pub fn run() {
             get_all_pdf_templates,
             update_pdf_template,
             delete_pdf_template,
+            get_builtin_templates,
+            save_chapters,
+            get_chapters,
+            update_chapter_title,
+            delete_chapters_by_novel,
             export_pdf,
             get_setting,
             set_setting,

@@ -45,9 +45,13 @@ pub fn detect_chapters(text: &str) -> Vec<Chapter> {
                 let content = text[last_pos..line_start].trim().to_string();
                 if !content.is_empty() {
                     chapters.push(Chapter {
+                        id: 0,
+                        novel_id: 0,
                         title: std::mem::take(&mut last_title),
                         content,
+                        sort_order: chapters.len() as i32,
                         start_index: last_pos,
+                        created_at: String::new(),
                     });
                 }
             } else {
@@ -66,18 +70,26 @@ pub fn detect_chapters(text: &str) -> Vec<Chapter> {
         let content = text[last_pos..].trim().to_string();
         if !content.is_empty() || !last_title.is_empty() {
             chapters.push(Chapter {
+                id: 0,
+                novel_id: 0,
                 title: last_title,
                 content,
+                sort_order: chapters.len() as i32,
                 start_index: last_pos,
+                created_at: String::new(),
             });
         }
     } else {
         // No chapters detected — treat the whole text as one chapter
         if !text.trim().is_empty() {
             chapters.push(Chapter {
+                id: 0,
+                novel_id: 0,
                 title: "全文".to_string(),
                 content: text.trim().to_string(),
+                sort_order: 0,
                 start_index: 0,
+                created_at: String::new(),
             });
         }
     }

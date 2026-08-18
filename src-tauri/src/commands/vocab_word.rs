@@ -16,9 +16,19 @@ pub fn create_vocab_word(
     memory_tag: String,
 ) -> Result<VocabWord, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
+
+    // Reject duplicates within the same book (case-insensitive on trimmed word)
+    let exists: bool = db
+        .prepare("SELECT COUNT(*) > 0 FROM vocab_word WHERE vocab_book_id = ?1 AND word = ?2")
+        .and_then(|mut s| s.query_row(rusqlite::params![vocab_book_id, word.trim()], |r| r.get(0)))
+        .unwrap_or(false);
+    if exists {
+        return Err(format!("单词「{}」已存在", word.trim()));
+    }
+
     db.execute(
         "INSERT INTO vocab_word (vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        rusqlite::params![vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag],
+        rusqlite::params![vocab_book_id, word.trim(), definition, phonetic, example_sentence, novel_id, proficiency, memory_tag],
     )
     .map_err(|e| format!("创建单词失败: {}", e))?;
 
@@ -81,6 +91,28 @@ pub fn delete_vocab_word(state: State<DbState>, id: i64) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn delete_vocab_words(state: State<DbState>, ids: Vec<i64>) -> Result<u32, String> {
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let mut db = state.db.lock().map_err(|e| e.to_string())?;
+    let tx = db.transaction().map_err(|e| e.to_string())?;
+    let mut count: u32 = 0;
+    {
+        let mut stmt = tx
+            .prepare("DELETE FROM vocab_word WHERE id = ?1")
+            .map_err(|e| e.to_string())?;
+        for id in &ids {
+            count += stmt
+                .execute(rusqlite::params![id])
+                .map_err(|e| format!("批量删除失败: {}", e))? as u32;
+        }
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(count)
+}
+
+#[tauri::command]
 pub fn search_vocab_words(
     state: State<DbState>,
     vocab_book_id: i64,
@@ -121,6 +153,7 @@ fn row_to_vocab_word(row: &rusqlite::Row) -> rusqlite::Result<VocabWord> {
         phonetic: row.get(4)?,
         example_sentence: row.get(5)?,
         novel_id: row.get(6)?,
+        chapter_id: None,
         proficiency: row.get(7)?,
         memory_tag: row.get(8)?,
         created_at: row.get(9)?,
@@ -203,17 +236,25 @@ pub fn export_vocab_words_csv(
     Ok(())
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportResult {
+    pub imported: u32,
+    pub skipped: u32,
+}
+
 #[tauri::command]
 pub fn import_vocab_words_csv(
     state: State<DbState>,
     vocab_book_id: i64,
     file_path: String,
-) -> Result<u32, String> {
+) -> Result<ImportResult, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let mut rdr =
         csv::Reader::from_path(&file_path).map_err(|e| format!("无法打开文件: {}", e))?;
 
-    let mut count: u32 = 0;
+    let mut imported: u32 = 0;
+    let mut skipped: u32 = 0;
 
     for result in rdr.records() {
         let record = result.map_err(|e| format!("CSV 解析失败: {}", e))?;
@@ -234,14 +275,22 @@ pub fn import_vocab_words_csv(
             _ => "unknown",
         };
 
-        db.execute(
-            "INSERT INTO vocab_word (vocab_book_id, word, definition, phonetic, example_sentence, proficiency, memory_tag) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            rusqlite::params![vocab_book_id, word, definition, phonetic, example_sentence, proficiency, memory_tag],
-        )
-        .map_err(|e| format!("导入单词 '{}' 失败: {}", word, e))?;
+        // INSERT OR IGNORE relies on the unique (vocab_book_id, word) index to
+        // silently skip duplicates (both against existing rows and earlier rows
+        // in the same file).
+        let n = db
+            .execute(
+                "INSERT OR IGNORE INTO vocab_word (vocab_book_id, word, definition, phonetic, example_sentence, proficiency, memory_tag) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![vocab_book_id, word, definition, phonetic, example_sentence, proficiency, memory_tag],
+            )
+            .map_err(|e| format!("导入单词 '{}' 失败: {}", word, e))?;
 
-        count += 1;
+        if n > 0 {
+            imported += 1;
+        } else {
+            skipped += 1;
+        }
     }
 
-    Ok(count)
+    Ok(ImportResult { imported, skipped })
 }

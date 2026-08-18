@@ -42,6 +42,61 @@ pub fn init_db(app_data_dir: &PathBuf) -> Result<DbState, String> {
         }
     }
 
+    // Migration: add chapter_id to vocab_word
+    {
+        let has_col: bool = conn
+            .prepare("SELECT COUNT(*) > 0 FROM pragma_table_info('vocab_word') WHERE name = 'chapter_id'")
+            .and_then(|mut s| s.query_row([], |r| r.get(0)))
+            .unwrap_or(false);
+        if !has_col {
+            conn.execute_batch(
+                "ALTER TABLE vocab_word ADD COLUMN chapter_id INTEGER;",
+            )
+            .map_err(|e| format!("迁移 vocab_word.chapter_id 失败: {}", e))?;
+        }
+    }
+
+    // Migration: add template_type + is_builtin to pdf_template
+    {
+        let has_col: bool = conn
+            .prepare("SELECT COUNT(*) > 0 FROM pragma_table_info('pdf_template') WHERE name = 'template_type'")
+            .and_then(|mut s| s.query_row([], |r| r.get(0)))
+            .unwrap_or(false);
+        if !has_col {
+            conn.execute_batch(
+                "ALTER TABLE pdf_template ADD COLUMN template_type TEXT NOT NULL DEFAULT 'appendix';
+                 ALTER TABLE pdf_template ADD COLUMN is_builtin INTEGER NOT NULL DEFAULT 0;",
+            )
+            .map_err(|e| format!("迁移 pdf_template.template_type 失败: {}", e))?;
+            // Migrate existing annotation_mode values to template_type
+            conn.execute_batch(
+                "UPDATE pdf_template SET template_type = 'intensive' WHERE annotation_mode = 'inline';
+                 UPDATE pdf_template SET template_type = 'sidebar' WHERE annotation_mode = 'sidebar';
+                 UPDATE pdf_template SET template_type = 'appendix' WHERE annotation_mode = 'none';",
+            )
+            .map_err(|e| format!("迁移 template_type 值失败: {}", e))?;
+        }
+    }
+
+    // Migration: enforce unique (vocab_book_id, word) — dedup existing rows first,
+    // keeping the earliest id, then create a unique index.
+    {
+        let has_index: bool = conn
+            .prepare("SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='index' AND name='idx_vocab_word_unique'")
+            .and_then(|mut s| s.query_row([], |r| r.get(0)))
+            .unwrap_or(false);
+        if !has_index {
+            conn.execute_batch(
+                "DELETE FROM vocab_word
+                 WHERE id NOT IN (
+                     SELECT MIN(id) FROM vocab_word GROUP BY vocab_book_id, word
+                 );
+                 CREATE UNIQUE INDEX idx_vocab_word_unique ON vocab_word (vocab_book_id, word);",
+            )
+            .map_err(|e| format!("迁移 vocab_word 唯一索引失败: {}", e))?;
+        }
+    }
+
     Ok(DbState {
         db: Mutex::new(conn),
     })
@@ -99,6 +154,17 @@ CREATE TABLE IF NOT EXISTS pdf_template (
     created_at      TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
     updated_at      TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
+
+CREATE TABLE IF NOT EXISTS chapter (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    novel_id   INTEGER NOT NULL,
+    title      TEXT    NOT NULL DEFAULT '',
+    content    TEXT    NOT NULL DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (novel_id) REFERENCES novel(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_chapter_novel ON chapter(novel_id);
 
 CREATE TABLE IF NOT EXISTS app_settings (
     key   TEXT PRIMARY KEY,

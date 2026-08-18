@@ -128,7 +128,6 @@
           <el-select v-model="form.annotationMode" style="width:100%">
             <el-option label="行内标注 — 生词后附释义" value="inline" />
             <el-option label="侧边栏 — 释义显示在侧边" value="sidebar" />
-            <el-option label="文末附录 — 文末生成词汇表" value="appendix" />
             <el-option label="无注释 — 仅原文" value="none" />
           </el-select>
         </el-form-item>
@@ -151,7 +150,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { usePdfTemplateStore } from '@/stores/pdfTemplateStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
-import type { PdfTemplate } from '@/types/pdf'
+import type { PdfTemplate, PdfTemplateFormData } from '@/types/pdf'
 import { open } from '@tauri-apps/plugin-dialog'
 
 const templateStore = usePdfTemplateStore()
@@ -173,7 +172,9 @@ const form = reactive({
   fontFamily: 'SimSun',
   fontSize: 14,
   lineSpacing: 1.5,
-  annotationMode: 'appendix' as 'inline' | 'sidebar' | 'appendix' | 'none',
+  annotationMode: 'inline' as 'inline' | 'sidebar' | 'none',
+  templateType: 'intensive' as PdfTemplateFormData['templateType'],
+  isBuiltin: false,
   margins: JSON.stringify({ top: 25, bottom: 25, left: 20, right: 20 }),
 })
 
@@ -185,7 +186,6 @@ function annotationModeLabel(mode: string): string {
   switch (mode) {
     case 'inline': return '行内标注'
     case 'sidebar': return '侧边栏'
-    case 'appendix': return '文末附录'
     case 'none': return '无注释'
     default: return mode
   }
@@ -199,7 +199,9 @@ function showCreate() {
   form.fontFamily = 'SimSun'
   form.fontSize = 14
   form.lineSpacing = 1.5
-  form.annotationMode = 'appendix'
+  form.annotationMode = 'inline'
+  form.templateType = 'intensive'
+  form.isBuiltin = false
   form.margins = defaultMargins
   dialogVisible.value = true
 }
@@ -212,7 +214,9 @@ function editTemplate(tpl: PdfTemplate) {
   form.fontFamily = tpl.fontFamily
   form.fontSize = tpl.fontSize
   form.lineSpacing = tpl.lineSpacing
-  form.annotationMode = tpl.annotationMode
+  form.annotationMode = tpl.annotationMode as 'inline' | 'sidebar' | 'none'
+  form.templateType = tpl.templateType as PdfTemplateFormData['templateType']
+  form.isBuiltin = tpl.isBuiltin || false
   form.margins = tpl.margins
   dialogVisible.value = true
 }
@@ -233,6 +237,8 @@ async function handleSubmit() {
         lineSpacing: form.lineSpacing,
         margins: form.margins,
         annotationMode: form.annotationMode,
+        templateType: form.templateType,
+        isBuiltin: form.isBuiltin,
       })
       ElMessage.success('模板已更新')
     } else {
@@ -244,6 +250,8 @@ async function handleSubmit() {
         lineSpacing: form.lineSpacing,
         margins: form.margins,
         annotationMode: form.annotationMode,
+        templateType: form.templateType,
+        isBuiltin: form.isBuiltin,
       })
       ElMessage.success('模板已创建')
     }

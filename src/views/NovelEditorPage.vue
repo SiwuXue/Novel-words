@@ -9,6 +9,20 @@
         <el-icon v-if="editorStore.saving" class="is-loading"><Loading /></el-icon>
         <template v-else>{{ editorStore.isDirty ? '未保存' : '已保存' }}</template>
       </span>
+      <el-select
+        v-if="loadState === 'loaded'"
+        v-model="selectedTemplateType"
+        size="small"
+        style="width: 110px"
+        @change="onTemplateChange"
+      >
+        <el-option
+          v-for="t in pdfTemplateStore.builtinTemplates"
+          :key="t.id"
+          :label="t.name"
+          :value="t.templateType"
+        />
+      </el-select>
       <el-button
         v-if="loadState === 'loaded'"
         size="small"
@@ -18,23 +32,59 @@
       </el-button>
     </div>
 
-    <!-- Loaded: three-column body -->
+    <!-- Loaded: three-column body with draggable splitters -->
     <div class="editor-body" v-if="loadState === 'loaded'">
-      <ChapterList
-        :chapters="editorStore.chapterList"
-        :active-index="editorStore.activeChapterIndex"
-        @select="scrollToChapter"
-      />
-      <NovelEditor
-        ref="editorRef"
-        :novel-id="currentNovelId"
-        :content="editorContent"
-        :highlight-words="highlightWords"
-        :highlight-book-id="highlightBookId"
-        @update:content="onEditorContentChange"
-        @update:highlight-book-id="highlightBookId = $event"
-      />
-      <PreviewPanel ref="previewRef" :html="previewHtml" />
+      <div
+        class="editor-pane left-pane"
+        :style="{ width: split.state.leftWidth + 'px' }"
+        v-show="split.state.leftWidth > 0"
+      >
+        <ChapterList
+          :chapters="editorStore.chapterList"
+          :active-index="editorStore.activeChapterIndex"
+          @select="scrollToChapter"
+        />
+      </div>
+      <div
+        class="split-divider"
+        :class="{ collapsed: split.state.leftWidth === 0 }"
+        @mousedown="split.startLeftDrag"
+        @dblclick="split.toggleLeft"
+        title="拖拽调整宽度 · 双击折叠/恢复"
+      >
+        <el-icon v-if="split.state.leftWidth === 0" class="divider-icon">
+          <component :is="DArrowRight" />
+        </el-icon>
+      </div>
+      <div class="editor-pane center-pane">
+        <NovelEditor
+          ref="editorRef"
+          :novel-id="currentNovelId"
+          :content="editorContent"
+          :highlight-words="highlightWords"
+          :highlight-book-id="highlightBookId"
+          @update:content="onEditorContentChange"
+          @update:highlight-book-id="highlightBookId = $event"
+        />
+      </div>
+      <div
+        class="split-divider"
+        :class="{ collapsed: split.state.rightWidth === 0 }"
+        @mousedown="split.startRightDrag"
+        @dblclick="split.toggleRight"
+        title="拖拽调整宽度 · 双击折叠/恢复"
+      >
+        <el-icon v-if="split.state.rightWidth === 0" class="divider-icon">
+          <component :is="DArrowLeft" />
+        </el-icon>
+      </div>
+      <div
+        class="editor-pane right-pane"
+        :style="{ width: split.state.rightWidth + 'px' }"
+        v-show="split.state.rightWidth > 0"
+      >
+        <PreviewPanel ref="previewRef" :html="previewHtml" />
+      </div>
     </div>
 
     <!-- Loading -->
@@ -54,34 +104,61 @@
     </div>
 
     <!-- PDF export dialog -->
-    <PdfExportDialog v-model="exportPdfDialogVisible" />
+    <PdfExportDialog
+      v-model="exportPdfDialogVisible"
+      :template-type="selectedTemplateType"
+      :vocab-book-id="highlightBookId"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
-import { ArrowLeft, Loading, Printer } from '@element-plus/icons-vue'
+import { ArrowLeft, Loading, Printer, DArrowLeft, DArrowRight } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
 import { useNovelStore } from '@/stores/novelStore'
 import { useEditorStore } from '@/stores/editorStore'
+import { usePdfTemplateStore } from '@/stores/pdfTemplateStore'
 import type { HighlightWord } from '@/types/vocabWord'
 import NovelEditor from '@/components/novel/NovelEditor.vue'
 import ChapterList from '@/components/novel/ChapterList.vue'
 import PreviewPanel from '@/components/novel/PreviewPanel.vue'
 import PdfExportDialog from '@/components/pdf/PdfExportDialog.vue'
+import { buildHtml as buildPreviewHtml } from '@/utils/pdfPreview'
+import { useSplitLayout } from '@/composables/useSplitLayout'
 
+const split = useSplitLayout({
+  left: 200,
+  right: 280,
+  min: 50,
+  max: 500,
+  storageKey: 'novel-editor-layout-v2',
+})
 const route = useRoute()
 const router = useRouter()
 const store = useNovelStore()
 const editorStore = useEditorStore()
+const pdfTemplateStore = usePdfTemplateStore()
 const editorRef = ref<InstanceType<typeof NovelEditor> | null>(null)
 const previewRef = ref<InstanceType<typeof PreviewPanel> | null>(null)
 
 const highlightBookId = ref<number | null>(null)
 const highlightWords = ref<HighlightWord[]>([])
 const exportPdfDialogVisible = ref(false)
+
+function loadTemplateType(): string {
+  try {
+    const raw = localStorage.getItem('novel-editor-template')
+    if (raw && ['intensive', 'sidebar', 'recitation', 'dictation'].includes(raw)) return raw
+  } catch {}
+  return 'intensive'
+}
+const selectedTemplateType = ref<string>(loadTemplateType())
+function onTemplateChange(v: string) {
+  try { localStorage.setItem('novel-editor-template', v) } catch {}
+}
 
 type LoadState = 'loading' | 'loaded' | 'error'
 const loadState = ref<LoadState>('loading')
@@ -119,9 +196,24 @@ const topbarTitle = computed(() => {
   return '加载中...'
 })
 
-const previewHtml = computed(
-  () => editorContent.value || store.currentNovel?.cleanedText || '<p>无内容</p>',
-)
+const previewHtml = computed(() => {
+  const content = editorContent.value || store.currentNovel?.cleanedText || ''
+  if (!content) return '<p>无内容</p>'
+  const chapterList = editorStore.chapterList
+  const chapters =
+    chapterList.length > 0
+      ? chapterList
+      : [{ id: 0, novelId: 0, title: '', content, sortOrder: 0, startIndex: 0, createdAt: '' }]
+  // HighlightWord is a subset of VocabWord (no chapter_id/novel_id); the
+  // preview renderer only reads .word/.definition/.phonetic/.proficiency
+  // so it's safe to pass through.
+  return buildPreviewHtml({
+    chapters,
+    words: highlightWords.value as any,
+    novelTitle: store.currentNovel?.title,
+    templateType: selectedTemplateType.value,
+  })
+})
 
 async function loadNovel() {
   loadStartedAt = Date.now()
@@ -159,7 +251,7 @@ async function loadNovel() {
     }
     const text = store.currentNovel.cleanedText || store.currentNovel.rawText || ''
     editorContentOverride.value = text
-    if (text) editorStore.loadChapters(text)
+    if (text) await editorStore.loadChapters(id, text)
     loadState.value = 'loaded'
     await nextTick()
   } catch (e: any) {
@@ -188,7 +280,10 @@ function retry() {
   loadNovel()
 }
 
-onMounted(() => {
+onMounted(async () => {
+  if (pdfTemplateStore.builtinTemplates.length === 0) {
+    await pdfTemplateStore.fetchBuiltin()
+  }
   loadNovel()
 })
 
@@ -286,17 +381,46 @@ async function scrollToChapter(index: number) {
   overflow: hidden;
   min-height: 0;
 }
-.editor-body > :deep(.chapter-list-panel) {
-  width: 200px;
+.editor-pane {
+  overflow: hidden;
   flex-shrink: 0;
 }
-.editor-body > :deep(.novel-editor-wrapper) {
-  flex: 1;
+.editor-pane.left-pane,
+.editor-pane.right-pane {
   min-width: 0;
 }
-.editor-body > :deep(.preview-panel) {
-  width: 280px;
+.editor-pane.center-pane {
+  flex: 1;
+  min-width: 200px;
+}
+
+/* Draggable divider between panels */
+.split-divider {
+  width: 6px;
   flex-shrink: 0;
+  cursor: col-resize;
+  background: var(--border-color, #e0e0e0);
+  transition: background 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+}
+.split-divider:hover,
+.split-divider:active {
+  background: var(--accent-color, #409eff);
+}
+.split-divider.collapsed {
+  width: 22px;
+  cursor: pointer;
+  background: var(--bg-secondary, #fafafa);
+}
+.split-divider.collapsed:hover {
+  background: var(--accent-light, #ecf5ff);
+}
+.divider-icon {
+  font-size: 14px;
+  color: var(--text-secondary, #909399);
 }
 .editor-state-block {
   flex: 1;

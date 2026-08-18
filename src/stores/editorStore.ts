@@ -1,7 +1,9 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import { useNovelStore } from './novelStore'
 import { detectChapters } from '@/utils/chapterDetector'
+import { looksLikeHtml } from '@/utils/editorHtml'
 import type { Chapter } from '@/types/novel'
 
 export const useEditorStore = defineStore('editor', () => {
@@ -15,10 +17,43 @@ export const useEditorStore = defineStore('editor', () => {
    *  instead of triggering a second concurrent write. */
   let inFlight: Promise<void> | null = null
 
-  /** Derive chapters client-side; avoids shipping the full text to Rust. */
-  function loadChapters(text: string) {
-    chapterList.value = detectChapters(text)
+  /** Load chapters from DB. Falls back to client-side detection if DB empty. */
+  async function loadChapters(novelId: number, text: string) {
+    // 1. Try DB first
+    try {
+      const dbChapters = await invoke<Chapter[]>('get_chapters', { novelId })
+      if (dbChapters.length > 0) {
+        chapterList.value = dbChapters
+        activeChapterIndex.value = 0
+        return
+      }
+    } catch (e) {
+      console.error('[editorStore] get_chapters failed:', e)
+    }
+
+    // 2. Fallback: client-side detection from plain text
+    // If text is HTML (from previous editor autosave), strip tags first
+    const plainText = looksLikeHtml(text) ? stripHtml(text) : text
+    chapterList.value = detectChapters(plainText)
     activeChapterIndex.value = 0
+  }
+
+  /** Strip HTML tags to recover plain text for chapter detection. */
+  function stripHtml(html: string): string {
+    return html
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/p>/gi, '\n\n')
+      .replace(/<\/h[1-6]>/gi, '\n\n')
+      .replace(/<\/li>/gi, '\n')
+      .replace(/<\/div>/gi, '\n')
+      .replace(/<[^>]*>/g, '')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
   }
 
   /** Auto-save with 3s debounce. If a previous autosave is still awaiting

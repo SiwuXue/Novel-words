@@ -128,4 +128,49 @@ defineExpose({ scrollToText })
   margin: 8px 0;
   color: var(--text-secondary);
 }
+
+/* PDF preview: highlighted vocab words and their inline sup annotations. */
+:deep(.preview-content .vocab-word) {
+  display: inline-block;
+  line-height: 1.4;
+}
+:deep(.preview-content .vocab-word sup) {
+  margin-left: 2px;
+  opacity: 0.85;
+}
+:deep(.preview-content .pdf-preview-body h1.title) {
+  font-size: 26px;
+  text-align: center;
+  margin: 24px 0 12px;
+  font-weight: 700;
+}
+:deep(.preview-content .pdf-preview-body h2.chapter) {
+  font-size: 20px;
+  margin: 20px 0 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #e0e0e0;
+  font-weight: 600;
+}
+:deep(.preview-content .pdf-preview-body .vocab-heading) {
+  font-size: 16px;
+  margin: 18px 0 6px;
+  font-weight: 600;
+  color: #555;
+}
+:deep(.preview-content .pdf-preview-body .vocab-table) {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin: 0 0 16px;
+}
+:deep(.preview-content .pdf-preview-body .vocab-table th),
+:deep(.preview-content .pdf-preview-body .vocab-table td) {
+  padding: 4px 8px;
+  border: 1px solid #ddd;
+  text-align: left;
+  vertical-align: top;
+}
+:deep(.preview-content .pdf-preview-body .vocab-table th) {
+  background: #f5f5f5;
+}
 </style>

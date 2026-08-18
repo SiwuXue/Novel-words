@@ -86,6 +86,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { invoke } from '@tauri-apps/api/core'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Plus, Star, StarFilled, FolderOpened } from '@element-plus/icons-vue'
 import { useNovelStore } from '@/stores/novelStore'
@@ -119,7 +120,6 @@ function showImportDialog() {
 }
 
 async function handleImportConfirm(result: ImportResult, _filePath: string) {
-  // Create novel from import result first, then close dialog on success
   try {
     const novel = await store.create({
       title: result.detectedTitle || '未命名小说',
@@ -128,6 +128,21 @@ async function handleImportConfirm(result: ImportResult, _filePath: string) {
       rawText: result.rawText,
       cleanedText: result.cleanedText,
     })
+    // Save chapters to DB
+    try {
+      const chapters = result.chapters.map((ch, i) => ({
+        id: 0,
+        novelId: novel.id,
+        title: ch.title,
+        content: ch.content || result.cleanedText.slice(ch.startIndex),
+        sortOrder: i,
+        startIndex: ch.startIndex,
+        createdAt: '',
+      }))
+      await invoke('save_chapters', { novelId: novel.id, chapters })
+    } catch (e) {
+      console.error('[NovelListPage] Failed to save chapters:', e)
+    }
     showImport.value = false
     if (novel) {
       router.push(`/novels/${novel.id}`)

@@ -23,6 +23,13 @@
         <el-button type="primary" @click="showCreateDialog">
           <el-icon><Plus /></el-icon> 添加单词
         </el-button>
+        <el-button
+          type="danger"
+          :disabled="selectedRows.length === 0"
+          @click="handleBatchDelete"
+        >
+          <el-icon><Delete /></el-icon> 批量删除{{ selectedRows.length ? ` (${selectedRows.length})` : '' }}
+        </el-button>
         <el-button @click="handleExportCsv" :disabled="store.words.length === 0">
           <el-icon><Download /></el-icon> 导出 CSV
         </el-button>
@@ -32,14 +39,15 @@
       </div>
     </div>
 
-    <!-- Proficiency tabs -->
+    <!-- Proficiency filter (multi-select: only show checked categories) -->
     <div class="filter-tabs">
-      <el-radio-group v-model="proficiencyFilter" size="small">
-        <el-radio-button value="all">全部</el-radio-button>
-        <el-radio-button value="unknown">生疏</el-radio-button>
-        <el-radio-button value="familiar">熟悉</el-radio-button>
-        <el-radio-button value="mastered">已掌握</el-radio-button>
-      </el-radio-group>
+      <el-checkbox-group v-model="proficiencyFilter" size="small">
+        <el-checkbox-button value="unknown">生疏</el-checkbox-button>
+        <el-checkbox-button value="familiar">熟悉</el-checkbox-button>
+        <el-checkbox-button value="mastered">已掌握</el-checkbox-button>
+        <el-button size="small" link @click="proficiencyFilter = ['unknown','familiar','mastered']">全选</el-button>
+        <el-button size="small" link @click="proficiencyFilter = ['unknown','familiar']">只看薄弱</el-button>
+      </el-checkbox-group>
     </div>
 
     <!-- Word table -->
@@ -49,7 +57,9 @@
       stripe
       style="width: 100%"
       empty-text="词汇本还没有单词，点击「添加单词」开始"
+      @selection-change="handleSelectionChange"
     >
+      <el-table-column type="selection" width="48" />
       <el-table-column prop="word" label="单词" min-width="120" />
       <el-table-column prop="phonetic" label="音标" width="140">
         <template #default="{ row }">
@@ -93,7 +103,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Search, Plus, Download, Upload } from '@element-plus/icons-vue'
+import { ArrowLeft, Search, Plus, Download, Upload, Delete } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
 import { save, open } from '@tauri-apps/plugin-dialog'
@@ -110,9 +120,13 @@ const bookStore = useVocabBookStore()
 const bookId = computed(() => Number(route.params.id))
 
 const searchQuery = ref('')
-const proficiencyFilter = ref<'all' | 'unknown' | 'familiar' | 'mastered'>('all')
+const proficiencyFilter = ref<('unknown' | 'familiar' | 'mastered')[]>([
+  'unknown',
+  'familiar',
+])
 const dialogVisible = ref(false)
 const editingWord = ref<VocabWord | null>(null)
+const selectedRows = ref<VocabWord[]>([])
 
 const book = computed(() =>
   bookStore.books.find((b) => b.id === bookId.value) || null,
@@ -120,9 +134,11 @@ const book = computed(() =>
 
 const filteredWords = computed(() => {
   let list = store.words
-  // filter by proficiency
-  if (proficiencyFilter.value !== 'all') {
-    list = list.filter((w) => w.proficiency === proficiencyFilter.value)
+  // filter by proficiency (multi-select: only show checked)
+  if (proficiencyFilter.value.length > 0) {
+    list = list.filter((w) =>
+      proficiencyFilter.value.includes(w.proficiency as 'unknown' | 'familiar' | 'mastered'),
+    )
   }
   // filter by search query
   const q = searchQuery.value.trim().toLowerCase()
@@ -145,10 +161,10 @@ onMounted(async () => {
   store.fetchAll(bookId.value)
 })
 
-function proficiencyType(p: string): 'info' | 'warning' | 'success' {
+function proficiencyType(p: string): 'danger' | 'warning' | 'success' {
   if (p === 'mastered') return 'success'
   if (p === 'familiar') return 'warning'
-  return 'info'
+  return 'danger'
 }
 
 function proficiencyLabel(p: string): string {
@@ -195,6 +211,27 @@ async function confirmDelete(word: VocabWord) {
   }
 }
 
+function handleSelectionChange(rows: VocabWord[]) {
+  selectedRows.value = rows
+}
+
+async function handleBatchDelete() {
+  const rows = selectedRows.value
+  if (rows.length === 0) return
+  try {
+    await ElMessageBox.confirm(
+      `确定删除选中的 ${rows.length} 个单词吗？`,
+      '批量删除',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' },
+    )
+    const count = await store.removeMany(rows.map((r) => r.id))
+    selectedRows.value = []
+    ElMessage.success(`已删除 ${count} 个单词`)
+  } catch {
+    // user cancelled
+  }
+}
+
 function goBack() {
   router.push('/vocabulary')
 }
@@ -225,11 +262,17 @@ async function handleImportCsv() {
     })
     if (!filePath) return // user cancelled
 
-    const count = await invoke<number>('import_vocab_words_csv', {
-      vocabBookId: bookId.value,
-      filePath,
-    })
-    ElMessage.success(`已导入 ${count} 个单词`)
+    const result = await invoke<{ imported: number; skipped: number }>(
+      'import_vocab_words_csv',
+      {
+        vocabBookId: bookId.value,
+        filePath,
+      },
+    )
+    const msg = result.skipped > 0
+      ? `已导入 ${result.imported} 个单词，跳过 ${result.skipped} 个重复`
+      : `已导入 ${result.imported} 个单词`
+    ElMessage.success(msg)
     await store.fetchAll(bookId.value)
   } catch (e: any) {
     ElMessage.error(String(e?.message || e || '导入失败'))
