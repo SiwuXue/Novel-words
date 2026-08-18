@@ -1,9 +1,6 @@
 mod font;
 mod matcher;
 mod intensive;
-mod sidebar;
-mod recitation;
-mod dictation;
 
 use printpdf::*;
 use std::fs::File;
@@ -14,22 +11,6 @@ fn measure_char_width(ch: char, font_size: f32) -> f32 {
     if ch == '…' { font_size * 0.3528 } // approx same as a CJK char
     else if ch.is_ascii() { font_size * 0.55 * 0.3528 }
     else { font_size * 0.3528 }
-}
-
-/// Highlight background color for a word's proficiency. Pastel tones so the
-/// text on top remains readable in black. These RGB values are kept in sync
-/// with `src/utils/proficiencyColors.ts` (frontend preview) — when you change
-/// one, change the other.
-pub fn highlight_color_for(proficiency: &str) -> Color {
-    match proficiency {
-        // unknown — #f9c7c7 (soft red)
-        "unknown" => Color::Rgb(Rgb::new(0xF9 as f32 / 255.0, 0xC7 as f32 / 255.0, 0xC7 as f32 / 255.0, None)),
-        // familiar — #fceba6 (soft yellow)
-        "familiar" => Color::Rgb(Rgb::new(0xFC as f32 / 255.0, 0xEB as f32 / 255.0, 0xA6 as f32 / 255.0, None)),
-        // mastered — #c7ebc7 (soft green)
-        "mastered" => Color::Rgb(Rgb::new(0xC7 as f32 / 255.0, 0xEB as f32 / 255.0, 0xC7 as f32 / 255.0, None)),
-        _ => Color::Rgb(Rgb::new(0xF9 as f32 / 255.0, 0xC7 as f32 / 255.0, 0xC7 as f32 / 255.0, None)),
-    }
 }
 
 /// Text colors for the intensive reading template.
@@ -164,13 +145,6 @@ fn make_point(x_mm: f32, y_mm: f32) -> Point {
     Point::new(Mm(x_mm), Mm(y_mm))
 }
 
-fn make_line_point(x_mm: f32, y_mm: f32) -> LinePoint {
-    LinePoint {
-        p: make_point(x_mm, y_mm),
-        bezier: false,
-    }
-}
-
 /// PDF rendering context.
 pub struct PdfContext {
     pub doc: PdfDocument,
@@ -183,7 +157,6 @@ pub struct PdfContext {
     pub line_height: f32,
     pub margins: Margins,
     pub usable_width: f32,
-    pub usable_height: f32,
     pub current_y: f32,     // mm from TOP of page
     pub page_count: usize,
     /// Whether to render page header/footer (intensive template only).
@@ -347,46 +320,6 @@ impl PdfContext {
         w * 0.3528
     }
 
-    /// Draw text with a colored highlight rectangle behind it. The rectangle
-    /// sits at the baseline of the text and extends slightly above and below
-    /// so the text reads clearly. Use `highlight_color_for(proficiency)` to
-    /// pick the right palette color.
-    pub fn draw_text_highlighted(
-        &mut self,
-        text: &str,
-        x_mm: f32,
-        y_mm: f32,
-        size: f32,
-        bg: Color,
-    ) -> f32 {
-        let w = self.measure_text_width(text, size);
-        if w <= 0.0 {
-            return 0.0;
-        }
-        // Slight padding around the text so the highlight band looks natural.
-        let pad_x = 0.6;
-        let pad_y = size * 0.18;
-        let rect_w = w + pad_x * 2.0;
-        let rect_h = size * 0.3528 + pad_y * 2.0;
-        // y_mm is bottom-based; rectangle top edge is up by `rect_h`.
-        let bottom = y_mm - pad_y;
-        let mm_to_pt = 2.8346;
-        self.current_ops.push(Op::SetFillColor { col: bg });
-        self.current_ops.push(Op::DrawRectangle {
-            rectangle: Rect {
-                x: Pt((x_mm - pad_x) * mm_to_pt),
-                y: Pt((bottom - rect_h) * mm_to_pt),
-                width: Pt(rect_w * mm_to_pt),
-                height: Pt(rect_h * mm_to_pt),
-                mode: Some(PaintMode::Fill),
-                winding_order: None,
-            },
-        });
-        // Draw the text itself on top (default color).
-        self.draw_text(text, x_mm, y_mm, size);
-        w
-    }
-
     pub fn measure_text_width(&self, text: &str, font_size: f32) -> f32 {
         let mut w = 0.0f32;
         for ch in text.chars() {
@@ -423,69 +356,6 @@ impl PdfContext {
             self.current_y -= self.line_height;
         }
         count
-    }
-
-    /// Truncate text to fit within `max_width` mm, appending "…" if truncated.
-    /// Returns an owned String.
-    pub fn truncate_text(&self, text: &str, max_width: f32, font_size: f32) -> String {
-        let mut cum_w = 0.0f32;
-        let mut end_idx = 0;
-        for (i, ch) in text.char_indices() {
-            let ch_w = measure_char_width(ch, font_size);
-            if cum_w + ch_w > max_width {
-                break;
-            }
-            cum_w += ch_w;
-            end_idx = i + ch.len_utf8();
-        }
-        if end_idx < text.len() {
-            let mut s = text[..end_idx].to_string();
-            let ellipsis_w = measure_char_width('…', font_size);
-            if cum_w + ellipsis_w <= max_width {
-                s.push('…');
-            }
-            s
-        } else {
-            text.to_string()
-        }
-    }
-
-    /// Draw rectangle border. `y` is distance from the bottom of the page (top
-    /// edge of the row); the rectangle extends downward by `h`.
-    pub fn draw_rect_border(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        let bottom = y;
-        let black = Color::Greyscale(Greyscale { percent: 0.0, icc_profile: None });
-        self.current_ops.push(Op::SetOutlineColor { col: black.clone() });
-        self.current_ops.push(Op::SetOutlineThickness { pt: Pt(0.5) });
-        let mm_to_pt = 2.8346;
-        self.current_ops.push(Op::DrawRectangle {
-            rectangle: Rect {
-                x: Pt(x * mm_to_pt),
-                y: Pt((bottom - h) * mm_to_pt),
-                width: Pt(w * mm_to_pt),
-                height: Pt(h * mm_to_pt),
-                mode: None,
-                winding_order: None,
-            },
-        });
-    }
-
-    /// Draw line. `y1` and `y2` are distances from the bottom of the page.
-    pub fn draw_line(&mut self, x1: f32, y1: f32, x2: f32, y2: f32) {
-        let by1 = y1;
-        let by2 = y2;
-        let black = Color::Greyscale(Greyscale { percent: 0.0, icc_profile: None });
-        self.current_ops.push(Op::SetOutlineColor { col: black });
-        self.current_ops.push(Op::SetOutlineThickness { pt: Pt(0.5) });
-        self.current_ops.push(Op::DrawLine {
-            line: Line {
-                points: vec![
-                    make_line_point(x1, by1),
-                    make_line_point(x2, by2),
-                ],
-                is_closed: false,
-            },
-        });
     }
 }
 
@@ -558,12 +428,9 @@ pub fn generate_pdf(
     let margins = Margins::from_json(&template.margins);
     let (paper_w, paper_h) = paper_dims(&template.paper_size);
     let usable_w = paper_w - margins.left - margins.right;
-    let usable_h = paper_h - margins.top - margins.bottom;
 
     let font_size = template.font_size.max(8).min(24) as f32;
     let line_height = template.line_spacing.max(1.0).min(3.0) as f32 * font_size * 0.3528;
-
-    let is_intensive = template.template_type == "intensive";
 
     let mut ctx = PdfContext {
         doc,
@@ -575,50 +442,29 @@ pub fn generate_pdf(
         line_height,
         margins: margins.clone(),
         usable_width: usable_w,
-        usable_height: usable_h,
-        current_y: if is_intensive { paper_h - margins.top - 5.0 } else { paper_h - margins.top - 60.0 },
+        current_y: paper_h - margins.top - 5.0,
         page_count: 0,
         paper_width: paper_w,
         paper_height: paper_h,
         current_ops: Vec::new(),
         bookmarks: Vec::new(),
-        show_chrome: is_intensive,
+        show_chrome: true,
         chapter_page: 1,
         novel_title: if novel.title.is_empty() { String::new() } else { novel.title.clone() },
         novel_author: if novel.author.is_empty() { String::new() } else { novel.author.clone() },
     };
 
-    // 3. Render title page (skip for intensive — it has its own chapter headers)
-    if !is_intensive {
-        let title_y = paper_h - margins.top - 5.0;
-        let author_y = paper_h - margins.top - 25.0;
-        let title_str = if novel.title.is_empty() { "未命名" } else { &novel.title };
-        ctx.draw_text(title_str, margins.left, title_y, font_size + 4.0);
-        if !novel.author.is_empty() {
-            ctx.draw_text(&novel.author, margins.left, author_y, font_size);
-        }
-        ctx.new_page();
-    }
+    // 3. Render (intensive reading only)
+    intensive::render(&mut ctx, chapters, vocabs);
 
-    // 4. Dispatch
-    match template.template_type.as_str() {
-        "intensive" => intensive::render(&mut ctx, chapters, vocabs),
-        "sidebar" => sidebar::render(&mut ctx, chapters, vocabs),
-        "recitation" => recitation::render(&mut ctx, chapters, vocabs),
-        "dictation" => dictation::render(&mut ctx, chapters, vocabs),
-        _ => intensive::render(&mut ctx, chapters, vocabs),
-    };
-
-    // 5. Add PDF bookmarks for chapter navigation
+    // 4. Add PDF bookmarks for chapter navigation
     for (title, page) in &ctx.bookmarks {
         ctx.doc.add_bookmark(title, *page);
     }
 
-    // 6. Finalize last page
+    // 5. Finalize last page
     if !ctx.current_ops.is_empty() {
-        if ctx.show_chrome {
-            ctx.render_page_chrome();
-        }
+        ctx.render_page_chrome();
         let ops = std::mem::take(&mut ctx.current_ops);
         ctx.doc.pages.push(PdfPage::new(Mm(paper_w), Mm(paper_h), ops));
     }

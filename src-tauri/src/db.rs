@@ -71,8 +71,7 @@ pub fn init_db(app_data_dir: &PathBuf) -> Result<DbState, String> {
             // Migrate existing annotation_mode values to template_type
             conn.execute_batch(
                 "UPDATE pdf_template SET template_type = 'intensive' WHERE annotation_mode = 'inline';
-                 UPDATE pdf_template SET template_type = 'sidebar' WHERE annotation_mode = 'sidebar';
-                 UPDATE pdf_template SET template_type = 'appendix' WHERE annotation_mode = 'none';",
+                 UPDATE pdf_template SET template_type = 'intensive' WHERE template_type != 'intensive';",
             )
             .map_err(|e| format!("迁移 template_type 值失败: {}", e))?;
         }

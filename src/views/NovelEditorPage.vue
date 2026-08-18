@@ -9,20 +9,6 @@
         <el-icon v-if="editorStore.saving" class="is-loading"><Loading /></el-icon>
         <template v-else>{{ editorStore.isDirty ? '未保存' : '已保存' }}</template>
       </span>
-      <el-select
-        v-if="loadState === 'loaded'"
-        v-model="selectedTemplateType"
-        size="small"
-        style="width: 110px"
-        @change="onTemplateChange"
-      >
-        <el-option
-          v-for="t in pdfTemplateStore.builtinTemplates"
-          :key="t.id"
-          :label="t.name"
-          :value="t.templateType"
-        />
-      </el-select>
       <el-button
         v-if="loadState === 'loaded'"
         size="small"
@@ -120,7 +106,6 @@ import { invoke } from '@tauri-apps/api/core'
 import { save } from '@tauri-apps/plugin-dialog'
 import { useNovelStore } from '@/stores/novelStore'
 import { useEditorStore } from '@/stores/editorStore'
-import { usePdfTemplateStore } from '@/stores/pdfTemplateStore'
 import type { HighlightWord } from '@/types/vocabWord'
 import NovelEditor from '@/components/novel/NovelEditor.vue'
 import ChapterList from '@/components/novel/ChapterList.vue'
@@ -139,7 +124,6 @@ const route = useRoute()
 const router = useRouter()
 const store = useNovelStore()
 const editorStore = useEditorStore()
-const pdfTemplateStore = usePdfTemplateStore()
 const editorRef = ref<InstanceType<typeof NovelEditor> | null>(null)
 const previewRef = ref<InstanceType<typeof PreviewPanel> | null>(null)
 
@@ -150,18 +134,6 @@ const previewFullscreen = ref(false)
 
 function togglePreviewFullscreen() {
   previewFullscreen.value = !previewFullscreen.value
-}
-
-function loadTemplateType(): string {
-  try {
-    const raw = localStorage.getItem('novel-editor-template')
-    if (raw && ['intensive', 'sidebar', 'recitation', 'dictation'].includes(raw)) return raw
-  } catch {}
-  return 'intensive'
-}
-const selectedTemplateType = ref<string>(loadTemplateType())
-function onTemplateChange(v: string) {
-  try { localStorage.setItem('novel-editor-template', v) } catch {}
 }
 
 type LoadState = 'loading' | 'loaded' | 'error'
@@ -208,7 +180,6 @@ const previewHtml = computed(() => {
     chapters,
     words: highlightWords.value as any,
     novelTitle: store.currentNovel?.title,
-    templateType: selectedTemplateType.value,
   })
 })
 
@@ -228,13 +199,6 @@ async function handleExportPdf() {
     ElMessage.error('请先打开小说')
     return
   }
-  const tpl = pdfTemplateStore.builtinTemplates.find(
-    (t) => t.templateType === selectedTemplateType.value,
-  ) || pdfTemplateStore.builtinTemplates[0]
-  if (!tpl) {
-    ElMessage.error('未找到内置排版模板')
-    return
-  }
   let filePath: string | null = null
   try {
     filePath = await save({
@@ -251,8 +215,7 @@ async function handleExportPdf() {
   try {
     await invoke<string>('export_pdf', {
       novelId: novel.id,
-      templateId: null,
-      templateType: tpl.templateType,
+      templateType: 'intensive',
       vocabBookId: highlightBookId.value,
       outputPath: filePath,
     })
@@ -330,9 +293,6 @@ function retry() {
 }
 
 onMounted(async () => {
-  if (pdfTemplateStore.builtinTemplates.length === 0) {
-    await pdfTemplateStore.fetchBuiltin()
-  }
   loadNovel()
 })
 

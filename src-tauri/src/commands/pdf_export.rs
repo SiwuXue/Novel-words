@@ -9,8 +9,8 @@ use tauri::State;
 pub fn export_pdf(
     state: State<DbState>,
     novel_id: i64,
-    template_id: Option<i64>,
-    template_type: Option<String>,
+    _template_id: Option<i64>,
+    _template_type: Option<String>,
     vocab_book_id: Option<i64>,
     output_path: String,
 ) -> Result<String, String> {
@@ -38,39 +38,8 @@ pub fn export_pdf(
         )
         .map_err(|e| format!("查询小说失败: {}", e))?;
 
-    // Load template or use defaults
-    let mut template = if let Some(tid) = template_id {
-        db.query_row(
-            "SELECT id, name, paper_size, font_family, font_size, line_spacing, margins, annotation_mode, template_type, is_builtin, created_at, updated_at
-             FROM pdf_template WHERE id = ?1",
-            rusqlite::params![tid],
-            |row| {
-                Ok(PdfTemplate {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    paper_size: row.get(2)?,
-                    font_family: row.get(3)?,
-                    font_size: row.get(4)?,
-                    line_spacing: row.get(5)?,
-                    margins: row.get(6)?,
-                    annotation_mode: row.get(7)?,
-                    template_type: row.get(8)?,
-                    is_builtin: row.get::<_, i32>(9)? != 0,
-                    created_at: row.get(10)?,
-                    updated_at: row.get(11)?,
-                })
-            },
-        )
-        .unwrap_or_else(|_| default_template())
-    } else {
-        default_template()
-    };
-
-    // Override template type for builtin templates (template_id is null,
-    // so we fell back to default; frontend passes the real type)
-    if let Some(tt) = template_type {
-        template.template_type = tt;
-    }
+    // Use default template (intensive reading only)
+    let template = default_template();
 
     // Load vocab words if a book is selected
     let vocabs: Vec<VocabWord> = if let Some(book_id) = vocab_book_id {
