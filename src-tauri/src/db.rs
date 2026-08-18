@@ -174,4 +174,5 @@ CREATE TABLE IF NOT EXISTS app_settings (
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('theme', 'light');
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('default_export_folder', '');
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('default_vocab_book_id', '');
+INSERT OR IGNORE INTO app_settings (key, value) VALUES ('pdf_intensive_steps', '[1,2,3]');
 ";

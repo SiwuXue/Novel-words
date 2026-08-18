@@ -1,11 +1,14 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import type { StepNum } from '@/types/pdfSteps'
+import { normalizeSteps, serializeSteps } from '@/types/pdfSteps'
 
 export const useSettingsStore = defineStore('settings', () => {
   const theme = ref<'light' | 'dark'>('light')
   const defaultExportFolder = ref('')
   const defaultVocabBookId = ref<number | null>(null)
+  const pdfIntensiveSteps = ref<StepNum[]>([1, 2, 3])
   const loaded = ref(false)
 
   async function load() {
@@ -26,6 +29,14 @@ export const useSettingsStore = defineStore('settings', () => {
           case 'default_vocab_book_id': {
             const n = Number(s.value)
             defaultVocabBookId.value = Number.isFinite(n) && n > 0 ? n : null
+            break
+          }
+          case 'pdf_intensive_steps': {
+            try {
+              pdfIntensiveSteps.value = normalizeSteps(JSON.parse(s.value))
+            } catch {
+              /* 非法 JSON → 保持默认 [1,2,3] */
+            }
             break
           }
         }
@@ -75,14 +86,29 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
+  async function setPdfIntensiveSteps(steps: StepNum[]) {
+    const normalized = normalizeSteps(steps)
+    pdfIntensiveSteps.value = normalized
+    try {
+      await invoke('set_setting', {
+        key: 'pdf_intensive_steps',
+        value: serializeSteps(normalized),
+      })
+    } catch (e) {
+      console.error('[settingsStore] setPdfIntensiveSteps failed:', e)
+    }
+  }
+
   return {
     theme,
     defaultExportFolder,
     defaultVocabBookId,
+    pdfIntensiveSteps,
     loaded,
     load,
     setTheme,
     setDefaultExportFolder,
     setDefaultVocabBookId,
+    setPdfIntensiveSteps,
   }
 })

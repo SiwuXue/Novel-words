@@ -14,7 +14,76 @@ use crate::models::novel::Chapter;
 use crate::models::vocab_word::VocabWord;
 use printpdf::Color;
 
-pub fn render(ctx: &mut PdfContext, chapters: &[Chapter], vocabs: &[VocabWord]) {
+/// Step toggle flags for the intensive reading template.
+/// All false → normalized to Step 1 so we never render an empty chapter.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct IntensiveSteps {
+    pub step1: bool,
+    pub step2: bool,
+    pub step3: bool,
+}
+
+impl IntensiveSteps {
+    pub fn any(self) -> bool {
+        self.step1 || self.step2 || self.step3
+    }
+
+    pub fn normalize(mut self) -> Self {
+        if !self.any() {
+            self.step1 = true;
+        }
+        self
+    }
+}
+
+/// Parse the raw DB string for `pdf_intensive_steps` (expected JSON array like "[1,2,3]")
+/// into flags. None / empty / invalid JSON / any array with no valid {1,2,3} elements
+/// → fallback to all three steps enabled (so existing installs behave unchanged).
+pub fn parse_steps_from_db(value: Option<&str>) -> IntensiveSteps {
+    let v = match value {
+        Some(s) if !s.trim().is_empty() => s,
+        _ => {
+            return IntensiveSteps {
+                step1: true,
+                step2: true,
+                step3: true,
+            }
+        }
+    };
+    let arr: Vec<u8> = match serde_json::from_str(v) {
+        Ok(xs) => xs,
+        Err(_) => {
+            return IntensiveSteps {
+                step1: true,
+                step2: true,
+                step3: true,
+            }
+        }
+    };
+    let mut s = IntensiveSteps::default();
+    for n in arr {
+        match n {
+            1 => s.step1 = true,
+            2 => s.step2 = true,
+            3 => s.step3 = true,
+            _ => {}
+        }
+    }
+    if !s.any() {
+        s.step1 = true;
+        s.step2 = true;
+        s.step3 = true;
+    }
+    s
+}
+
+pub fn render(
+    ctx: &mut PdfContext,
+    chapters: &[Chapter],
+    vocabs: &[VocabWord],
+    steps: IntensiveSteps,
+) {
+    let steps = steps.normalize();
     for (ci, chapter) in chapters.iter().enumerate() {
         if ci > 0 {
             ctx.new_page_for_chapter();
@@ -25,42 +94,48 @@ pub fn render(ctx: &mut PdfContext, chapters: &[Chapter], vocabs: &[VocabWord]) 
         let chapter_words: Vec<&VocabWord> = words_found_in_text(&chapter.content, vocabs);
         let chapter_word_count = chapter_words.len();
 
-        // Chapter header area
+        // Chapter header area (always displayed — chapter headings are not part of steps)
         draw_chapter_header(ctx, chapter_num, &chapter.title, chapter_word_count);
 
         // ===== STEP 1 =====
-        draw_step1_header(ctx);
+        if steps.step1 {
+            draw_step1_header(ctx);
 
-        for para in super::split_paragraphs(&chapter.content) {
-            if ctx.remaining_height() < ctx.line_height * 2.0 {
-                ctx.new_page();
+            for para in super::split_paragraphs(&chapter.content) {
+                if ctx.remaining_height() < ctx.line_height * 2.0 {
+                    ctx.new_page();
+                }
+                render_annotated_paragraph_step1(ctx, &para, vocabs);
+                ctx.current_y -= ctx.line_height * 0.4;
             }
-            render_annotated_paragraph_step1(ctx, &para, vocabs);
-            ctx.current_y -= ctx.line_height * 0.4;
+
+            draw_step1_end_marker(ctx);
         }
 
-        draw_step1_end_marker(ctx);
-
         // ===== STEP 2 =====
-        draw_step2_header(ctx);
+        if steps.step2 {
+            draw_step2_header(ctx);
 
-        for para in super::split_paragraphs(&chapter.content) {
-            if ctx.remaining_height() < ctx.line_height * 2.0 {
-                ctx.new_page();
+            for para in super::split_paragraphs(&chapter.content) {
+                if ctx.remaining_height() < ctx.line_height * 2.0 {
+                    ctx.new_page();
+                }
+                render_annotated_paragraph_step2(ctx, &para, vocabs);
+                ctx.current_y -= ctx.line_height * 0.4;
             }
-            render_annotated_paragraph_step2(ctx, &para, vocabs);
-            ctx.current_y -= ctx.line_height * 0.4;
         }
 
         // ===== STEP 3 =====
-        if chapter_words.is_empty() {
-            draw_step3_header(ctx, 0);
-        } else {
-            draw_step3_header(ctx, chapter_word_count);
-            draw_step3_word_table(ctx, &chapter_words);
+        if steps.step3 {
+            if chapter_words.is_empty() {
+                draw_step3_header(ctx, 0);
+            } else {
+                draw_step3_header(ctx, chapter_word_count);
+                draw_step3_word_table(ctx, &chapter_words);
+            }
         }
 
-        // ===== Chapter end marker =====
+        // ===== Chapter end marker (always displayed) =====
         draw_chapter_end_marker(ctx, chapter_num);
     }
 }

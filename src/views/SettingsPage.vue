@@ -44,6 +44,19 @@
               />
             </el-select>
           </el-form-item>
+
+          <el-form-item label="精读版导出步骤">
+            <el-checkbox-group v-model="localSteps" @change="onStepsChange">
+              <el-checkbox
+                v-for="n in stepNums"
+                :key="n"
+                :label="n"
+                :value="n"
+              >
+                {{ STEP_LABELS[n] }}
+              </el-checkbox>
+            </el-checkbox-group>
+          </el-form-item>
         </el-form>
       </el-tab-pane>
     </el-tabs>
@@ -51,16 +64,28 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
 import { open } from '@tauri-apps/plugin-dialog'
+import { STEP_LABELS, type StepNum } from '@/types/pdfSteps'
 
 const settingsStore = useSettingsStore()
 const vocabBookStore = useVocabBookStore()
 
 const activeTab = ref('general')
+const stepNums: StepNum[] = [1, 2, 3]
+const localSteps = ref<StepNum[]>([...settingsStore.pdfIntensiveSteps])
+
+watch(
+  () => settingsStore.pdfIntensiveSteps,
+  (v) => {
+    // Store 先 loaded（异步）→ 同步本地缓冲
+    localSteps.value = [...v]
+  },
+  { once: true },
+)
 
 function onThemeChange(t: 'light' | 'dark') {
   settingsStore.setTheme(t)
@@ -81,10 +106,23 @@ function onDefaultVocabBookChange(id: number | null) {
   settingsStore.setDefaultVocabBookId(id)
 }
 
+async function onStepsChange(next: StepNum[]) {
+  if (next.length === 0) {
+    ElMessage.warning('至少勾选一个步骤')
+    // rollback: keep local buffer in sync with the last good value
+    localSteps.value = [...settingsStore.pdfIntensiveSteps]
+    return
+  }
+  await settingsStore.setPdfIntensiveSteps(next)
+  localSteps.value = [...settingsStore.pdfIntensiveSteps]
+}
+
 onMounted(() => {
   if (vocabBookStore.books.length === 0) {
     vocabBookStore.fetchAll()
   }
+  // In case the store was fully loaded before setup() ran.
+  localSteps.value = [...settingsStore.pdfIntensiveSteps]
 })
 </script>
 

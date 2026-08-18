@@ -10,6 +10,8 @@
 import type { Chapter } from '@/types/novel'
 import type { VocabWord } from '@/types/vocabWord'
 import type { PdfTemplate } from '@/types/pdf'
+import type { StepNum } from '@/types/pdfSteps'
+import { normalizeSteps } from '@/types/pdfSteps'
 import { textColorFor } from './proficiencyColors'
 import { looksLikeHtml } from './editorHtml'
 
@@ -214,6 +216,7 @@ export interface BuildPreviewInput {
   words: VocabWord[]
   template?: PdfTemplate | null
   novelTitle?: string
+  steps?: StepNum[]
 }
 
 function baseCss(fontSize: number, lineHeight: number): string {
@@ -244,7 +247,17 @@ function baseCss(fontSize: number, lineHeight: number): string {
   `
 }
 
-function buildIntensive(chapters: Chapter[], words: VocabWord[], _novelTitle?: string): string {
+function buildIntensive(
+  chapters: Chapter[],
+  words: VocabWord[],
+  _novelTitle?: string,
+  stepsInput?: StepNum[],
+): string {
+  const steps = normalizeSteps(stepsInput)
+  const includeStep1 = steps.includes(1)
+  const includeStep2 = steps.includes(2)
+  const includeStep3 = steps.includes(3)
+
   const parts: string[] = []
   for (let ci = 0; ci < chapters.length; ci++) {
     const ch = chapters[ci]
@@ -258,20 +271,31 @@ function buildIntensive(chapters: Chapter[], words: VocabWord[], _novelTitle?: s
     parts.push(`<div class="ch-sub">【第 ${num} 章】</div>`)
     parts.push(`<div class="ch-wc">本章词汇：${chWords.length} 词</div>`)
 
-    parts.push(`<div class="step-title">Step 1：在语境中背单词</div>`)
-    parts.push(`<div class="step-desc">请仔细阅读下文，注意英文单词及其对应的中文释义。红色=生疏，橙色=熟悉，灰色=已掌握。</div>`)
-    for (const para of splitParagraphs(body)) {
-      parts.push(`<p>${renderParagraphStep1(para, words)}</p>`)
-    }
-    parts.push(`<div class="step1-end">—— Step 1 完 ——</div>`)
-
-    parts.push(`<div class="step-title">Step 2：看单词回忆词义</div>`)
-    parts.push(`<div class="step-desc">请再次阅读下文，尝试回忆英文单词对应的中文意思。</div>`)
-    for (const para of splitParagraphs(body)) {
-      parts.push(`<p>${renderParagraphStep2(para, words)}</p>`)
+    if (includeStep1) {
+      parts.push(`<div class="step-title">Step 1：在语境中背单词</div>`)
+      parts.push(
+        `<div class="step-desc">请仔细阅读下文，注意英文单词及其对应的中文释义。红色=生疏，橙色=熟悉，灰色=已掌握。</div>`,
+      )
+      for (const para of splitParagraphs(body)) {
+        parts.push(`<p>${renderParagraphStep1(para, words)}</p>`)
+      }
+      parts.push(`<div class="step1-end">—— Step 1 完 ——</div>`)
     }
 
-    parts.push(buildStep3Block(chWords))
+    if (includeStep2) {
+      parts.push(`<div class="step-title">Step 2：看单词回忆词义</div>`)
+      parts.push(
+        `<div class="step-desc">请再次阅读下文，尝试回忆英文单词对应的中文意思。</div>`,
+      )
+      for (const para of splitParagraphs(body)) {
+        parts.push(`<p>${renderParagraphStep2(para, words)}</p>`)
+      }
+    }
+
+    if (includeStep3) {
+      parts.push(buildStep3Block(chWords))
+    }
+
     parts.push(`<div class="chapter-end">—— 第 ${num} 章 完 ——</div>`)
     parts.push(`</div>`)
   }
@@ -279,10 +303,10 @@ function buildIntensive(chapters: Chapter[], words: VocabWord[], _novelTitle?: s
 }
 
 export function buildHtml(input: BuildPreviewInput): string {
-  const { chapters, words, template, novelTitle } = input
+  const { chapters, words, template, novelTitle, steps } = input
   const lineHeight = template?.lineSpacing ?? 1.5
   const fontSize = template?.fontSize ?? 14
   const css = baseCss(fontSize, lineHeight)
-  const bodyContent = buildIntensive(chapters, words, novelTitle)
+  const bodyContent = buildIntensive(chapters, words, novelTitle, steps)
   return `<style>${css}</style><div class="pdf-preview-body">${bodyContent}</div>`
 }

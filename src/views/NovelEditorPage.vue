@@ -9,6 +9,29 @@
         <el-icon v-if="editorStore.saving" class="is-loading"><Loading /></el-icon>
         <template v-else>{{ editorStore.isDirty ? '未保存' : '已保存' }}</template>
       </span>
+      <el-dropdown
+        v-if="loadState === 'loaded'"
+        trigger="click"
+        @change="onStepsDropdownClick"
+      >
+        <el-button size="small" link>
+          ⚙ 导出步骤：已选 {{ pdfSteps.length }} 项
+        </el-button>
+        <template #dropdown>
+          <div class="pdf-steps-dropdown">
+            <div class="pdf-steps-dropdown-title">本次导出包含（不影响默认设置）</div>
+            <el-checkbox-group
+              v-model="pdfSteps"
+              @change="onPdfStepsChange"
+              style="display:flex;flex-direction:column;gap:6px;padding:6px 4px 2px;"
+            >
+              <el-checkbox v-for="n in stepNums" :key="n" :label="n" :value="n">
+                {{ STEP_LABELS[n] }}
+              </el-checkbox>
+            </el-checkbox-group>
+          </div>
+        </template>
+      </el-dropdown>
       <el-button
         v-if="loadState === 'loaded'"
         size="small"
@@ -106,12 +129,16 @@ import { invoke } from '@tauri-apps/api/core'
 import { save } from '@tauri-apps/plugin-dialog'
 import { useNovelStore } from '@/stores/novelStore'
 import { useEditorStore } from '@/stores/editorStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import type { HighlightWord } from '@/types/vocabWord'
+import { normalizeSteps, STEP_LABELS, type StepNum } from '@/types/pdfSteps'
 import NovelEditor from '@/components/novel/NovelEditor.vue'
 import ChapterList from '@/components/novel/ChapterList.vue'
 import PreviewPanel from '@/components/novel/PreviewPanel.vue'
 import { buildHtml as buildPreviewHtml } from '@/utils/pdfPreview'
 import { useSplitLayout } from '@/composables/useSplitLayout'
+
+const settingsStore = useSettingsStore()
 
 const split = useSplitLayout({
   left: 200,
@@ -131,9 +158,34 @@ const highlightBookId = ref<number | null>(null)
 const highlightWords = ref<HighlightWord[]>([])
 const exportingPdf = ref(false)
 const previewFullscreen = ref(false)
+const stepNums: StepNum[] = [1, 2, 3]
+const pdfSteps = ref<StepNum[]>([...settingsStore.pdfIntensiveSteps])
+
+// Once store is loaded (async), sync session buffer once.
+watch(
+  () => [settingsStore.loaded, settingsStore.pdfIntensiveSteps] as const,
+  ([loaded, v]) => {
+    if (loaded) pdfSteps.value = [...v]
+  },
+  { immediate: true, once: true },
+)
 
 function togglePreviewFullscreen() {
   previewFullscreen.value = !previewFullscreen.value
+}
+
+function onStepsDropdownClick(_cmd: any) {
+  // Checkbox group is handled by v-model on pdfSteps directly.
+}
+
+function onPdfStepsChange(next: StepNum[]) {
+  if (next.length === 0) {
+    ElMessage.warning('至少勾选一个步骤')
+    // rollback to a normalized safe value without affecting settingsStore
+    pdfSteps.value = normalizeSteps(pdfSteps.value)
+    return
+  }
+  pdfSteps.value = next
 }
 
 type LoadState = 'loading' | 'loaded' | 'error'
@@ -180,6 +232,7 @@ const previewHtml = computed(() => {
     chapters,
     words: highlightWords.value as any,
     novelTitle: store.currentNovel?.title,
+    steps: normalizeSteps(pdfSteps.value),
   })
 })
 
@@ -217,6 +270,7 @@ async function handleExportPdf() {
       novelId: novel.id,
       templateType: 'intensive',
       vocabBookId: highlightBookId.value,
+      steps: normalizeSteps(pdfSteps.value),
       outputPath: filePath,
     })
     ElMessage.success('PDF 已导出')
@@ -376,6 +430,17 @@ async function scrollToChapter(index: number) {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+.pdf-steps-dropdown {
+  min-width: 260px;
+  padding: 8px 12px 10px;
+}
+.pdf-steps-dropdown-title {
+  font-size: 12px;
+  color: var(--text-secondary, #909399);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-color, #ebeef5);
+  margin-bottom: 4px;
 }
 .editor-body {
   display: flex;

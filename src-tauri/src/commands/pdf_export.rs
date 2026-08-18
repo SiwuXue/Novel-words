@@ -3,6 +3,7 @@ use crate::models::novel::{Chapter, Novel};
 use crate::models::pdf_template::PdfTemplate;
 use crate::models::vocab_word::VocabWord;
 use crate::pdf;
+use crate::pdf::{parse_steps_from_db, IntensiveSteps};
 use tauri::State;
 
 #[tauri::command]
@@ -12,6 +13,7 @@ pub fn export_pdf(
     _template_id: Option<i64>,
     _template_type: Option<String>,
     vocab_book_id: Option<i64>,
+    steps: Option<Vec<i64>>,
     output_path: String,
 ) -> Result<String, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
@@ -114,9 +116,27 @@ pub fn export_pdf(
         }
     };
 
+    // ===== Resolve steps (frontend override → DB default → all enabled) =====
+    let steps = match steps {
+        Some(arr) => IntensiveSteps {
+            step1: arr.contains(&1),
+            step2: arr.contains(&2),
+            step3: arr.contains(&3),
+        }
+        .normalize(),
+        None => {
+            let db_val: Result<String, _> = db.query_row(
+                "SELECT value FROM app_settings WHERE key='pdf_intensive_steps'",
+                [],
+                |row| row.get(0),
+            );
+            parse_steps_from_db(db_val.ok().as_deref())
+        }
+    };
+
     drop(db);
 
-    pdf::generate_pdf(&novel, &template, &vocabs, &chapters, &output_path)?;
+    pdf::generate_pdf(&novel, &template, &vocabs, &chapters, steps, &output_path)?;
 
     Ok(output_path)
 }

@@ -2,6 +2,8 @@ mod font;
 mod matcher;
 mod intensive;
 
+pub use intensive::{parse_steps_from_db, IntensiveSteps};
+
 use printpdf::*;
 use std::fs::File;
 use std::io::Write;
@@ -479,6 +481,7 @@ pub fn generate_pdf(
     template: &PdfTemplate,
     vocabs: &[VocabWord],
     chapters: &[Chapter],
+    steps: IntensiveSteps,
     output_path: &str,
 ) -> Result<(), String> {
     // 1. Find + load font
@@ -541,7 +544,7 @@ pub fn generate_pdf(
     };
 
     // 3. Render (intensive reading only)
-    intensive::render(&mut ctx, chapters, vocabs);
+    intensive::render(&mut ctx, chapters, vocabs, steps);
 
     // 4. Add PDF bookmarks for chapter navigation
     for (title, page) in &ctx.bookmarks {
