@@ -68,12 +68,21 @@
     </div>
 
     <!-- Editor -->
-    <editor-content :editor="editor" class="tiptap-editor" />
+    <editor-content ref="editorContentRef" :editor="editor" class="tiptap-editor" />
+
+    <!-- Dict Lookup Popover -->
+    <DictLookupPopover
+      v-if="popoverVisible"
+      :text="popoverText"
+      :position="popoverPosition"
+      :novel-id="props.novelId"
+      @close="closePopover"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onBeforeUnmount } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useEditor, EditorContent } from '@tiptap/vue-3'
 import type { EditorView } from '@tiptap/pm/view'
 import StarterKit from '@tiptap/starter-kit'
@@ -81,10 +90,14 @@ import Placeholder from '@tiptap/extension-placeholder'
 import { List, Tickets, RefreshLeft, RefreshRight } from '@element-plus/icons-vue'
 import { useEditorStore } from '@/stores/editorStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
+import { useDictionaryStore } from '@/stores/dictionaryStore'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { speakWord } from '@/utils/speech'
 import { plainTextToHtml } from '@/utils/editorHtml'
 import { cleanText } from '@/utils/textCleaner'
 import { VocabHighlight, setVocabHighlightWords, refreshVocabHighlight } from '@/extensions/VocabHighlight'
 import type { HighlightWord } from '@/types/vocabWord'
+import DictLookupPopover from './DictLookupPopover.vue'
 
 const props = defineProps<{
   novelId: number
@@ -100,7 +113,104 @@ const emit = defineEmits<{
 
 const store = useEditorStore()
 const vocabBookStore = useVocabBookStore()
+const dictStore = useDictionaryStore()
+const settingsStore = useSettingsStore()
 vocabBookStore.fetchAll()
+
+// ===== Dict lookup state =====
+const editorContentRef = ref<InstanceType<typeof EditorContent> | null>(null)
+const popoverVisible = ref(false)
+const popoverPosition = ref({ x: 0, y: 0 })
+const popoverText = ref('')
+let mouseupTimer: number | null = null
+// Flag to prevent mouseup handler from re-firing after a dblclick
+let suppressNextMouseup = false
+
+function getSelectionText(): string | null {
+  const sel = window.getSelection()
+  if (!sel || sel.isCollapsed) return null
+  const text = sel.toString().trim()
+  return text || null
+}
+
+function isEnglishWord(s: string): boolean {
+  return /^[A-Za-z][A-Za-z'-]*$/.test(s)
+}
+
+function hasChinese(s: string): boolean {
+  return /[\u4e00-\u9fa5]/.test(s)
+}
+
+function showPopover(x: number, y: number, text: string) {
+  popoverText.value = text
+  popoverPosition.value = { x, y }
+  popoverVisible.value = true
+  void dictStore.lookupAuto(text)
+  // 选中英文单词时自动朗读（按用户 speech_accent 偏好）
+  if (isEnglishWord(text)) {
+    speakWord(text, settingsStore.speechAccent)
+  }
+}
+
+function closePopover() {
+  popoverVisible.value = false
+  dictStore.clear()
+}
+
+function handleDblClick(event: MouseEvent) {
+  const text = getSelectionText()
+  if (!text) return
+  // 双击只处理英文单词
+  if (!isEnglishWord(text)) return
+  suppressNextMouseup = true
+  showPopover(event.clientX, event.clientY, text)
+}
+
+function handleMouseup(event: MouseEvent) {
+  if (suppressNextMouseup) {
+    suppressNextMouseup = false
+    return
+  }
+  if (popoverVisible.value) return
+  // 延迟 50ms 让 selection 同步稳定
+  if (mouseupTimer) clearTimeout(mouseupTimer)
+  mouseupTimer = window.setTimeout(() => {
+    const text = getSelectionText()
+    if (!text) return
+    // 划选英文单词（无空格，限 50 字符）
+    if (isEnglishWord(text) && text.length <= 50) {
+      showPopover(event.clientX, event.clientY, text)
+      return
+    }
+    // 中文（限 30 字符，避免误选整段）
+    if (hasChinese(text) && text.length <= 30) {
+      showPopover(event.clientX, event.clientY, text)
+    }
+    // 含空格的英文短语忽略
+  }, 50)
+}
+
+function onExternalClick(e: MouseEvent) {
+  if (!popoverVisible.value) return
+  const target = e.target as HTMLElement
+  if (!target.closest('.dict-lookup-popover')) {
+    closePopover()
+  }
+}
+
+onMounted(() => {
+  const el = (editorContentRef.value as any)?.$el as HTMLElement | undefined
+  el?.addEventListener('dblclick', handleDblClick)
+  el?.addEventListener('mouseup', handleMouseup)
+  document.addEventListener('mousedown', onExternalClick)
+})
+onBeforeUnmount(() => {
+  const el = (editorContentRef.value as any)?.$el as HTMLElement | undefined
+  el?.removeEventListener('dblclick', handleDblClick)
+  el?.removeEventListener('mouseup', handleMouseup)
+  document.removeEventListener('mousedown', onExternalClick)
+  if (mouseupTimer) clearTimeout(mouseupTimer)
+})
 
 // Initialize Tiptap with empty content; load the novel body asynchronously
 // once the editor is mounted so the initial parse doesn't block the main

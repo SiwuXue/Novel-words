@@ -1,5 +1,6 @@
 mod commands;
 mod db;
+mod dictionary;
 mod models;
 mod pdf;
 mod utils;
@@ -27,6 +28,7 @@ use commands::chapter::{
 };
 use commands::pdf_export::export_pdf;
 use commands::settings::{get_all_settings, get_setting, set_setting};
+use dictionary::{dict_lookup_chinese, dict_lookup_english, DictDbState};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -35,7 +37,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
-            // Resolve app data directory and initialize database
+            // Resolve app data directory and initialize main database
             let app_data_dir = app
                 .path()
                 .app_data_dir()
@@ -43,8 +45,25 @@ pub fn run() {
 
             let db_state = db::init_db(&app_data_dir)
                 .map_err(|e| format!("数据库初始化失败: {}", e))?;
-
             app.manage(db_state);
+
+            // Initialize embedded dictionary (read-only). Failure here is
+            // non-fatal: dict_lookup_* commands will return errors and the
+            // app continues without lookup feature.
+            let dict_db_path = app
+                .path()
+                .resource_dir()
+                .map_err(|e| format!("无法解析资源目录: {}", e))?
+                .join("resources")
+                .join("dictionary.db");
+            match DictDbState::open(dict_db_path) {
+                Ok(state) => {
+                    app.manage(state);
+                }
+                Err(e) => {
+                    eprintln!("[dictionary] 词典库初始化失败（不阻断启动）: {}", e);
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -81,6 +100,8 @@ pub fn run() {
             get_setting,
             set_setting,
             get_all_settings,
+            dict_lookup_english,
+            dict_lookup_chinese,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
