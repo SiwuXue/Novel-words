@@ -36,7 +36,8 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "resources/dictionary.db"
+      "resources/dictionary.db",
+      "resources/CET4luan_1.json"
     ]
   }
 }
