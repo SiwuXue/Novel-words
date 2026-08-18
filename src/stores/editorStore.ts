@@ -56,7 +56,7 @@ export const useEditorStore = defineStore('editor', () => {
       .trim()
   }
 
-  /** Auto-save with 3s debounce. If a previous autosave is still awaiting
+  /** Auto-save with 30s debounce. If a previous autosave is still awaiting
    *  Rust, the next call awaits it before scheduling a new write. */
   async function scheduleAutosave(novelId: number, html: string) {
     isDirty.value = true
@@ -64,7 +64,7 @@ export const useEditorStore = defineStore('editor', () => {
     autosaveTimer = setTimeout(() => {
       autosaveTimer = null
       void runAutosave(novelId, html)
-    }, 3000)
+    }, 30000)
   }
 
   async function runAutosave(novelId: number, html: string) {

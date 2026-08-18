@@ -1,10 +1,20 @@
 use crate::db::DbState;
 use crate::models::novel::{Chapter, Novel};
+use crate::models::pdf_export_response::PdfExportResponse;
 use crate::models::pdf_template::PdfTemplate;
 use crate::models::vocab_word::VocabWord;
 use crate::pdf;
+use crate::pdf::matcher::words_found_in_text;
 use crate::pdf::{parse_steps_from_db, IntensiveSteps};
 use tauri::State;
+
+fn steps_label(steps: IntensiveSteps) -> String {
+    let mut parts = Vec::new();
+    if steps.step1 { parts.push("Step 1") }
+    if steps.step2 { parts.push("Step 2") }
+    if steps.step3 { parts.push("Step 3") }
+    parts.join(" + ")
+}
 
 #[tauri::command]
 pub fn export_pdf(
@@ -15,7 +25,7 @@ pub fn export_pdf(
     vocab_book_id: Option<i64>,
     steps: Option<Vec<i64>>,
     output_path: String,
-) -> Result<String, String> {
+) -> Result<PdfExportResponse, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
 
     // Load novel
@@ -136,9 +146,29 @@ pub fn export_pdf(
 
     drop(db);
 
+    // ===== Compute coverage stats before generating =====
+    let total_vocab = vocabs.len();
+    let chapter_count = chapters.len();
+    let matched_words: usize = {
+        let mut all_found = std::collections::HashSet::new();
+        for ch in &chapters {
+            for w in words_found_in_text(&ch.content, &vocabs) {
+                all_found.insert(w.id);
+            }
+        }
+        all_found.len()
+    };
+
+    let steps_str = steps_label(steps);
     pdf::generate_pdf(&novel, &template, &vocabs, &chapters, steps, &output_path)?;
 
-    Ok(output_path)
+    Ok(PdfExportResponse {
+        path: output_path,
+        total_vocab,
+        matched_words,
+        chapter_count,
+        steps_used: steps_str,
+    })
 }
 
 fn default_template() -> PdfTemplate {

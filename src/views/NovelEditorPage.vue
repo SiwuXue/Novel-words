@@ -8,6 +8,15 @@
       <span class="save-status">
         <el-icon v-if="editorStore.saving" class="is-loading"><Loading /></el-icon>
         <template v-else>{{ editorStore.isDirty ? '未保存' : '已保存' }}</template>
+        <el-button
+          v-if="loadState === 'loaded'"
+          size="small"
+          link
+          :disabled="!editorStore.isDirty"
+          @click="handleManualSave"
+        >
+          保存 (Ctrl+S)
+        </el-button>
       </span>
       <el-dropdown
         v-if="loadState === 'loaded'"
@@ -93,6 +102,17 @@
         :style="{ width: split.state.rightWidth + 'px' }"
         v-show="split.state.rightWidth > 0"
       >
+        <el-alert
+          v-if="loadState === 'loaded' && highlightBookId && highlightWords.length === 0"
+          type="warning"
+          :closable="false"
+          show-icon
+          style="margin: 8px;"
+        >
+          <template #title>
+            本章未匹配到词汇本中的单词，请检查词汇本中的中文释义是否与小说正文一致。
+          </template>
+        </el-alert>
         <PreviewPanel
           ref="previewRef"
           :html="previewHtml"
@@ -266,14 +286,36 @@ async function handleExportPdf() {
   if (!filePath) return
   exportingPdf.value = true
   try {
-    await invoke<string>('export_pdf', {
+    const resp = await invoke<{
+      path: string
+      total_vocab: number
+      matched_words: number
+      chapter_count: number
+      steps_used: string
+    }>('export_pdf', {
       novelId: novel.id,
       templateType: 'intensive',
       vocabBookId: highlightBookId.value,
       steps: normalizeSteps(pdfSteps.value),
       outputPath: filePath,
     })
-    ElMessage.success('PDF 已导出')
+    const pct =
+      resp.total_vocab > 0
+        ? ((resp.matched_words / resp.total_vocab) * 100).toFixed(1)
+        : '0.0'
+    const low =
+      resp.total_vocab > 0 && resp.matched_words / resp.total_vocab < 0.5
+        ? '\n\n💡 覆盖率较低，建议检查词汇本中文释义是否与小说用词一致。'
+        : ''
+    ElMessageBox.alert(
+      `已导出至：${resp.path}\n\n` +
+        `📚 小说章节：${resp.chapter_count} 章\n` +
+        `📖 词汇本：${resp.total_vocab} 词\n` +
+        `✅ 已匹配：${resp.matched_words} 词（覆盖率 ${pct}%）\n` +
+        `🔧 包含步骤：${resp.steps_used}${low}`,
+      'PDF 导出成功',
+      { confirmButtonText: '好的', type: 'success' },
+    )
   } catch (e: any) {
     console.error('[PdfExport] export_pdf failed:', e)
     ElMessage.error(String(e?.message || e || '导出失败'))
@@ -367,14 +409,66 @@ watch(highlightBookId, async (bookId) => {
 
 onBeforeUnmount(() => {
   cleanupTimers()
+  // Flush pending autosave before unmounting
+  if (loadState.value === 'loaded') {
+    const id = currentNovelId.value
+    if (id && editorStore.isDirty) {
+      void editorStore.flushSave(id, editorContent.value)
+    }
+  }
+  window.removeEventListener('keydown', onKeyDown)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   editorStore.reset()
 })
+
+/** Manual save: Ctrl+S or Cmd+S. */
+async function handleManualSave() {
+  if (loadState.value !== 'loaded') return
+  const id = currentNovelId.value
+  if (!id) return
+  await editorStore.flushSave(id, editorContent.value)
+  if (editorStore.isDirty) {
+    ElMessage.success('已保存')
+  }
+}
+
+function onKeyDown(e: KeyboardEvent) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    e.preventDefault()
+    void handleManualSave()
+  }
+}
+
+/** Flush pending save when window becomes hidden (user switches apps). */
+function onVisibilityChange() {
+  if (document.hidden && loadState.value === 'loaded' && editorStore.isDirty) {
+    const id = currentNovelId.value
+    if (id) void editorStore.flushSave(id, editorContent.value)
+  }
+}
+
+// Register global keyboard + visibility listeners
+window.addEventListener('keydown', onKeyDown)
+document.addEventListener('visibilitychange', onVisibilityChange)
 
 function goBack() {
   router.push('/novels')
 }
 
 onBeforeRouteLeave(async (_to, _from, next) => {
+  if (editorStore.isDirty && loadState.value === 'loaded') {
+    // Flush pending autosave so the user doesn't lose content even if they
+    // confirm leaving. This covers the case where the 30s autosave hasn't
+    // fired yet.
+    const id = currentNovelId.value
+    if (id) {
+      try {
+        await editorStore.flushSave(id, editorContent.value)
+      } catch {
+        // If flush fails we still ask for confirmation
+      }
+    }
+  }
   if (editorStore.isDirty) {
     try {
       await ElMessageBox.confirm(

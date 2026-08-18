@@ -39,10 +39,10 @@ pub fn run() {
             let app_data_dir = app
                 .path()
                 .app_data_dir()
-                .expect("failed to resolve app data dir");
+                .map_err(|e| format!("无法解析数据目录: {}", e))?;
 
             let db_state = db::init_db(&app_data_dir)
-                .expect("failed to initialize database");
+                .map_err(|e| format!("数据库初始化失败: {}", e))?;
 
             app.manage(db_state);
             Ok(())

@@ -1,5 +1,5 @@
 mod font;
-mod matcher;
+pub mod matcher;
 mod intensive;
 
 pub use intensive::{parse_steps_from_db, IntensiveSteps};
