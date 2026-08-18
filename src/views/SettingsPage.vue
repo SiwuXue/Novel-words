@@ -57,6 +57,17 @@
               </el-checkbox>
             </el-checkbox-group>
           </el-form-item>
+
+          <el-form-item label="朗读口音">
+            <el-radio-group
+              :model-value="settingsStore.speechAccent"
+              @change="onAccentChange"
+            >
+              <el-radio-button value="us">美式</el-radio-button>
+              <el-radio-button value="uk">英式</el-radio-button>
+            </el-radio-group>
+            <el-button link type="primary" size="small" style="margin-left:12px;" @click="onTestAccent">试听</el-button>
+          </el-form-item>
         </el-form>
       </el-tab-pane>
     </el-tabs>
@@ -70,6 +81,7 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
 import { open } from '@tauri-apps/plugin-dialog'
 import { STEP_LABELS, type StepNum } from '@/types/pdfSteps'
+import { speakWord, type SpeechAccent } from '@/utils/speech'
 
 const settingsStore = useSettingsStore()
 const vocabBookStore = useVocabBookStore()
@@ -115,6 +127,14 @@ async function onStepsChange(next: StepNum[]) {
   }
   await settingsStore.setPdfIntensiveSteps(next)
   localSteps.value = [...settingsStore.pdfIntensiveSteps]
+}
+
+function onAccentChange(accent: SpeechAccent) {
+  settingsStore.setSpeechAccent(accent)
+}
+
+function onTestAccent() {
+  speakWord('hello', settingsStore.speechAccent)
 }
 
 onMounted(() => {

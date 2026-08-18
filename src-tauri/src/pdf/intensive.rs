@@ -5,7 +5,9 @@
 //!         learners can recall the meaning from context.
 //! Step 3: Two-column word list (idx / word / definition), proficiency-colored words,
 //!         with header row, table borders, and chapter-end marker.
-use super::matcher::{find_matches_in_line, words_found_in_text};
+use super::matcher::{
+    find_matches_in_line, find_matches_in_line_en, words_found_in_text, words_found_in_text_en,
+};
 use super::{
     table_border, table_header_bg, text_black, text_gray, text_light_gray, text_purple, text_red,
     text_color_for_proficiency, PdfContext,
@@ -82,8 +84,10 @@ pub fn render(
     chapters: &[Chapter],
     vocabs: &[VocabWord],
     steps: IntensiveSteps,
+    language: &str,
 ) {
     let steps = steps.normalize();
+    let is_en = language == "en";
     for (ci, chapter) in chapters.iter().enumerate() {
         if ci > 0 {
             ctx.new_page_for_chapter();
@@ -91,7 +95,11 @@ pub fn render(
         ctx.reset_chapter_page();
 
         let chapter_num = ci + 1;
-        let chapter_words: Vec<&VocabWord> = words_found_in_text(&chapter.content, vocabs);
+        let chapter_words: Vec<&VocabWord> = if is_en {
+            words_found_in_text_en(&chapter.content, vocabs)
+        } else {
+            words_found_in_text(&chapter.content, vocabs)
+        };
         let chapter_word_count = chapter_words.len();
 
         // Chapter header area (always displayed — chapter headings are not part of steps)
@@ -105,7 +113,11 @@ pub fn render(
                 if ctx.remaining_height() < ctx.line_height * 2.0 {
                     ctx.new_page();
                 }
-                render_annotated_paragraph_step1(ctx, &para, vocabs);
+                if is_en {
+                    render_annotated_paragraph_step1_en(ctx, &para, vocabs);
+                } else {
+                    render_annotated_paragraph_step1(ctx, &para, vocabs);
+                }
                 ctx.current_y -= ctx.line_height * 0.4;
             }
 
@@ -120,7 +132,11 @@ pub fn render(
                 if ctx.remaining_height() < ctx.line_height * 2.0 {
                     ctx.new_page();
                 }
-                render_annotated_paragraph_step2(ctx, &para, vocabs);
+                if is_en {
+                    render_annotated_paragraph_step2_en(ctx, &para, vocabs);
+                } else {
+                    render_annotated_paragraph_step2(ctx, &para, vocabs);
+                }
                 ctx.current_y -= ctx.line_height * 0.4;
             }
         }
@@ -609,6 +625,93 @@ fn render_annotated_paragraph_step2(ctx: &mut PdfContext, line: &str, vocabs: &[
         draw_segment(ctx, &mut x, max_x, en, text_color_for_proficiency(&m.word.proficiency));
 
         // Blank full-width parens: estimate width from definition length
+        let def_len = if m.word.definition.is_empty() {
+            4
+        } else {
+            m.word.definition.chars().count().max(4)
+        };
+        let blank: String = std::iter::repeat('　').take(def_len).collect();
+        let bracket_content = format!("（{}）", blank);
+        draw_segment(ctx, &mut x, max_x, &bracket_content, text_black());
+
+        last = m.end;
+    }
+
+    if last < line.len() {
+        let rest = &line[last..];
+        draw_segment(ctx, &mut x, max_x, rest, text_black());
+    }
+    ctx.current_y -= ctx.line_height;
+}
+
+// ---------------------------------------------------------------------------
+// English-novel paragraph rendering: the body is English, so matched words
+// are colored in place (not swapped in) and （definition）/（　　） appended.
+// ---------------------------------------------------------------------------
+
+/// Step 1 paragraph (English novel): matched English word colored by proficiency
+/// + （definition） purple appended right after the word.
+fn render_annotated_paragraph_step1_en(ctx: &mut PdfContext, line: &str, vocabs: &[VocabWord]) {
+    let matches = find_matches_in_line_en(line, vocabs);
+    if matches.is_empty() {
+        ctx.draw_text_wrapped(line, ctx.margins.left, ctx.usable_width, ctx.font_size);
+        return;
+    }
+
+    let max_x = ctx.margins.left + ctx.usable_width;
+    let mut x = ctx.margins.left;
+    let mut last = 0usize;
+
+    for m in &matches {
+        if m.start > last {
+            let pre = &line[last..m.start];
+            draw_segment(ctx, &mut x, max_x, pre, text_black());
+        }
+        // The English word as it appears in the body, colored by proficiency
+        let en = &line[m.start..m.end];
+        draw_segment(ctx, &mut x, max_x, en, text_color_for_proficiency(&m.word.proficiency));
+
+        // Full-width left paren (black)
+        draw_segment(ctx, &mut x, max_x, "（", text_black());
+        // Definition (purple)
+        let def = if m.word.definition.is_empty() { "—" } else { &m.word.definition };
+        draw_segment(ctx, &mut x, max_x, def, text_purple());
+        // Full-width right paren (black)
+        draw_segment(ctx, &mut x, max_x, "）", text_black());
+
+        last = m.end;
+    }
+
+    if last < line.len() {
+        let rest = &line[last..];
+        draw_segment(ctx, &mut x, max_x, rest, text_black());
+    }
+    ctx.current_y -= ctx.line_height;
+}
+
+/// Step 2 paragraph (English novel): matched English word colored by proficiency
+/// + （　　　） blank appended right after the word.
+fn render_annotated_paragraph_step2_en(ctx: &mut PdfContext, line: &str, vocabs: &[VocabWord]) {
+    let matches = find_matches_in_line_en(line, vocabs);
+    if matches.is_empty() {
+        ctx.draw_text_wrapped(line, ctx.margins.left, ctx.usable_width, ctx.font_size);
+        return;
+    }
+
+    let max_x = ctx.margins.left + ctx.usable_width;
+    let mut x = ctx.margins.left;
+    let mut last = 0usize;
+
+    for m in &matches {
+        if m.start > last {
+            let pre = &line[last..m.start];
+            draw_segment(ctx, &mut x, max_x, pre, text_black());
+        }
+        // The English word as it appears in the body, colored by proficiency
+        let en = &line[m.start..m.end];
+        draw_segment(ctx, &mut x, max_x, en, text_color_for_proficiency(&m.word.proficiency));
+
+        // Blank full-width parens sized to the definition length
         let def_len = if m.word.definition.is_empty() {
             4
         } else {

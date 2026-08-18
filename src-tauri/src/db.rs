@@ -96,6 +96,28 @@ pub fn init_db(app_data_dir: &PathBuf) -> Result<DbState, String> {
         }
     }
 
+    // Migration: add language to novel so each book can be tagged as 'zh' or 'en'
+    // for matching mode (per-novel granularity).
+    {
+        let has_col: bool = conn
+            .prepare("SELECT COUNT(*) > 0 FROM pragma_table_info('novel') WHERE name = 'language'")
+            .and_then(|mut s| s.query_row([], |r| r.get(0)))
+            .unwrap_or(false);
+        if !has_col {
+            conn.execute_batch(
+                "ALTER TABLE novel ADD COLUMN language TEXT NOT NULL DEFAULT 'zh';
+                 UPDATE novel SET language = 'zh' WHERE language = '';",
+            )
+            .map_err(|e| format!("迁移 novel.language 失败: {}", e))?;
+        }
+    }
+
+    // Seed default settings (inserted here so future-added keys land too)
+    conn.execute_batch(
+        "INSERT OR IGNORE INTO app_settings (key, value) VALUES ('speech_accent', 'us');",
+    )
+    .map_err(|e| format!("seed speech_accent 失败: {}", e))?;
+
     Ok(DbState {
         db: Mutex::new(conn),
     })
@@ -110,6 +132,7 @@ CREATE TABLE IF NOT EXISTS novel (
     raw_text     TEXT    NOT NULL DEFAULT '',
     cleaned_text TEXT    NOT NULL DEFAULT '',
     is_favorite  INTEGER NOT NULL DEFAULT 0,
+    language     TEXT    NOT NULL DEFAULT 'zh',
     created_at   TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
     updated_at   TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
 );

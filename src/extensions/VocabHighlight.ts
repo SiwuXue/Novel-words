@@ -3,6 +3,8 @@ import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import type { EditorView } from '@tiptap/pm/view'
 import type { HighlightWord } from '@/types/vocabWord'
+import { speakWord } from '@/utils/speech'
+import { useSettingsStore } from '@/stores/settingsStore'
 
 const PLUGIN_KEY = new PluginKey('vocabHighlight')
 
@@ -114,7 +116,9 @@ function getTooltip(): HTMLDivElement {
     tooltipEl.style.cssText =
       'position:fixed;z-index:9999;display:none;max-width:300px;padding:10px 14px;' +
       'background:#fff;border:1px solid #e4e7ed;border-radius:6px;box-shadow:0 2px 12px rgba(0,0,0,.12);' +
-      'font-size:13px;line-height:1.6;pointer-events:none;'
+      'font-size:13px;line-height:1.6;pointer-events:auto;'
+    // Hide when the mouse leaves the tooltip itself (e.g. after clicking 朗读).
+    tooltipEl.addEventListener('mouseleave', () => hideTooltip())
     document.body.appendChild(tooltipEl)
   }
   return tooltipEl
@@ -138,7 +142,23 @@ function showTooltip(rect: DOMRect, hw: HighlightWord) {
     </div>
     ${hw.definition ? `<div style="color:#303133;">${escapeHtml(hw.definition)}</div>` : ''}
     ${hw.exampleSentence ? `<div style="color:#909399;font-size:12px;margin-top:2px;">例句：${escapeHtml(hw.exampleSentence)}</div>` : ''}
+    <div style="margin-top:6px;"><span data-speak="${escapeHtml(hw.word)}" style="cursor:pointer;color:#409eff;">朗读</span></div>
   `
+
+  // 朗读按钮点击
+  const speakBtn = tip.querySelector('[data-speak]')
+  if (speakBtn) {
+    speakBtn.addEventListener('click', (e: Event) => {
+      e.stopPropagation()
+      let accent: 'us' | 'uk' = 'us'
+      try {
+        accent = useSettingsStore().speechAccent
+      } catch {
+        /* Pinia not ready, use default */
+      }
+      speakWord(hw.word, accent)
+    })
+  }
 
   const top = rect.top - tip.offsetHeight - 6
   const left = rect.left + rect.width / 2 - tip.offsetWidth / 2
@@ -233,6 +253,8 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
               const target = event.target as HTMLElement
               const related = event.relatedTarget as HTMLElement | null
               if (target.closest('.vocab-highlight') && !related?.closest('.vocab-highlight')) {
+                // 鼠标移到 tooltip 内（如点击朗读）时保持显示
+                if (related && tooltipEl && tooltipEl.contains(related)) return false
                 hideTooltip()
               }
               return false

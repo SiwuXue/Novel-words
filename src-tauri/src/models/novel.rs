@@ -10,6 +10,9 @@ pub struct Novel {
     pub raw_text: String,
     pub cleaned_text: String,
     pub is_favorite: bool,
+    /// 'zh' = Chinese novel (match vocab by Chinese definition) |
+    /// 'en' = English novel (match vocab by English word)
+    pub language: String,
     pub created_at: String,
     pub updated_at: String,
 }

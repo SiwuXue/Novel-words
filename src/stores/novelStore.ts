@@ -47,6 +47,7 @@ export const useNovelStore = defineStore('novel', () => {
       category: data.category,
       rawText: data.rawText || '',
       cleanedText: data.cleanedText || data.rawText || '',
+      language: data.language || 'zh',
     })
     novels.value.unshift(novel)
     return novel
@@ -67,6 +68,7 @@ export const useNovelStore = defineStore('novel', () => {
       rawText: merged.rawText || '',
       cleanedText: merged.cleanedText || '',
       isFavorite: merged.isFavorite || false,
+      language: merged.language || 'zh',
     })
     if (currentNovel.value?.id === id) {
       currentNovel.value = { ...currentNovel.value, ...merged }

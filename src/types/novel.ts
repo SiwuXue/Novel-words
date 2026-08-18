@@ -6,6 +6,9 @@ export interface Novel {
   rawText: string
   cleanedText: string
   isFavorite: boolean
+  /** 'zh' = Chinese novel (match by Chinese definition) |
+   *  'en' = English novel (match by English word) */
+  language: 'zh' | 'en'
   createdAt: string
   updatedAt: string
 }
@@ -16,6 +19,7 @@ export interface NovelFormData {
   category: string
   rawText?: string
   cleanedText?: string
+  language?: 'zh' | 'en'
 }
 
 export interface Chapter {

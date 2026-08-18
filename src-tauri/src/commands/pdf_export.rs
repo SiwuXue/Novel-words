@@ -4,7 +4,7 @@ use crate::models::pdf_export_response::PdfExportResponse;
 use crate::models::pdf_template::PdfTemplate;
 use crate::models::vocab_word::VocabWord;
 use crate::pdf;
-use crate::pdf::matcher::words_found_in_text;
+use crate::pdf::matcher::{words_found_in_text, words_found_in_text_en};
 use crate::pdf::{parse_steps_from_db, IntensiveSteps};
 use tauri::State;
 
@@ -31,7 +31,7 @@ pub fn export_pdf(
     // Load novel
     let novel = db
         .query_row(
-            "SELECT id, title, author, category, raw_text, cleaned_text, is_favorite, created_at, updated_at
+            "SELECT id, title, author, category, raw_text, cleaned_text, is_favorite, language, created_at, updated_at
              FROM novel WHERE id = ?1",
             rusqlite::params![novel_id],
             |row| {
@@ -43,8 +43,9 @@ pub fn export_pdf(
                     raw_text: row.get(4)?,
                     cleaned_text: row.get(5)?,
                     is_favorite: row.get(6)?,
-                    created_at: row.get(7)?,
-                    updated_at: row.get(8)?,
+                    language: row.get(7)?,
+                    created_at: row.get(8)?,
+                    updated_at: row.get(9)?,
                 })
             },
         )
@@ -151,8 +152,14 @@ pub fn export_pdf(
     let chapter_count = chapters.len();
     let matched_words: usize = {
         let mut all_found = std::collections::HashSet::new();
+        let is_en = novel.language == "en";
         for ch in &chapters {
-            for w in words_found_in_text(&ch.content, &vocabs) {
+            let found: Vec<&VocabWord> = if is_en {
+                words_found_in_text_en(&ch.content, &vocabs)
+            } else {
+                words_found_in_text(&ch.content, &vocabs)
+            };
+            for w in found {
                 all_found.insert(w.id);
             }
         }

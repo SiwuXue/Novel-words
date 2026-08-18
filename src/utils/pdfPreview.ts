@@ -89,6 +89,64 @@ function wordsFoundInText(text: string, words: VocabWord[]): VocabWord[] {
 }
 
 /* ------------------------------------------------------------------ *
+ * English-novel matching: whole-word, case-insensitive.              *
+ * The body is English, so we locate the English word itself instead  *
+ * of searching by its Chinese definition.                            *
+ * ------------------------------------------------------------------ */
+
+function isAsciiLetter(ch: string): boolean {
+  const c = ch.charCodeAt(0)
+  return (c >= 65 && c <= 90) || (c >= 97 && c <= 122)
+}
+
+function findMatchesInLineEn(line: string, words: VocabWord[]): Match[] {
+  const lineL = line.toLowerCase()
+  const raw: Match[] = []
+  for (const w of words) {
+    const needle = w.word.trim()
+    if (!needle) continue
+    const needleL = needle.toLowerCase()
+    const n = needleL.length
+    let from = 0
+    while (from <= lineL.length - n) {
+      const pos = lineL.indexOf(needleL, from)
+      if (pos < 0) break
+      // whole-word boundary: prev/next must not be a letter / ' / -
+      const prev = pos > 0 ? line[pos - 1] : ''
+      const next = pos + n < line.length ? line[pos + n] : ''
+      const okLeft = !prev || !(isAsciiLetter(prev) || prev === "'" || prev === '-')
+      const okRight = !next || !(isAsciiLetter(next) || next === "'" || next === '-')
+      if (okLeft && okRight) {
+        raw.push({ start: pos, end: pos + n, word: w })
+      }
+      from = pos + n
+      if (from <= pos) break
+    }
+  }
+  raw.sort((a, b) => a.start - b.start || b.end - b.start - (a.end - a.start))
+  const filtered: Match[] = []
+  for (const m of raw) {
+    if (!filtered.some((f) => m.start < f.end && f.start < m.end)) {
+      filtered.push(m)
+    }
+  }
+  return filtered
+}
+
+function wordsFoundInTextEn(text: string, words: VocabWord[]): VocabWord[] {
+  const textL = text.toLowerCase()
+  const found: VocabWord[] = []
+  for (const w of words) {
+    const needle = w.word.trim().toLowerCase()
+    if (!needle) continue
+    if (textL.includes(needle) && !found.some((f) => f.word.toLowerCase() === needle)) {
+      found.push(w)
+    }
+  }
+  return found
+}
+
+/* ------------------------------------------------------------------ *
  * HTML helpers                                                       *
  * ------------------------------------------------------------------ */
 
@@ -142,6 +200,54 @@ function renderParagraphStep2(para: string, words: VocabWord[]): string {
   for (const m of matches) {
     if (m.start > last) out.push(escapeHtml(para.slice(last, m.start)))
     const en = escapeHtml(m.word.word)
+    const defLen = Math.max((m.word.definition || '').length, 4)
+    const blank = Array(defLen + 1).join('\u3000')
+    const enColor = textColorFor(m.word.proficiency)
+    out.push(
+      `<span class="vocab-en" style="color:${enColor}">${en}</span><span class="vocab-blank">（${blank}）</span>`,
+    )
+    last = m.end
+  }
+  if (last < para.length) out.push(escapeHtml(para.slice(last)))
+  return out.join('')
+}
+
+/* English-novel paragraph rendering: the body is English, so matched words
+ * are colored in place (not swapped) and （definition）/（　　） appended. */
+
+/** Step 1 (English novel): matched word colored + （definition）. */
+function renderParagraphStep1En(para: string, words: VocabWord[]): string {
+  const matches = findMatchesInLineEn(para, words)
+  if (matches.length === 0) {
+    return escapeHtml(para)
+  }
+  const out: string[] = []
+  let last = 0
+  for (const m of matches) {
+    if (m.start > last) out.push(escapeHtml(para.slice(last, m.start)))
+    const en = escapeHtml(para.slice(m.start, m.end))
+    const def = escapeHtml(m.word.definition || '—')
+    const enColor = textColorFor(m.word.proficiency)
+    out.push(
+      `<span class="vocab-en" style="color:${enColor}">${en}</span><span class="vocab-paren">（</span><span class="vocab-def">${def}</span><span class="vocab-paren">）</span>`,
+    )
+    last = m.end
+  }
+  if (last < para.length) out.push(escapeHtml(para.slice(last)))
+  return out.join('')
+}
+
+/** Step 2 (English novel): matched word colored + （blank）. */
+function renderParagraphStep2En(para: string, words: VocabWord[]): string {
+  const matches = findMatchesInLineEn(para, words)
+  if (matches.length === 0) {
+    return escapeHtml(para)
+  }
+  const out: string[] = []
+  let last = 0
+  for (const m of matches) {
+    if (m.start > last) out.push(escapeHtml(para.slice(last, m.start)))
+    const en = escapeHtml(para.slice(m.start, m.end))
     const defLen = Math.max((m.word.definition || '').length, 4)
     const blank = Array(defLen + 1).join('\u3000')
     const enColor = textColorFor(m.word.proficiency)
@@ -217,6 +323,8 @@ export interface BuildPreviewInput {
   template?: PdfTemplate | null
   novelTitle?: string
   steps?: StepNum[]
+  /** 'zh' = match vocab by Chinese definition; 'en' = match by English word. */
+  language?: string
 }
 
 function baseCss(fontSize: number, lineHeight: number): string {
@@ -252,18 +360,24 @@ function buildIntensive(
   words: VocabWord[],
   _novelTitle?: string,
   stepsInput?: StepNum[],
+  language?: string,
 ): string {
   const steps = normalizeSteps(stepsInput)
   const includeStep1 = steps.includes(1)
   const includeStep2 = steps.includes(2)
   const includeStep3 = steps.includes(3)
+  const isEn = language === 'en'
+
+  const findWords = isEn ? wordsFoundInTextEn : wordsFoundInText
+  const renderStep1 = isEn ? renderParagraphStep1En : renderParagraphStep1
+  const renderStep2 = isEn ? renderParagraphStep2En : renderParagraphStep2
 
   const parts: string[] = []
   for (let ci = 0; ci < chapters.length; ci++) {
     const ch = chapters[ci]
     const num = ci + 1
     const body = looksLikeHtml(ch.content) ? stripHtml(ch.content) : ch.content
-    const chWords = wordsFoundInText(body, words)
+    const chWords = findWords(body, words)
 
     parts.push(`<div class="intensive-chapter">`)
     parts.push(`<div class="ch-en">Chapter ${num}</div>`)
@@ -277,7 +391,7 @@ function buildIntensive(
         `<div class="step-desc">请仔细阅读下文，注意英文单词及其对应的中文释义。红色=生疏，橙色=熟悉，灰色=已掌握。</div>`,
       )
       for (const para of splitParagraphs(body)) {
-        parts.push(`<p>${renderParagraphStep1(para, words)}</p>`)
+        parts.push(`<p>${renderStep1(para, words)}</p>`)
       }
       parts.push(`<div class="step1-end">—— Step 1 完 ——</div>`)
     }
@@ -288,7 +402,7 @@ function buildIntensive(
         `<div class="step-desc">请再次阅读下文，尝试回忆英文单词对应的中文意思。</div>`,
       )
       for (const para of splitParagraphs(body)) {
-        parts.push(`<p>${renderParagraphStep2(para, words)}</p>`)
+        parts.push(`<p>${renderStep2(para, words)}</p>`)
       }
     }
 
@@ -303,10 +417,10 @@ function buildIntensive(
 }
 
 export function buildHtml(input: BuildPreviewInput): string {
-  const { chapters, words, template, novelTitle, steps } = input
+  const { chapters, words, template, novelTitle, steps, language } = input
   const lineHeight = template?.lineSpacing ?? 1.5
   const fontSize = template?.fontSize ?? 14
   const css = baseCss(fontSize, lineHeight)
-  const bodyContent = buildIntensive(chapters, words, novelTitle, steps)
+  const bodyContent = buildIntensive(chapters, words, novelTitle, steps, language)
   return `<style>${css}</style><div class="pdf-preview-body">${bodyContent}</div>`
 }

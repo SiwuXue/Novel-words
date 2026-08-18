@@ -10,11 +10,13 @@ pub fn create_novel(
     category: String,
     raw_text: String,
     cleaned_text: String,
+    language: Option<String>,
 ) -> Result<Novel, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
+    let lang = language.as_deref().unwrap_or("zh");
     db.execute(
-        "INSERT INTO novel (title, author, category, raw_text, cleaned_text) VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![title, author, category, raw_text, cleaned_text],
+        "INSERT INTO novel (title, author, category, raw_text, cleaned_text, language) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![title, author, category, raw_text, cleaned_text, lang],
     )
     .map_err(|e| format!("创建小说失败: {}", e))?;
 
@@ -26,7 +28,7 @@ pub fn create_novel(
 pub fn get_all_novels(state: State<DbState>) -> Result<Vec<Novel>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let mut stmt = db
-        .prepare("SELECT id, title, author, category, raw_text, cleaned_text, is_favorite, created_at, updated_at FROM novel ORDER BY updated_at DESC")
+        .prepare("SELECT id, title, author, category, raw_text, cleaned_text, is_favorite, language, created_at, updated_at FROM novel ORDER BY updated_at DESC")
         .map_err(|e| e.to_string())?;
 
     let novels = stmt
@@ -54,12 +56,25 @@ pub fn update_novel(
     raw_text: String,
     cleaned_text: String,
     is_favorite: bool,
+    language: Option<String>,
 ) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
+    // Read existing language if not provided so callers that don't pass it
+    // don't blow it away.
+    let lang = match language {
+        Some(l) => l,
+        None => db
+            .query_row(
+                "SELECT language FROM novel WHERE id=?1",
+                rusqlite::params![id],
+                |r| r.get::<_, String>(0),
+            )
+            .unwrap_or_else(|_| "zh".to_string()),
+    };
     let affected = db
         .execute(
-            "UPDATE novel SET title=?1, author=?2, category=?3, raw_text=?4, cleaned_text=?5, is_favorite=?6, updated_at=datetime('now','localtime') WHERE id=?7",
-            rusqlite::params![title, author, category, raw_text, cleaned_text, is_favorite as i32, id],
+            "UPDATE novel SET title=?1, author=?2, category=?3, raw_text=?4, cleaned_text=?5, is_favorite=?6, language=?7, updated_at=datetime('now','localtime') WHERE id=?8",
+            rusqlite::params![title, author, category, raw_text, cleaned_text, is_favorite as i32, lang, id],
         )
         .map_err(|e| format!("更新小说失败: {}", e))?;
 
@@ -83,7 +98,7 @@ pub fn search_novels(state: State<DbState>, query: String) -> Result<Vec<Novel>,
     let pattern = format!("%{}%", query);
     let mut stmt = db
         .prepare(
-            "SELECT id, title, author, category, raw_text, cleaned_text, is_favorite, created_at, updated_at \
+            "SELECT id, title, author, category, raw_text, cleaned_text, is_favorite, language, created_at, updated_at \
              FROM novel WHERE title LIKE ?1 OR author LIKE ?1 OR category LIKE ?1 ORDER BY updated_at DESC",
         )
         .map_err(|e| e.to_string())?;
@@ -99,7 +114,7 @@ pub fn search_novels(state: State<DbState>, query: String) -> Result<Vec<Novel>,
 
 fn get_novel_by_id(db: &rusqlite::Connection, id: i64) -> Result<Novel, String> {
     db.query_row(
-        "SELECT id, title, author, category, raw_text, cleaned_text, is_favorite, created_at, updated_at FROM novel WHERE id=?1",
+        "SELECT id, title, author, category, raw_text, cleaned_text, is_favorite, language, created_at, updated_at FROM novel WHERE id=?1",
         rusqlite::params![id],
         row_to_novel,
     )
@@ -114,8 +129,9 @@ fn row_to_novel(row: &rusqlite::Row) -> rusqlite::Result<Novel> {
         category: row.get(3)?,
         raw_text: row.get(4)?,
         cleaned_text: row.get(5)?,
-        is_favorite: row.get::<_, i32>(6)? != 0,
-        created_at: row.get(7)?,
-        updated_at: row.get(8)?,
+        is_favorite: row.get(6)?,
+        language: row.get(7)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
     })
 }

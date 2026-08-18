@@ -13,7 +13,7 @@
         </el-icon>
       </button>
     </div>
-    <div class="preview-content" v-html="displayHtml" ref="contentRef"></div>
+    <div class="preview-content" v-html="displayHtml" ref="contentRef" @click="onContentClick"></div>
   </div>
 </template>
 
@@ -21,7 +21,10 @@
 import { computed, ref } from 'vue'
 import { FullScreen, Aim } from '@element-plus/icons-vue'
 import { looksLikeHtml } from '@/utils/editorHtml'
+import { speakWord } from '@/utils/speech'
+import { useSettingsStore } from '@/stores/settingsStore'
 
+const settingsStore = useSettingsStore()
 const contentRef = ref<HTMLElement | null>(null)
 
 const props = defineProps<{
@@ -47,6 +50,16 @@ function sanitizeAndWrap(raw: string): string {
     .split(/\n{2,}/)
     .map((p) => '<p>' + p.replace(/\n/g, '<br>') + '</p>')
     .join('')
+}
+
+/** 点击预览中的英文单词（.vocab-en）朗读该单词。 */
+function onContentClick(e: MouseEvent) {
+  const target = e.target as HTMLElement
+  const span = target.closest('.vocab-en') as HTMLElement | null
+  if (!span) return
+  const word = span.textContent?.trim()
+  if (!word) return
+  speakWord(word, settingsStore.speechAccent)
 }
 
 function scrollToText(keyword: string): boolean {
@@ -171,6 +184,12 @@ defineExpose({ scrollToText })
 :deep(.preview-content .vocab-word) {
   display: inline-block;
   line-height: 1.4;
+}
+:deep(.preview-content .vocab-en) {
+  cursor: pointer;
+}
+:deep(.preview-content .vocab-en:hover) {
+  text-decoration: underline;
 }
 :deep(.preview-content .vocab-word sup) {
   margin-left: 2px;

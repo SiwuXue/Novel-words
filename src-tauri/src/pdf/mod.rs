@@ -544,7 +544,7 @@ pub fn generate_pdf(
     };
 
     // 3. Render (intensive reading only)
-    intensive::render(&mut ctx, chapters, vocabs, steps);
+    intensive::render(&mut ctx, chapters, vocabs, steps, &novel.language);
 
     // 4. Add PDF bookmarks for chapter navigation
     for (title, page) in &ctx.bookmarks {

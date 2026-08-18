@@ -41,6 +41,25 @@
           </div>
         </template>
       </el-dropdown>
+      <el-dropdown
+        v-if="loadState === 'loaded'"
+        trigger="click"
+        @command="onLanguageChange"
+      >
+        <el-button size="small" link>
+          🌐 {{ novelLanguageLabel }}
+        </el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="zh" :disabled="store.currentNovel?.language === 'zh'">
+              中文小说（按释义匹配）
+            </el-dropdown-item>
+            <el-dropdown-item command="en" :disabled="store.currentNovel?.language === 'en'">
+              英文小说（按单词匹配）
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
       <el-button
         v-if="loadState === 'loaded'"
         size="small"
@@ -208,6 +227,22 @@ function onPdfStepsChange(next: StepNum[]) {
   pdfSteps.value = next
 }
 
+const novelLanguageLabel = computed(() =>
+  store.currentNovel?.language === 'en' ? '英文模式' : '中文模式',
+)
+
+async function onLanguageChange(lang: string) {
+  const novel = store.currentNovel
+  if (!novel || (lang !== 'zh' && lang !== 'en')) return
+  if (novel.language === lang) return
+  try {
+    await store.update(novel.id, { language: lang })
+    ElMessage.success(`已切换为${lang === 'en' ? '英文' : '中文'}模式`)
+  } catch (e: any) {
+    ElMessage.error('切换模式失败: ' + String(e?.message || e))
+  }
+}
+
 type LoadState = 'loading' | 'loaded' | 'error'
 const loadState = ref<LoadState>('loading')
 const errorMessage = ref('')
@@ -253,6 +288,7 @@ const previewHtml = computed(() => {
     words: highlightWords.value as any,
     novelTitle: store.currentNovel?.title,
     steps: normalizeSteps(pdfSteps.value),
+    language: store.currentNovel?.language,
   })
 })
 

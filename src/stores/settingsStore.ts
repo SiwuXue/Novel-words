@@ -3,12 +3,14 @@ import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { StepNum } from '@/types/pdfSteps'
 import { normalizeSteps, serializeSteps } from '@/types/pdfSteps'
+import type { SpeechAccent } from '@/utils/speech'
 
 export const useSettingsStore = defineStore('settings', () => {
   const theme = ref<'light' | 'dark'>('light')
   const defaultExportFolder = ref('')
   const defaultVocabBookId = ref<number | null>(null)
   const pdfIntensiveSteps = ref<StepNum[]>([1, 2, 3])
+  const speechAccent = ref<SpeechAccent>('us')
   const loaded = ref(false)
 
   async function load() {
@@ -39,6 +41,11 @@ export const useSettingsStore = defineStore('settings', () => {
             }
             break
           }
+          case 'speech_accent':
+            if (s.value === 'uk' || s.value === 'us') {
+              speechAccent.value = s.value
+            }
+            break
         }
       }
     } catch (e) {
@@ -99,16 +106,27 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
+  async function setSpeechAccent(accent: SpeechAccent) {
+    speechAccent.value = accent
+    try {
+      await invoke('set_setting', { key: 'speech_accent', value: accent })
+    } catch (e) {
+      console.error('[settingsStore] setSpeechAccent failed:', e)
+    }
+  }
+
   return {
     theme,
     defaultExportFolder,
     defaultVocabBookId,
     pdfIntensiveSteps,
+    speechAccent,
     loaded,
     load,
     setTheme,
     setDefaultExportFolder,
     setDefaultVocabBookId,
     setPdfIntensiveSteps,
+    setSpeechAccent,
   }
 })
