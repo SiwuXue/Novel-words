@@ -7,7 +7,7 @@ const router = createRouter({
       path: '/',
       name: 'Home',
       component: () => import('@/views/HomePage.vue'),
-      meta: { title: '词阅 PDF 工坊' },
+      meta: { title: '词阅' },
     },
     {
       path: '/novels',
@@ -55,7 +55,7 @@ const router = createRouter({
 })
 
 router.afterEach((to) => {
-  document.title = (to.meta?.title as string) || '词阅 PDF 工坊'
+  document.title = (to.meta?.title as string) || '词阅'
 })
 
 export default router

@@ -8,7 +8,7 @@
   >
     <div class="about-body">
       <div class="about-icon">📖</div>
-      <h2 class="about-title">词阅 PDF 工坊</h2>
+      <h2 class="about-title">词阅</h2>
       <p class="about-version">v{{ version }}</p>
       <p class="about-desc">本地小说阅读与词汇管理，助力外语学习</p>
 

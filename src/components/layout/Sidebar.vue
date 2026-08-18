@@ -1,7 +1,7 @@
 <template>
   <aside class="sidebar">
     <div class="sidebar-header">
-      <h1 class="app-title">词阅 PDF 工坊</h1>
+      <h1 class="app-title">词阅</h1>
     </div>
     <el-menu
       :default-active="activeRoute"

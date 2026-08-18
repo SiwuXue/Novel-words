@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="g2" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#409EFF"/>
+      <stop offset="100%" stop-color="#337ecc"/>
+    </linearGradient>
+  </defs>
+  <!-- Rounded book with pages -->
+  <rect x="10" y="10" width="44" height="46" rx="4" fill="url(#g2)"/>
+  <rect x="14" y="14" width="36" height="38" rx="2" fill="#ffffff"/>
+  <!-- Bookmark -->
+  <rect x="46" y="10" width="6" height="18" rx="1" fill="#e6a23c"/>
+  <rect x="46" y="10" width="6" height="4" rx="1" fill="#f5a623"/>
+  <!-- Word lines -->
+  <rect x="18" y="20" width="16" height="3" rx="1.5" fill="#409EFF"/>
+  <rect x="18" y="27" width="22" height="2" rx="1" fill="#c0c4cc"/>
+  <rect x="18" y="32" width="20" height="2" rx="1" fill="#c0c4cc"/>
+  <rect x="18" y="37" width="14" height="2" rx="1" fill="#c0c4cc"/>
+  <!-- Small EN label -->
+  <circle cx="22" cy="45" r="5" fill="#ecf5ff"/>
+  <text x="22" y="47.5" text-anchor="middle" font-family="Arial" font-size="4.5" font-weight="bold" fill="#409EFF">en</text>
+</svg>

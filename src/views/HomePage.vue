@@ -1,7 +1,7 @@
 <template>
   <div class="home-page">
     <div class="hero">
-      <h1>词阅 PDF 工坊</h1>
+      <h1>词阅</h1>
       <p class="subtitle">本地小说阅读与词汇管理，助力外语学习</p>
     </div>
 
