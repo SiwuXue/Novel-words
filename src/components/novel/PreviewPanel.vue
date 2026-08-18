@@ -1,7 +1,17 @@
 <template>
-  <div class="preview-panel">
+  <div class="preview-panel" :class="{ fullscreen }">
     <div class="panel-header">
       <h4>实时预览</h4>
+      <button
+        class="fullscreen-btn"
+        :title="fullscreen ? '退出全屏' : '全屏预览'"
+        @click="$emit('toggle-fullscreen')"
+      >
+        <el-icon>
+          <FullScreen v-if="!fullscreen" />
+          <Aim v-else />
+        </el-icon>
+      </button>
     </div>
     <div class="preview-content" v-html="displayHtml" ref="contentRef"></div>
   </div>
@@ -9,22 +19,20 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { FullScreen, Aim } from '@element-plus/icons-vue'
 import { looksLikeHtml } from '@/utils/editorHtml'
-
-const props = defineProps<{
-  html: string
-}>()
 
 const contentRef = ref<HTMLElement | null>(null)
 
-/**
- * For HTML input (Tiptap output after any edit, or wrapped paragraphs after
- * the first load) the content is already safe — no sanitization needed.
- * For raw plain text (e.g. a freshly imported novel body that arrives as
- * a single string with newlines), wrap in <p> blocks. Sanitization only
- * runs on the rare plain-text path, so the regex cost is paid once per
- * novel, not once per keystroke.
- */
+const props = defineProps<{
+  html: string
+  fullscreen?: boolean
+}>()
+
+defineEmits<{
+  (e: 'toggle-fullscreen'): void
+}>()
+
 const displayHtml = computed(() => {
   if (!props.html) return '<p style="color:#909399">暂无内容</p>'
   if (looksLikeHtml(props.html)) return props.html
@@ -41,11 +49,6 @@ function sanitizeAndWrap(raw: string): string {
     .join('')
 }
 
-/**
- * Scroll the preview to the first text node containing `keyword`.
- * Walks text nodes via TreeWalker, then scrolls the nearest block ancestor
- * (p / h1-h6 / div) into view.
- */
 function scrollToText(keyword: string): boolean {
   if (!contentRef.value || !keyword) return false
   try {
@@ -58,7 +61,6 @@ function scrollToText(keyword: string): boolean {
     while ((node = walker.nextNode())) {
       const text = node.textContent || ''
       if (text.includes(keyword)) {
-        // Walk up to the nearest block-level element
         let el: HTMLElement | null = node.parentElement as HTMLElement | null
         while (el && el !== contentRef.value) {
           const tag = el.tagName.toLowerCase()
@@ -90,15 +92,47 @@ defineExpose({ scrollToText })
   background: var(--bg-color, #fff);
 }
 
+.preview-panel.fullscreen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9999;
+  border-left: none;
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.2);
+}
+
 .panel-header {
   padding: 12px 16px;
   border-bottom: 1px solid var(--border-color, #ebeef5);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .panel-header h4 {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
+}
+
+.fullscreen-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary, #909399);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.fullscreen-btn:hover {
+  background: var(--accent-light, #ecf5ff);
+  color: var(--accent-color, #409eff);
 }
 
 .preview-content {
@@ -108,6 +142,10 @@ defineExpose({ scrollToText })
   font-size: 15px;
   line-height: 1.8;
   color: var(--text-regular, #303133);
+}
+
+.preview-panel.fullscreen .preview-content {
+  padding: 32px 15%;
 }
 
 :deep(.preview-content h1) {

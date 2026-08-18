@@ -26,7 +26,8 @@
       <el-button
         v-if="loadState === 'loaded'"
         size="small"
-        @click="exportPdfDialogVisible = true"
+        @click="handleExportPdf"
+        :loading="exportingPdf"
       >
         <el-icon><Printer /></el-icon> 导出 PDF
       </el-button>
@@ -83,7 +84,12 @@
         :style="{ width: split.state.rightWidth + 'px' }"
         v-show="split.state.rightWidth > 0"
       >
-        <PreviewPanel ref="previewRef" :html="previewHtml" />
+        <PreviewPanel
+          ref="previewRef"
+          :html="previewHtml"
+          :fullscreen="previewFullscreen"
+          @toggle-fullscreen="togglePreviewFullscreen"
+        />
       </div>
     </div>
 
@@ -102,13 +108,6 @@
         </template>
       </el-result>
     </div>
-
-    <!-- PDF export dialog -->
-    <PdfExportDialog
-      v-model="exportPdfDialogVisible"
-      :template-type="selectedTemplateType"
-      :vocab-book-id="highlightBookId"
-    />
   </div>
 </template>
 
@@ -118,6 +117,7 @@ import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { ArrowLeft, Loading, Printer, DArrowLeft, DArrowRight } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
+import { save } from '@tauri-apps/plugin-dialog'
 import { useNovelStore } from '@/stores/novelStore'
 import { useEditorStore } from '@/stores/editorStore'
 import { usePdfTemplateStore } from '@/stores/pdfTemplateStore'
@@ -125,7 +125,6 @@ import type { HighlightWord } from '@/types/vocabWord'
 import NovelEditor from '@/components/novel/NovelEditor.vue'
 import ChapterList from '@/components/novel/ChapterList.vue'
 import PreviewPanel from '@/components/novel/PreviewPanel.vue'
-import PdfExportDialog from '@/components/pdf/PdfExportDialog.vue'
 import { buildHtml as buildPreviewHtml } from '@/utils/pdfPreview'
 import { useSplitLayout } from '@/composables/useSplitLayout'
 
@@ -146,7 +145,12 @@ const previewRef = ref<InstanceType<typeof PreviewPanel> | null>(null)
 
 const highlightBookId = ref<number | null>(null)
 const highlightWords = ref<HighlightWord[]>([])
-const exportPdfDialogVisible = ref(false)
+const exportingPdf = ref(false)
+const previewFullscreen = ref(false)
+
+function togglePreviewFullscreen() {
+  previewFullscreen.value = !previewFullscreen.value
+}
 
 function loadTemplateType(): string {
   try {
@@ -169,15 +173,11 @@ let loadStartedAt = 0
 let elapsedTimer: number | null = null
 let hardTimeoutTimer: number | null = null
 
-// currentNovelId is a pure derivation of the route — no need for a ref.
 const currentNovelId = computed(() => {
   const n = Number(route.params.id)
   return Number.isFinite(n) ? n : 0
 })
 
-// editorContent mirrors store.currentNovel.cleanedText for read, but the
-// NovelEditor pushes live Tiptap HTML here via @update:content so the
-// preview panel stays in sync between autosaves.
 const editorContentOverride = ref<string | null>(null)
 const editorContent = computed<string>({
   get: () =>
@@ -204,9 +204,6 @@ const previewHtml = computed(() => {
     chapterList.length > 0
       ? chapterList
       : [{ id: 0, novelId: 0, title: '', content, sortOrder: 0, startIndex: 0, createdAt: '' }]
-  // HighlightWord is a subset of VocabWord (no chapter_id/novel_id); the
-  // preview renderer only reads .word/.definition/.phonetic/.proficiency
-  // so it's safe to pass through.
   return buildPreviewHtml({
     chapters,
     words: highlightWords.value as any,
@@ -214,6 +211,59 @@ const previewHtml = computed(() => {
     templateType: selectedTemplateType.value,
   })
 })
+
+/** Remove characters that are invalid in Windows file names. */
+function sanitizeFilename(name: string): string {
+  return name
+    .replace(/[<>:"/\\|?*]/g, '_')
+    .replace(/[\x00-\x1f]/g, '')
+    .trim()
+    .replace(/\.+$/, '')
+    .slice(0, 200) || 'export'
+}
+
+async function handleExportPdf() {
+  const novel = store.currentNovel
+  if (!novel) {
+    ElMessage.error('请先打开小说')
+    return
+  }
+  const tpl = pdfTemplateStore.builtinTemplates.find(
+    (t) => t.templateType === selectedTemplateType.value,
+  ) || pdfTemplateStore.builtinTemplates[0]
+  if (!tpl) {
+    ElMessage.error('未找到内置排版模板')
+    return
+  }
+  let filePath: string | null = null
+  try {
+    filePath = await save({
+      defaultPath: `${sanitizeFilename(novel.title || 'export')}.pdf`,
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    })
+  } catch (e: any) {
+    console.error('[PdfExport] save dialog failed:', e)
+    ElMessage.error('打开保存对话框失败: ' + String(e?.message || e))
+    return
+  }
+  if (!filePath) return
+  exportingPdf.value = true
+  try {
+    await invoke<string>('export_pdf', {
+      novelId: novel.id,
+      templateId: null,
+      templateType: tpl.templateType,
+      vocabBookId: highlightBookId.value,
+      outputPath: filePath,
+    })
+    ElMessage.success('PDF 已导出')
+  } catch (e: any) {
+    console.error('[PdfExport] export_pdf failed:', e)
+    ElMessage.error(String(e?.message || e || '导出失败'))
+  } finally {
+    exportingPdf.value = false
+  }
+}
 
 async function loadNovel() {
   loadStartedAt = Date.now()
@@ -231,7 +281,6 @@ async function loadNovel() {
     elapsedSeconds.value = Math.floor((Date.now() - loadStartedAt) / 1000)
   }, 1000)
 
-  // Hard 10s timeout — independent of any timeout the store may have.
   hardTimeoutTimer = window.setTimeout(() => {
     if (loadState.value === 'loading') {
       errorMessage.value = '加载超时（10s）—— 请检查网络或重启应用'
@@ -311,7 +360,6 @@ function goBack() {
   router.push('/novels')
 }
 
-// Warn on leaving with unsaved changes
 onBeforeRouteLeave(async (_to, _from, next) => {
   if (editorStore.isDirty) {
     try {
@@ -329,12 +377,6 @@ onBeforeRouteLeave(async (_to, _from, next) => {
   }
 })
 
-/**
- * Click handler for the chapter list. Waits two animation frames so any
- * in-flight setContent / sanitization has time to paint, then asks the
- * editor and preview panel to scroll. No polling — if the content isn't
- * ready the scroll call is simply a no-op.
- */
 async function scrollToChapter(index: number) {
   editorStore.activeChapterIndex = index
   const ch = editorStore.chapterList[index]

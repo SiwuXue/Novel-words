@@ -4,6 +4,7 @@
     title="关于"
     width="420px"
     :close-on-click-modal="false"
+    :append-to-body="true"
     center
   >
     <div class="about-body">
