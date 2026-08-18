@@ -1,4 +1,4 @@
-mod font;
+﻿mod font;
 mod matcher;
 mod intensive;
 mod sidebar;
@@ -31,6 +31,12 @@ pub fn highlight_color_for(proficiency: &str) -> Color {
         _ => Color::Rgb(Rgb::new(0xF9 as f32 / 255.0, 0xC7 as f32 / 255.0, 0xC7 as f32 / 255.0, None)),
     }
 }
+
+/// Text colors for the intensive reading template.
+pub const TEXT_RED: Color = Color::Rgb(Rgb::new(0xCC as f32 / 255.0, 0x00 as f32 / 255.0, 0x00 as f32 / 255.0, None));
+pub const TEXT_PURPLE: Color = Color::Rgb(Rgb::new(0x99 as f32 / 255.0, 0x00 as f32 / 255.0, 0x99 as f32 / 255.0, None));
+pub const TEXT_BLACK: Color = Color::Greyscale(Greyscale { percent: 0.0, icc_profile: None });
+pub const TEXT_GRAY: Color = Color::Greyscale(Greyscale { percent: 40.0, icc_profile: None });
 
 /// Split `text` into lines that each fit within `max_width` mm.
 /// Returns owned strings to avoid borrow conflicts.
@@ -145,6 +151,14 @@ pub struct PdfContext {
     pub usable_height: f32,
     pub current_y: f32,     // mm from TOP of page
     pub page_count: usize,
+    /// Whether to render page header/footer (intensive template only).
+    pub show_chrome: bool,
+    /// Page number within the current chapter (resets per chapter).
+    pub chapter_page: usize,
+    /// Novel title for page headers.
+    pub novel_title: String,
+    /// Novel author for page headers.
+    pub novel_author: String,
     /// Pairs of (chapter_title, page_index) recorded during rendering, used to
     /// add PDF bookmarks at the end.
     bookmarks: Vec<(String, usize)>,
@@ -155,10 +169,14 @@ pub struct PdfContext {
 
 impl PdfContext {
     pub fn new_page(&mut self) {
+        if self.show_chrome {
+            self.render_page_chrome();
+        }
         let ops = std::mem::take(&mut self.current_ops);
         let page = PdfPage::new(Mm(self.paper_width), Mm(self.paper_height), ops);
         self.doc.pages.push(page);
         self.page_count += 1;
+        self.chapter_page += 1;
         self.current_y = self.paper_height - self.margins.top;
     }
 
@@ -167,12 +185,37 @@ impl PdfContext {
     /// chapter already forced a page break).
     pub fn new_page_for_chapter(&mut self) {
         if self.current_ops.is_empty() {
-            // Current page is empty — just reset the cursor to the top, don't push
-            // an empty page.
             self.current_y = self.paper_height - self.margins.top;
         } else {
             self.new_page();
         }
+    }
+
+    /// Reset the per-chapter page counter to 1.
+    pub fn reset_chapter_page(&mut self) {
+        self.chapter_page = 1;
+    }
+
+    /// Draw page header (copyright info) and footer (page number).
+    fn render_page_chrome(&mut self) {
+        let pn = self.chapter_page;
+        let header_y = self.paper_height - self.margins.top + 8.0;
+        let copyright = if self.novel_author.is_empty() {
+            "已申请知识产权！禁止倒卖".to_string()
+        } else {
+            format!("作者：{}  已申请知识产权！禁止倒卖", self.novel_author)
+        };
+        self.draw_text_colored(&copyright, self.margins.left, header_y, self.small_font_size * 0.75, TEXT_RED);
+        let title_line = if self.novel_title.is_empty() {
+            "词学习小说".to_string()
+        } else {
+            format!("《{}》— 词学习小说", self.novel_title)
+        };
+        self.draw_text_colored(&title_line, self.margins.left, header_y - 3.5, self.small_font_size * 0.75, TEXT_RED);
+        let page_str = format!("第 {} 页", pn);
+        let pw = self.measure_text_width(&page_str, self.small_font_size);
+        let cx = (self.paper_width - pw) / 2.0;
+        self.draw_text(&page_str, cx, self.margins.bottom - 5.0, self.small_font_size);
     }
 
     /// Record the current page as the start of a chapter with the given title,
@@ -218,6 +261,16 @@ impl PdfContext {
         if !run.is_empty() {
             self.emit_run(&run, cursor_x, bottom_y, size, run_is_latin);
         }
+    }
+
+    /// Draw text with a specific fill color, resetting to black afterwards.
+    pub fn draw_text_colored(&mut self, text: &str, x_mm: f32, y_mm: f32, size: f32, color: Color) {
+        if text.is_empty() {
+            return;
+        }
+        self.current_ops.push(Op::SetFillColor { col: color });
+        self.draw_text(text, x_mm, y_mm, size);
+        self.current_ops.push(Op::SetFillColor { col: TEXT_BLACK });
     }
 
     /// Should this char be drawn with the Latin font rather than the CJK font?
@@ -475,6 +528,8 @@ pub fn generate_pdf(
     let font_size = template.font_size.max(8).min(24) as f32;
     let line_height = template.line_spacing.max(1.0).min(3.0) as f32 * font_size * 0.3528;
 
+    let is_intensive = template.template_type == "intensive";
+
     let mut ctx = PdfContext {
         doc,
         font_id,
@@ -486,24 +541,29 @@ pub fn generate_pdf(
         margins: margins.clone(),
         usable_width: usable_w,
         usable_height: usable_h,
-        current_y: paper_h - margins.top - 60.0,
+        current_y: if is_intensive { paper_h - margins.top - 5.0 } else { paper_h - margins.top - 60.0 },
         page_count: 0,
         paper_width: paper_w,
         paper_height: paper_h,
         current_ops: Vec::new(),
         bookmarks: Vec::new(),
+        show_chrome: is_intensive,
+        chapter_page: 1,
+        novel_title: if novel.title.is_empty() { String::new() } else { novel.title.clone() },
+        novel_author: if novel.author.is_empty() { String::new() } else { novel.author.clone() },
     };
 
-    // 3. Render title (y is now bottom-based, matching current_y)
-    let title_y = paper_h - margins.top - 5.0;
-    let author_y = paper_h - margins.top - 25.0;
-    let title_str = if novel.title.is_empty() { "未命名" } else { &novel.title };
-    ctx.draw_text(title_str, margins.left, title_y, font_size + 4.0);
-    if !novel.author.is_empty() {
-        ctx.draw_text(&novel.author, margins.left, author_y, font_size);
+    // 3. Render title page (skip for intensive — it has its own chapter headers)
+    if !is_intensive {
+        let title_y = paper_h - margins.top - 5.0;
+        let author_y = paper_h - margins.top - 25.0;
+        let title_str = if novel.title.is_empty() { "未命名" } else { &novel.title };
+        ctx.draw_text(title_str, margins.left, title_y, font_size + 4.0);
+        if !novel.author.is_empty() {
+            ctx.draw_text(&novel.author, margins.left, author_y, font_size);
+        }
+        ctx.new_page();
     }
-
-    ctx.new_page();
 
     // 4. Dispatch
     match template.template_type.as_str() {
@@ -521,6 +581,9 @@ pub fn generate_pdf(
 
     // 6. Finalize last page
     if !ctx.current_ops.is_empty() {
+        if ctx.show_chrome {
+            ctx.render_page_chrome();
+        }
         let ops = std::mem::take(&mut ctx.current_ops);
         ctx.doc.pages.push(PdfPage::new(Mm(paper_w), Mm(paper_h), ops));
     }
