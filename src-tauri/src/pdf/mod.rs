@@ -40,6 +40,18 @@ pub fn text_black() -> Color {
 pub fn text_gray() -> Color {
     Color::Greyscale(Greyscale { percent: 40.0, icc_profile: None })
 }
+#[inline]
+pub fn text_light_gray() -> Color {
+    Color::Greyscale(Greyscale { percent: 70.0, icc_profile: None })
+}
+#[inline]
+pub fn table_border() -> Color {
+    Color::Rgb(Rgb::new(0xC8 as f32 / 255.0, 0xD1 as f32 / 255.0, 0xD9 as f32 / 255.0, None))
+}
+#[inline]
+pub fn table_header_bg() -> Color {
+    Color::Rgb(Rgb::new(0xE0 as f32 / 255.0, 0xE8 as f32 / 255.0, 0xEF as f32 / 255.0, None))
+}
 
 /// Return the text color for a given proficiency level (intensive reading).
 /// - unknown → red (needs study)
@@ -356,6 +368,80 @@ impl PdfContext {
             self.current_y -= self.line_height;
         }
         count
+    }
+
+    /// Fill a rectangle with a solid color. x, y are distance from left / bottom.
+    pub fn fill_rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
+        let mm_to_pt = 2.8346;
+        self.current_ops.push(Op::SetFillColor { col: color });
+        self.current_ops.push(Op::DrawRectangle {
+            rectangle: Rect {
+                x: Pt(x * mm_to_pt),
+                y: Pt((y - h) * mm_to_pt),
+                width: Pt(w * mm_to_pt),
+                height: Pt(h * mm_to_pt),
+                mode: Some(PaintMode::Fill),
+                winding_order: None,
+            },
+        });
+        self.current_ops.push(Op::SetFillColor { col: text_black() });
+    }
+
+    /// Draw a horizontal line from (x1,y) to (x2,y). y = bottom-based mm.
+    pub fn draw_hline(&mut self, x1: f32, x2: f32, y: f32, color: Color, thickness_pt: f32) {
+        self.current_ops.push(Op::SetOutlineColor { col: color });
+        self.current_ops.push(Op::SetOutlineThickness { pt: Pt(thickness_pt) });
+        self.current_ops.push(Op::DrawLine {
+            line: Line {
+                points: vec![
+                    LinePoint { p: Point::new(Mm(x1), Mm(y)), bezier: false },
+                    LinePoint { p: Point::new(Mm(x2), Mm(y)), bezier: false },
+                ],
+                is_closed: false,
+            },
+        });
+    }
+
+    /// Draw a vertical line from (x,y1) to (x,y2). y = bottom-based mm.
+    pub fn draw_vline(&mut self, x: f32, y1: f32, y2: f32, color: Color, thickness_pt: f32) {
+        self.current_ops.push(Op::SetOutlineColor { col: color });
+        self.current_ops.push(Op::SetOutlineThickness { pt: Pt(thickness_pt) });
+        self.current_ops.push(Op::DrawLine {
+            line: Line {
+                points: vec![
+                    LinePoint { p: Point::new(Mm(x), Mm(y1)), bezier: false },
+                    LinePoint { p: Point::new(Mm(x), Mm(y2)), bezier: false },
+                ],
+                is_closed: false,
+            },
+        });
+    }
+
+    /// Truncate text to fit within `max_width` mm, appending "…" if truncated.
+    pub fn truncate_text(&self, text: &str, max_width: f32, font_size: f32) -> String {
+        let mut cum_w = 0.0f32;
+        let mut end_idx = 0;
+        for (i, ch) in text.char_indices() {
+            let ch_w = measure_char_width(ch, font_size);
+            if cum_w + ch_w > max_width {
+                break;
+            }
+            cum_w += ch_w;
+            end_idx = i + ch.len_utf8();
+        }
+        if end_idx < text.len() {
+            let mut s = text[..end_idx].to_string();
+            let ellipsis_w = measure_char_width('…', font_size);
+            if cum_w + ellipsis_w <= max_width {
+                s.push('…');
+            } else if s.len() > 0 {
+                s.pop();
+                s.push('…');
+            }
+            s
+        } else {
+            text.to_string()
+        }
     }
 }
 

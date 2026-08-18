@@ -1,10 +1,15 @@
-//! Intensive reading template: two-pass learning structure.
+//! Intensive reading template: three-stage learning structure.
 //! Step 1: English word (by proficiency color) + Chinese definition (purple) inline after the
 //!         matched Chinese term is replaced.
 //! Step 2: Same content but the definition area is a blank bracket pair so
 //!         learners can recall the meaning from context.
+//! Step 3: Two-column word list (idx / word / definition), proficiency-colored words,
+//!         with header row, table borders, and chapter-end marker.
 use super::matcher::{find_matches_in_line, words_found_in_text};
-use super::{text_black, text_gray, text_purple, text_red, text_color_for_proficiency, PdfContext};
+use super::{
+    table_border, table_header_bg, text_black, text_gray, text_light_gray, text_purple, text_red,
+    text_color_for_proficiency, PdfContext,
+};
 use crate::models::novel::Chapter;
 use crate::models::vocab_word::VocabWord;
 use printpdf::Color;
@@ -17,10 +22,11 @@ pub fn render(ctx: &mut PdfContext, chapters: &[Chapter], vocabs: &[VocabWord]) 
         ctx.reset_chapter_page();
 
         let chapter_num = ci + 1;
-        let chapter_words = words_found_in_text(&chapter.content, vocabs);
+        let chapter_words: Vec<&VocabWord> = words_found_in_text(&chapter.content, vocabs);
+        let chapter_word_count = chapter_words.len();
 
         // Chapter header area
-        draw_chapter_header(ctx, chapter_num, &chapter.title, chapter_words.len());
+        draw_chapter_header(ctx, chapter_num, &chapter.title, chapter_word_count);
 
         // ===== STEP 1 =====
         draw_step1_header(ctx);
@@ -45,6 +51,17 @@ pub fn render(ctx: &mut PdfContext, chapters: &[Chapter], vocabs: &[VocabWord]) 
             render_annotated_paragraph_step2(ctx, &para, vocabs);
             ctx.current_y -= ctx.line_height * 0.4;
         }
+
+        // ===== STEP 3 =====
+        if chapter_words.is_empty() {
+            draw_step3_header(ctx, 0);
+        } else {
+            draw_step3_header(ctx, chapter_word_count);
+            draw_step3_word_table(ctx, &chapter_words);
+        }
+
+        // ===== Chapter end marker =====
+        draw_chapter_end_marker(ctx, chapter_num);
     }
 }
 
@@ -131,6 +148,304 @@ fn draw_step2_header(ctx: &mut PdfContext) {
     let desc = "请再次阅读下文，尝试回忆英文单词对应的中文意思。";
     ctx.draw_text_colored(desc, ctx.margins.left, ctx.current_y, ctx.small_font_size, text_gray());
     ctx.current_y -= ctx.line_height * 1.3;
+}
+
+/// Step 3 header: "Step 3：单词列表（本章 N 词）" + description.
+fn draw_step3_header(ctx: &mut PdfContext, word_count: usize) {
+    if ctx.remaining_height() < ctx.line_height * 3.5 {
+        ctx.new_page();
+    }
+    let title = format!("Step 3：单词列表（本章 {} 词）", word_count);
+    ctx.draw_text_colored(&title, ctx.margins.left, ctx.current_y, ctx.font_size + 1.0, text_black());
+    ctx.current_y -= ctx.line_height * 0.8;
+    let desc = if word_count == 0 {
+        "本章没有匹配到词汇本中的单词。".to_string()
+    } else {
+        format!("复习本章出现的全部 {} 个单词，巩固记忆效果。", word_count)
+    };
+    ctx.draw_text_colored(&desc, ctx.margins.left, ctx.current_y, ctx.small_font_size, text_gray());
+    ctx.current_y -= ctx.line_height * 1.2;
+}
+
+/// Centered "—— 第 X 章 完 ——" marker (slightly larger than step-end marker).
+fn draw_chapter_end_marker(ctx: &mut PdfContext, chapter_num: usize) {
+    if ctx.remaining_height() < ctx.line_height * 2.5 {
+        ctx.new_page();
+    }
+    let marker = format!("—— 第 {} 章 完 ——", chapter_num);
+    let w = ctx.measure_text_width(&marker, ctx.font_size + 1.0);
+    let cx = ctx.margins.left + ctx.usable_width / 2.0;
+    ctx.draw_text_colored(&marker, cx - w / 2.0, ctx.current_y, ctx.font_size + 1.0, text_black());
+    ctx.current_y -= ctx.line_height * 1.5;
+}
+
+// ---------------------------------------------------------------------------
+// Step 3: Two-column word table
+// ---------------------------------------------------------------------------
+
+/// Layout parameters for one column of the Step 3 table.
+struct ColLayout {
+    x_left: f32,        // left edge of column block (mm)
+    col_w: f32,         // total column width (mm)
+    idx_w: f32,         // 序号 cell width
+    word_w: f32,        // 单词 cell width
+    def_w: f32,         // 释义 cell width
+}
+
+/// Calculate column layout (two side-by-side tables) given current context.
+fn compute_table_layout(ctx: &PdfContext) -> (ColLayout, ColLayout, f32 /* gap */) {
+    let gap = 4.0; // mm between the two columns
+    let usable = ctx.usable_width;
+    let col_w = (usable - gap) / 2.0;
+
+    let idx_w = (col_w * 0.15).max(8.0);
+    let word_w = col_w * 0.34;
+    let def_w = col_w - idx_w - word_w;
+
+    let left = ColLayout {
+        x_left: ctx.margins.left,
+        col_w,
+        idx_w,
+        word_w,
+        def_w,
+    };
+    let right = ColLayout {
+        x_left: ctx.margins.left + col_w + gap,
+        col_w,
+        idx_w,
+        word_w,
+        def_w,
+    };
+    (left, right, gap)
+}
+
+/// Compute how many data rows (excluding header) fit in `avail_height` mm.
+fn rows_that_fit(_ctx: &PdfContext, avail_height: f32, row_h: f32, header_h: f32) -> usize {
+    if avail_height <= header_h {
+        return 0;
+    }
+    let rem = avail_height - header_h;
+    (rem / row_h).floor() as usize
+}
+
+/// Draw the header row (background + 3 labels + bottom border) for one column.
+/// Returns the y-position of the bottom of the header (= top y minus header height).
+fn draw_column_header(ctx: &mut PdfContext, col: &ColLayout, top_y: f32, header_h: f32) -> f32 {
+    // Background rectangle (fill before text)
+    ctx.fill_rect(col.x_left, top_y, col.col_w, header_h, table_header_bg());
+
+    let border_thick = 0.4;
+    let label_size = ctx.small_font_size;
+    let text_y = top_y - header_h * 0.35; // baseline, approximate within the band
+
+    let x_idx = col.x_left;
+    let x_word = col.x_left + col.idx_w;
+    let x_def = col.x_left + col.idx_w + col.word_w;
+
+    // 序号 (centered)
+    let label_idx = "序号";
+    let w = ctx.measure_text_width(label_idx, label_size);
+    ctx.draw_text_colored(label_idx, x_idx + (col.idx_w - w) / 2.0, text_y, label_size, text_black());
+    // 单词 (centered)
+    let label_word = "单词";
+    let w = ctx.measure_text_width(label_word, label_size);
+    ctx.draw_text_colored(label_word, x_word + (col.word_w - w) / 2.0, text_y, label_size, text_black());
+    // 释义 (centered)
+    let label_def = "释义";
+    let w = ctx.measure_text_width(label_def, label_size);
+    ctx.draw_text_colored(label_def, x_def + (col.def_w - w) / 2.0, text_y, label_size, text_black());
+
+    // Bottom border of header
+    let bottom_y = top_y - header_h;
+    ctx.draw_hline(col.x_left, col.x_left + col.col_w, bottom_y, table_border(), border_thick);
+    // Top border
+    ctx.draw_hline(col.x_left, col.x_left + col.col_w, top_y, table_border(), border_thick);
+    // Left outer border
+    ctx.draw_vline(col.x_left, top_y, bottom_y, table_border(), border_thick);
+    // Divider between 序号 & 单词
+    ctx.draw_vline(x_word, top_y, bottom_y, table_border(), border_thick);
+    // Divider between 单词 & 释义
+    ctx.draw_vline(x_def, top_y, bottom_y, table_border(), border_thick);
+    // Right outer border
+    ctx.draw_vline(col.x_left + col.col_w, top_y, bottom_y, table_border(), border_thick);
+
+    bottom_y
+}
+
+/// Draw one data row at baseline y = `row_top_y` (which is top edge of the row rectangle).
+/// Row occupies row_top_y down to row_top_y - row_h.
+fn draw_data_row(
+    ctx: &mut PdfContext,
+    col: &ColLayout,
+    row_top_y: f32,
+    row_h: f32,
+    idx_num: usize,
+    word: &VocabWord,
+) {
+    let font_size = ctx.small_font_size;
+    let idx_font = font_size * 0.9;
+    let text_y = row_top_y - row_h * 0.32;
+
+    let x_idx = col.x_left;
+    let x_word = col.x_left + col.idx_w;
+    let x_def = col.x_left + col.idx_w + col.word_w;
+    let right_x = col.x_left + col.col_w;
+    let bottom_y = row_top_y - row_h;
+    let border_thick = 0.4;
+
+    // 序号 (two digits, gray, centered)
+    let idx_str = format!("{:02}", idx_num);
+    let w = ctx.measure_text_width(&idx_str, idx_font);
+    ctx.draw_text_colored(&idx_str, x_idx + (col.idx_w - w) / 2.0, text_y, idx_font, text_light_gray());
+
+    // 单词 (by proficiency color, left-aligned with small padding)
+    let pad = 0.6;
+    let en_max_w = col.word_w - pad * 2.0;
+    let en = ctx.truncate_text(&word.word, en_max_w, font_size);
+    ctx.draw_text_colored(&en, x_word + pad, text_y, font_size, text_color_for_proficiency(&word.proficiency));
+
+    // 释义 (black, left-aligned with small padding, truncated)
+    let def = if word.definition.is_empty() { "—" } else { &word.definition };
+    let def_max_w = col.def_w - pad * 2.0;
+    let def_short = ctx.truncate_text(def, def_max_w, font_size);
+    ctx.draw_text_colored(&def_short, x_def + pad, text_y, font_size, text_black());
+
+    // Row bottom border
+    ctx.draw_hline(col.x_left, right_x, bottom_y, table_border(), border_thick);
+    // Dividers
+    ctx.draw_vline(x_word, row_top_y, bottom_y, table_border(), border_thick);
+    ctx.draw_vline(x_def, row_top_y, bottom_y, table_border(), border_thick);
+    // Left & right outer borders
+    ctx.draw_vline(col.x_left, row_top_y, bottom_y, table_border(), border_thick);
+    ctx.draw_vline(right_x, row_top_y, bottom_y, table_border(), border_thick);
+}
+
+/// Render a "page" of the Step 3 table: one column on the left (words L) and
+/// one on the right (words R). Both columns start at the current `ctx.current_y`.
+/// After drawing, `ctx.current_y` is updated to the y below the last row of the
+/// smaller of the two columns (in number of rows — actually both columns use the same
+/// baseline per row, so we just advance by max(count_left, count_right) rows).
+fn render_table_page(
+    ctx: &mut PdfContext,
+    left: &ColLayout,
+    right: &ColLayout,
+    left_words: &[&VocabWord],
+    right_words: &[&VocabWord],
+    left_start_idx: usize,
+    right_start_idx: usize,
+) {
+    let row_h = ctx.line_height * 0.95;
+    let header_h = ctx.line_height * 1.0;
+    let max_rows = left_words.len().max(right_words.len());
+    if max_rows == 0 {
+        return;
+    }
+
+    // Headers
+    let header_bottom_left = draw_column_header(ctx, left, ctx.current_y, header_h);
+    let header_bottom_right = draw_column_header(ctx, right, ctx.current_y, header_h);
+    let header_bottom = header_bottom_left.min(header_bottom_right);
+
+    // Move cursor below header to start drawing rows
+    let mut row_top = header_bottom;
+
+    for i in 0..max_rows {
+        // Left row
+        if i < left_words.len() {
+            draw_data_row(ctx, left, row_top, row_h, left_start_idx + i, left_words[i]);
+        } else {
+            // Still draw left outer column border lines / bottom lines with empty content,
+            // so the two columns visually match in height.
+            let bottom_y = row_top - row_h;
+            let bt = 0.4;
+            let col = left;
+            ctx.draw_hline(col.x_left, col.x_left + col.col_w, bottom_y, table_border(), bt);
+            ctx.draw_vline(col.x_left, row_top, bottom_y, table_border(), bt);
+            ctx.draw_vline(col.x_left + col.col_w, row_top, bottom_y, table_border(), bt);
+            let x1 = col.x_left + col.idx_w;
+            let x2 = col.x_left + col.idx_w + col.word_w;
+            ctx.draw_vline(x1, row_top, bottom_y, table_border(), bt);
+            ctx.draw_vline(x2, row_top, bottom_y, table_border(), bt);
+        }
+        // Right row
+        if i < right_words.len() {
+            draw_data_row(ctx, right, row_top, row_h, right_start_idx + i, right_words[i]);
+        } else {
+            let bottom_y = row_top - row_h;
+            let bt = 0.4;
+            let col = right;
+            ctx.draw_hline(col.x_left, col.x_left + col.col_w, bottom_y, table_border(), bt);
+            ctx.draw_vline(col.x_left, row_top, bottom_y, table_border(), bt);
+            ctx.draw_vline(col.x_left + col.col_w, row_top, bottom_y, table_border(), bt);
+            let x1 = col.x_left + col.idx_w;
+            let x2 = col.x_left + col.idx_w + col.word_w;
+            ctx.draw_vline(x1, row_top, bottom_y, table_border(), bt);
+            ctx.draw_vline(x2, row_top, bottom_y, table_border(), bt);
+        }
+        row_top -= row_h;
+    }
+
+    ctx.current_y = row_top;
+}
+
+/// Core Step 3 table renderer.
+/// Algorithm (sequential dual column):
+///   * Given remaining space, compute R = rows per column that fit.
+///   * Page 1: left = words[0..R], right = words[R..2R]
+///   * new_page() if more words; repeat pattern with full-page R'
+fn draw_step3_word_table<'a>(ctx: &mut PdfContext, words: &[&'a VocabWord]) {
+    let (left_col, right_col, _gap) = compute_table_layout(ctx);
+    let row_h = ctx.line_height * 0.95;
+    let header_h = ctx.line_height * 1.0;
+
+    let full_page_rows = {
+        let total_available = ctx.paper_height - ctx.margins.top - ctx.margins.bottom - 5.0;
+        rows_that_fit(ctx, total_available, row_h, header_h)
+    };
+    let rows_first_page = rows_that_fit(ctx, ctx.remaining_height(), row_h, header_h);
+
+    let mut i = 0;
+    let n = words.len();
+    let mut is_first = true;
+
+    while i < n {
+        let rows_per_col: usize = if is_first {
+            if rows_first_page < 3 {
+                ctx.new_page();
+                full_page_rows
+            } else {
+                rows_first_page
+            }
+        } else {
+            full_page_rows
+        };
+        is_first = false;
+
+        if rows_per_col == 0 {
+            ctx.new_page();
+            continue;
+        }
+
+        let left_end = (i + rows_per_col).min(n);
+        let left: &[&VocabWord] = &words[i..left_end];
+        let left_len = left.len();
+        let r_start = i + rows_per_col;
+        let right: &[&VocabWord] = if r_start < n {
+            &words[r_start..(r_start + rows_per_col).min(n)]
+        } else {
+            &[]
+        };
+
+        render_table_page(ctx, &left_col, &right_col, left, right, i, r_start);
+
+        i += left_len + right.len();
+        if i < n {
+            ctx.current_y -= ctx.line_height * 0.8;
+            ctx.new_page();
+        }
+    }
+
+    ctx.current_y -= ctx.line_height * 0.8;
 }
 
 // ---------------------------------------------------------------------------

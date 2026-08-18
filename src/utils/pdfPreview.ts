@@ -152,6 +152,42 @@ function renderParagraphStep2(para: string, words: VocabWord[]): string {
   return out.join('')
 }
 
+/** Step 3: Build a single column table (序号 / 单词 / 释义). */
+function buildStep3ColumnTable(list: VocabWord[], startIdx: number): string {
+  const rows = list
+    .map((w, i) => {
+      const idx = String(startIdx + i + 1).padStart(2, '0')
+      const en = escapeHtml(w.word)
+      const def = escapeHtml(w.definition || '—')
+      const enColor = textColorFor(w.proficiency)
+      return `<tr><td class="idx">${idx}</td><td class="word" style="color:${enColor}">${en}</td><td class="def" title="${def}">${def}</td></tr>`
+    })
+    .join('')
+  return `<table><thead><tr><th>序号</th><th>单词</th><th>释义</th></tr></thead><tbody>${rows}</tbody></table>`
+}
+
+/** Step 3 block: title + description + two-column word table. */
+function buildStep3Block(chWords: VocabWord[]): string {
+  const n = chWords.length
+  if (n === 0) {
+    return [
+      `<div class="step-title">Step 3：单词列表（本章 0 词）</div>`,
+      `<div class="step-desc">本章没有匹配到词汇本中的单词。</div>`,
+    ].join('')
+  }
+  const mid = Math.ceil(n / 2)
+  const left = chWords.slice(0, mid)
+  const right = chWords.slice(mid)
+  return [
+    `<div class="step-title">Step 3：单词列表（本章 ${n} 词）</div>`,
+    `<div class="step-desc">复习本章出现的全部 ${n} 个单词，巩固记忆效果。</div>`,
+    `<div class="step3-tables">`,
+    buildStep3ColumnTable(left, 0),
+    buildStep3ColumnTable(right, mid),
+    `</div>`,
+  ].join('')
+}
+
 function stripHtml(html: string): string {
   return html
     .replace(/<br\s*\/?>/gi, '\n')
@@ -195,6 +231,15 @@ function baseCss(fontSize: number, lineHeight: number): string {
     .pdf-preview-body .step-title { font-size: ${fontSize + 1}px; margin: 14px 0 4px; font-weight: 600; }
     .pdf-preview-body .step-desc { font-size: ${fontSize - 2}px; margin: 0 0 10px; color: #999; }
     .pdf-preview-body .step1-end { font-size: ${fontSize - 1}px; text-align: center; margin: 14px 0 18px; color: #999; letter-spacing: 2px; }
+    .pdf-preview-body .chapter-end { font-size: ${fontSize + 1}px; text-align: center; margin: 26px 0 10px; letter-spacing: 2px; }
+    .pdf-preview-body .step3-tables { display: flex; justify-content: space-between; gap: 2%; margin-top: 10px; }
+    .pdf-preview-body .step3-tables table { border-collapse: collapse; width: 49%; table-layout: fixed; }
+    .pdf-preview-body .step3-tables th,
+    .pdf-preview-body .step3-tables td { border: 1px solid #C8D1D9; padding: 4px 6px; font-size: ${fontSize - 1}px; }
+    .pdf-preview-body .step3-tables thead th { background: #E0E8EF; color: #333; font-weight: 600; text-align: center; }
+    .pdf-preview-body .step3-tables td.idx { text-align: center; color: #888; width: 20%; font-size: ${fontSize - 2}px; }
+    .pdf-preview-body .step3-tables td.word { width: 34%; font-weight: 500; }
+    .pdf-preview-body .step3-tables td.def { width: 46%; color: #222; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pdf-preview-body p { margin: 0 0 8px; text-indent: 2em; }
   `
 }
@@ -225,6 +270,9 @@ function buildIntensive(chapters: Chapter[], words: VocabWord[], _novelTitle?: s
     for (const para of splitParagraphs(body)) {
       parts.push(`<p>${renderParagraphStep2(para, words)}</p>`)
     }
+
+    parts.push(buildStep3Block(chWords))
+    parts.push(`<div class="chapter-end">—— 第 ${num} 章 完 ——</div>`)
     parts.push(`</div>`)
   }
   return parts.join('\n')
