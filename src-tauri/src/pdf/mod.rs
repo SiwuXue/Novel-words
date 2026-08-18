@@ -1,4 +1,4 @@
-﻿mod font;
+mod font;
 mod matcher;
 mod intensive;
 mod sidebar;
@@ -33,10 +33,23 @@ pub fn highlight_color_for(proficiency: &str) -> Color {
 }
 
 /// Text colors for the intensive reading template.
-pub const TEXT_RED: Color = Color::Rgb(Rgb::new(0xCC as f32 / 255.0, 0x00 as f32 / 255.0, 0x00 as f32 / 255.0, None));
-pub const TEXT_PURPLE: Color = Color::Rgb(Rgb::new(0x99 as f32 / 255.0, 0x00 as f32 / 255.0, 0x99 as f32 / 255.0, None));
-pub const TEXT_BLACK: Color = Color::Greyscale(Greyscale { percent: 0.0, icc_profile: None });
-pub const TEXT_GRAY: Color = Color::Greyscale(Greyscale { percent: 40.0, icc_profile: None });
+/// `Rgb::new` is not a const fn, so these are exposed as helper functions.
+#[inline]
+pub fn text_red() -> Color {
+    Color::Rgb(Rgb::new(0xCC as f32 / 255.0, 0x00 as f32 / 255.0, 0x00 as f32 / 255.0, None))
+}
+#[inline]
+pub fn text_purple() -> Color {
+    Color::Rgb(Rgb::new(0x99 as f32 / 255.0, 0x00 as f32 / 255.0, 0x99 as f32 / 255.0, None))
+}
+#[inline]
+pub fn text_black() -> Color {
+    Color::Greyscale(Greyscale { percent: 0.0, icc_profile: None })
+}
+#[inline]
+pub fn text_gray() -> Color {
+    Color::Greyscale(Greyscale { percent: 40.0, icc_profile: None })
+}
 
 /// Split `text` into lines that each fit within `max_width` mm.
 /// Returns owned strings to avoid borrow conflicts.
@@ -205,13 +218,13 @@ impl PdfContext {
         } else {
             format!("作者：{}  已申请知识产权！禁止倒卖", self.novel_author)
         };
-        self.draw_text_colored(&copyright, self.margins.left, header_y, self.small_font_size * 0.75, TEXT_RED);
+        self.draw_text_colored(&copyright, self.margins.left, header_y, self.small_font_size * 0.75, text_red());
         let title_line = if self.novel_title.is_empty() {
             "词学习小说".to_string()
         } else {
             format!("《{}》— 词学习小说", self.novel_title)
         };
-        self.draw_text_colored(&title_line, self.margins.left, header_y - 3.5, self.small_font_size * 0.75, TEXT_RED);
+        self.draw_text_colored(&title_line, self.margins.left, header_y - 3.5, self.small_font_size * 0.75, text_red());
         let page_str = format!("第 {} 页", pn);
         let pw = self.measure_text_width(&page_str, self.small_font_size);
         let cx = (self.paper_width - pw) / 2.0;
@@ -270,7 +283,7 @@ impl PdfContext {
         }
         self.current_ops.push(Op::SetFillColor { col: color });
         self.draw_text(text, x_mm, y_mm, size);
-        self.current_ops.push(Op::SetFillColor { col: TEXT_BLACK });
+        self.current_ops.push(Op::SetFillColor { col: text_black() });
     }
 
     /// Should this char be drawn with the Latin font rather than the CJK font?

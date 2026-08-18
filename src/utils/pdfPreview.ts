@@ -2,8 +2,8 @@
  * Frontend PDF preview renderer.
  *
  * Produces the same look as the Rust printpdf backend (which is the real
- * exporter): per-paragraph inline annotations + per-chapter word table +
- * full-book word table, with each vocab word colored by proficiency.
+ * exporter): per-paragraph inline annotations in two-pass (Step 1/Step 2)
+ * structure for the intensive template.
  *
  * This module does NOT call the printer — it just emits HTML the preview
  * panel can render and that the user can sanity-check before clicking
@@ -113,7 +113,11 @@ export function splitParagraphs(content: string): string[] {
   return parts.map((p) => p.trim()).filter((p) => p.length > 0)
 }
 
-function renderParagraph(para: string, words: VocabWord[]): string {
+/**
+ * Step 1 paragraph: matched Chinese → English (red) + （definition purple）.
+ * The original Chinese term is dropped and replaced.
+ */
+function renderParagraphStep1(para: string, words: VocabWord[]): string {
   const matches = findMatchesInLine(para, words)
   if (matches.length === 0) {
     return escapeHtml(para)
@@ -122,13 +126,11 @@ function renderParagraph(para: string, words: VocabWord[]): string {
   let last = 0
   for (const m of matches) {
     if (m.start > last) out.push(escapeHtml(para.slice(last, m.start)))
-    const matched = para.slice(m.start, m.end)
-    const c = highlightFor(m.word.proficiency)
-    const sup = m.word.phonetic
-      ? `${escapeHtml(m.word.phonetic)} ${escapeHtml(m.word.definition || '')}`
-      : escapeHtml(m.word.definition || '')
+    // Skip the original matched Chinese term (m.start..m.end). Replace it:
+    const en = escapeHtml(m.word.word)
+    const def = escapeHtml(m.word.definition || '—')
     out.push(
-      `<span class="vocab-word" data-prof="${m.word.proficiency}" style="background:${c.bg};color:${c.text};border-radius:3px;padding:0 3px;font-weight:500;">${escapeHtml(matched)}<sup style="font-size:0.65em;margin-left:2px;color:${c.text};">${sup}</sup></span>`,
+      `<span class="vocab-en">${en}</span><span class="vocab-paren">（</span><span class="vocab-def">${def}</span><span class="vocab-paren">）</span>`,
     )
     last = m.end
   }
@@ -136,23 +138,28 @@ function renderParagraph(para: string, words: VocabWord[]): string {
   return out.join('')
 }
 
-function renderChapterWordTable(chapterTitle: string, words: VocabWord[]): string {
-  if (words.length === 0) return ''
-  const rows = words
-    .map((w) => {
-      const c = highlightFor(w.proficiency)
-      return `<tr>
-        <td><span class="vocab-word" data-prof="${w.proficiency}" style="background:${c.bg};color:${c.text};border-radius:3px;padding:1px 4px;">${escapeHtml(w.word)}</span></td>
-        <td>${escapeHtml(w.phonetic || '—')}</td>
-        <td>${escapeHtml(w.definition || '—')}</td>
-      </tr>`
-    })
-    .join('')
-  return `<h3 class="vocab-heading">${escapeHtml(chapterTitle)} — 生词表</h3>
-    <table class="vocab-table">
-      <thead><tr><th>单词</th><th>音标</th><th>释义</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`
+/**
+ * Step 2 paragraph: matched Chinese → English (red) + （blank bracket）.
+ */
+function renderParagraphStep2(para: string, words: VocabWord[]): string {
+  const matches = findMatchesInLine(para, words)
+  if (matches.length === 0) {
+    return escapeHtml(para)
+  }
+  const out: string[] = []
+  let last = 0
+  for (const m of matches) {
+    if (m.start > last) out.push(escapeHtml(para.slice(last, m.start)))
+    const en = escapeHtml(m.word.word)
+    const defLen = Math.max((m.word.definition || '').length, 4)
+    const blank = Array(defLen + 1).join('\u3000') // ideographic space
+    out.push(
+      `<span class="vocab-en">${en}</span><span class="vocab-blank">（${blank}）</span>`,
+    )
+    last = m.end
+  }
+  if (last < para.length) out.push(escapeHtml(para.slice(last)))
+  return out.join('')
 }
 
 function renderFullTable(words: VocabWord[]): string {
@@ -214,8 +221,20 @@ function baseCss(fontSize: number, lineHeight: number): string {
   return `
     .pdf-preview-body { font-size: ${fontSize}px; line-height: ${lineHeight}; color: #222; }
     .pdf-preview-body .vocab-word { display: inline-block; }
+    .pdf-preview-body .vocab-en { color: #CC0000; font-weight: 500; }
+    .pdf-preview-body .vocab-def { color: #990099; }
+    .pdf-preview-body .vocab-paren { color: #222; }
+    .pdf-preview-body .vocab-blank { color: #999; letter-spacing: 0; }
     .pdf-preview-body h1.title { font-size: ${fontSize + 8}px; text-align: center; margin: 32px 0 8px; }
     .pdf-preview-body h2.chapter { font-size: ${fontSize + 4}px; margin: 24px 0 8px; padding-bottom: 4px; border-bottom: 1px solid #ddd; }
+    .pdf-preview-body .intensive-chapter { margin-bottom: 20px; page-break-after: always; }
+    .pdf-preview-body .intensive-chapter .ch-en { font-size: ${fontSize + 6}px; text-align: center; margin: 20px 0 6px; font-weight: 600; }
+    .pdf-preview-body .intensive-chapter .ch-cn { font-size: ${fontSize + 2}px; text-align: center; margin: 0 0 4px; font-weight: 600; }
+    .pdf-preview-body .intensive-chapter .ch-sub { font-size: ${fontSize - 1}px; text-align: center; margin: 0 0 3px; color: #CC0000; }
+    .pdf-preview-body .intensive-chapter .ch-wc { font-size: ${fontSize - 2}px; text-align: center; margin: 0 0 14px; color: #999; }
+    .pdf-preview-body .step-title { font-size: ${fontSize + 1}px; margin: 14px 0 4px; font-weight: 600; }
+    .pdf-preview-body .step-desc { font-size: ${fontSize - 2}px; margin: 0 0 10px; color: #999; }
+    .pdf-preview-body .step1-end { font-size: ${fontSize - 1}px; text-align: center; margin: 14px 0 18px; color: #999; letter-spacing: 2px; }
     .pdf-preview-body p { margin: 0 0 8px; text-indent: 2em; }
     .pdf-preview-body .vocab-heading { font-size: ${fontSize + 2}px; margin: 18px 0 6px; }
     .pdf-preview-body .vocab-table { width: 100%; border-collapse: collapse; font-size: ${fontSize - 1}px; margin: 0 0 16px; }
@@ -230,22 +249,39 @@ function baseCss(fontSize: number, lineHeight: number): string {
   `
 }
 
-/** Intensive: inline annotations + word tables (current behavior). */
+/** Intensive: two-pass (Step 1 / Step 2) chapter rendering without word tables. */
 function buildIntensive(
-  chapters: Chapter[], words: VocabWord[], novelTitle?: string,
+  chapters: Chapter[], words: VocabWord[], _novelTitle?: string,
 ): string {
   const parts: string[] = []
-  if (novelTitle) parts.push(`<h1 class="title">${escapeHtml(novelTitle)}</h1>`)
-  for (const ch of chapters) {
-    if (ch.title) parts.push(`<h2 class="chapter">${escapeHtml(ch.title)}</h2>`)
+  for (let ci = 0; ci < chapters.length; ci++) {
+    const ch = chapters[ci]
+    const num = ci + 1
     const body = looksLikeHtml(ch.content) ? stripHtml(ch.content) : ch.content
-    for (const para of splitParagraphs(body)) {
-      parts.push(`<p>${renderParagraph(para, words)}</p>`)
-    }
     const chWords = wordsFoundInText(body, words)
-    parts.push(renderChapterWordTable(ch.title, chWords))
+
+    parts.push(`<div class="intensive-chapter">`)
+    parts.push(`<div class="ch-en">Chapter ${num}</div>`)
+    if (ch.title) parts.push(`<div class="ch-cn">${escapeHtml(ch.title)}</div>`)
+    parts.push(`<div class="ch-sub">【第 ${num} 章】</div>`)
+    parts.push(`<div class="ch-wc">本章词汇：${chWords.length} 词</div>`)
+
+    // Step 1
+    parts.push(`<div class="step-title">Step 1：在语境中背单词</div>`)
+    parts.push(`<div class="step-desc">请仔细阅读下文，注意红色单词及其对应的中文释义。</div>`)
+    for (const para of splitParagraphs(body)) {
+      parts.push(`<p>${renderParagraphStep1(para, words)}</p>`)
+    }
+    parts.push(`<div class="step1-end">—— Step 1 完 ——</div>`)
+
+    // Step 2
+    parts.push(`<div class="step-title">Step 2：看单词回忆词义</div>`)
+    parts.push(`<div class="step-desc">请再次阅读下文，尝试回忆红色单词对应的中文意思。</div>`)
+    for (const para of splitParagraphs(body)) {
+      parts.push(`<p>${renderParagraphStep2(para, words)}</p>`)
+    }
+    parts.push(`</div>`)
   }
-  parts.push(renderFullTable(words))
   return parts.join('\n')
 }
 
