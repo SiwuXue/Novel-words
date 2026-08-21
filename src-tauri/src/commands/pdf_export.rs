@@ -17,9 +17,9 @@ fn steps_label(steps: IntensiveSteps) -> String {
 }
 
 #[tauri::command]
-pub fn export_pdf(
+pub async fn export_pdf(
     app: AppHandle,
-    state: State<DbState>,
+    state: State<'_, DbState>,
     novel_id: i64,
     _template_id: Option<i64>,
     _template_type: Option<String>,
@@ -27,175 +27,186 @@ pub fn export_pdf(
     steps: Option<Vec<i64>>,
     output_path: String,
 ) -> Result<PdfExportResponse, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    // ---- Phase 1: read all data from SQLite (fast, hold the lock only briefly) ----
+    let (novel, template, vocabs, chapters, steps) = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
 
-    // Load novel
-    let novel = db
-        .query_row(
-            "SELECT id, title, author, category, raw_text, cleaned_text, is_favorite, language, created_at, updated_at
-             FROM novel WHERE id = ?1",
-            rusqlite::params![novel_id],
-            |row| {
-                Ok(Novel {
-                    id: row.get(0)?,
-                    title: row.get(1)?,
-                    author: row.get(2)?,
-                    category: row.get(3)?,
-                    raw_text: row.get(4)?,
-                    cleaned_text: row.get(5)?,
-                    is_favorite: row.get(6)?,
-                    language: row.get(7)?,
-                    created_at: row.get(8)?,
-                    updated_at: row.get(9)?,
-                })
-            },
-        )
-        .map_err(|e| format!("查询小说失败: {}", e))?;
-
-    // Use default template (intensive reading only)
-    let template = default_template();
-
-    // Load vocab words if a book is selected
-    let vocabs: Vec<VocabWord> = if let Some(book_id) = vocab_book_id {
-        let mut stmt = db
-            .prepare(
-                "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, created_at
-                 FROM vocab_word WHERE vocab_book_id = ?1",
+        // Load novel
+        let novel = db
+            .query_row(
+                "SELECT id, title, author, category, raw_text, cleaned_text, is_favorite, language, created_at, updated_at
+                 FROM novel WHERE id = ?1",
+                rusqlite::params![novel_id],
+                |row| {
+                    Ok(Novel {
+                        id: row.get(0)?,
+                        title: row.get(1)?,
+                        author: row.get(2)?,
+                        category: row.get(3)?,
+                        raw_text: row.get(4)?,
+                        cleaned_text: row.get(5)?,
+                        is_favorite: row.get(6)?,
+                        language: row.get(7)?,
+                        created_at: row.get(8)?,
+                        updated_at: row.get(9)?,
+                    })
+                },
             )
-            .map_err(|e| format!("查询生词失败: {}", e))?;
-        let rows = stmt
-            .query_map(rusqlite::params![book_id], |row| {
-                Ok(VocabWord {
-                    id: row.get(0)?,
-                    vocab_book_id: row.get(1)?,
-                    word: row.get(2)?,
-                    definition: row.get(3)?,
-                    phonetic: row.get(4)?,
-                    example_sentence: row.get(5)?,
-                    novel_id: row.get(6)?,
-                    chapter_id: None,
-                    proficiency: row.get(7)?,
-                    memory_tag: row.get(8)?,
-                    created_at: row.get(9)?,
-                })
-            })
-            .map_err(|e| format!("查询生词失败: {}", e))?;
-        rows.filter_map(|r| r.ok()).collect()
-    } else {
-        Vec::new()
-    };
+            .map_err(|e| format!("查询小说失败: {}", e))?;
 
-    // Load chapters (fallback to full-text if none in DB)
-    let chapters: Vec<Chapter> = {
-        let mut stmt = db
-            .prepare(
-                "SELECT id, novel_id, title, content, sort_order, created_at FROM chapter WHERE novel_id = ?1 ORDER BY sort_order",
-            )
-            .map_err(|e| format!("查询章节失败: {}", e))?;
-        let rows: Vec<Chapter> = stmt
-            .query_map(rusqlite::params![novel_id], |row| {
-                Ok(Chapter {
-                    id: row.get(0)?,
-                    novel_id: row.get(1)?,
-                    title: row.get(2)?,
-                    content: row.get(3)?,
-                    sort_order: row.get(4)?,
-                    start_index: 0,
-                    created_at: row.get(5)?,
+        // Use default template (intensive reading only)
+        let template = default_template();
+
+        // Load vocab words if a book is selected
+        let vocabs: Vec<VocabWord> = if let Some(book_id) = vocab_book_id {
+            let mut stmt = db
+                .prepare(
+                    "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, created_at
+                     FROM vocab_word WHERE vocab_book_id = ?1",
+                )
+                .map_err(|e| format!("查询生词失败: {}", e))?;
+            let rows = stmt
+                .query_map(rusqlite::params![book_id], |row| {
+                    Ok(VocabWord {
+                        id: row.get(0)?,
+                        vocab_book_id: row.get(1)?,
+                        word: row.get(2)?,
+                        definition: row.get(3)?,
+                        phonetic: row.get(4)?,
+                        example_sentence: row.get(5)?,
+                        novel_id: row.get(6)?,
+                        chapter_id: None,
+                        proficiency: row.get(7)?,
+                        memory_tag: row.get(8)?,
+                        created_at: row.get(9)?,
+                    })
                 })
-            })
-            .map_err(|e| e.to_string())?
-            .filter_map(|r| r.ok())
-            .collect();
-        if rows.is_empty() {
-            // Fallback: one chapter with full novel text
-            let text = if !novel.cleaned_text.is_empty() {
-                &novel.cleaned_text
-            } else {
-                &novel.raw_text
-            };
-            vec![Chapter {
-                id: 0,
-                novel_id,
-                title: "全文".into(),
-                content: text.clone(),
-                sort_order: 0,
-                start_index: 0,
-                created_at: String::new(),
-            }]
+                .map_err(|e| format!("查询生词失败: {}", e))?;
+            rows.filter_map(|r| r.ok()).collect()
         } else {
-            rows
-        }
-    };
+            Vec::new()
+        };
 
-    // ===== Resolve steps (frontend override → DB default → all enabled) =====
-    let steps = match steps {
-        Some(arr) => IntensiveSteps {
-            step1: arr.contains(&1),
-            step2: arr.contains(&2),
-            step3: arr.contains(&3),
-        }
-        .normalize(),
-        None => {
-            let db_val: Result<String, _> = db.query_row(
-                "SELECT value FROM app_settings WHERE key='pdf_intensive_steps'",
-                [],
-                |row| row.get(0),
-            );
-            parse_steps_from_db(db_val.ok().as_deref())
-        }
-    };
-
-    drop(db);
-
-    let _ = app.emit(
-        "pdf-export-progress",
-        crate::pdf::PdfProgress {
-            percent: 0,
-            message: "正在统计词汇匹配…".to_string(),
-        },
-    );
-
-    // ===== Compute coverage stats before generating =====
-    let total_vocab = vocabs.len();
-    let chapter_count = chapters.len();
-    let matched_words: usize = {
-        let mut all_found = std::collections::HashSet::new();
-        let is_en = novel.language == "en";
-        for ch in &chapters {
-            let found: Vec<&VocabWord> = if is_en {
-                words_found_in_text_en(&ch.content, &vocabs)
+        // Load chapters (fallback to full-text if none in DB)
+        let chapters: Vec<Chapter> = {
+            let mut stmt = db
+                .prepare(
+                    "SELECT id, novel_id, title, content, sort_order, created_at FROM chapter WHERE novel_id = ?1 ORDER BY sort_order",
+                )
+                .map_err(|e| format!("查询章节失败: {}", e))?;
+            let rows: Vec<Chapter> = stmt
+                .query_map(rusqlite::params![novel_id], |row| {
+                    Ok(Chapter {
+                        id: row.get(0)?,
+                        novel_id: row.get(1)?,
+                        title: row.get(2)?,
+                        content: row.get(3)?,
+                        sort_order: row.get(4)?,
+                        start_index: 0,
+                        created_at: row.get(5)?,
+                    })
+                })
+                .map_err(|e| e.to_string())?
+                .filter_map(|r| r.ok())
+                .collect();
+            if rows.is_empty() {
+                // Fallback: one chapter with full novel text
+                let text = if !novel.cleaned_text.is_empty() {
+                    &novel.cleaned_text
+                } else {
+                    &novel.raw_text
+                };
+                vec![Chapter {
+                    id: 0,
+                    novel_id,
+                    title: "全文".into(),
+                    content: text.clone(),
+                    sort_order: 0,
+                    start_index: 0,
+                    created_at: String::new(),
+                }]
             } else {
-                words_found_in_text(&ch.content, &vocabs)
-            };
-            for w in found {
-                all_found.insert(w.id);
+                rows
             }
-        }
-        all_found.len()
+        };
+
+        // ===== Resolve steps (frontend override → DB default → all enabled) =====
+        let steps = match steps {
+            Some(arr) => IntensiveSteps {
+                step1: arr.contains(&1),
+                step2: arr.contains(&2),
+                step3: arr.contains(&3),
+            }
+            .normalize(),
+            None => {
+                let db_val: Result<String, _> = db.query_row(
+                    "SELECT value FROM app_settings WHERE key='pdf_intensive_steps'",
+                    [],
+                    |row| row.get(0),
+                );
+                parse_steps_from_db(db_val.ok().as_deref())
+            }
+        };
+
+        (novel, template, vocabs, chapters, steps)
     };
 
-    let steps_str = steps_label(steps);
-    let progress: &dyn Fn(crate::pdf::PdfProgress) = &|p: crate::pdf::PdfProgress| {
-        let _ = app.emit("pdf-export-progress", p);
-    };
-    pdf::generate_pdf(
-        &novel,
-        &template,
-        &vocabs,
-        &chapters,
-        steps,
-        &output_path,
-        Some(progress),
-    )?;
+    // ---- Phase 2: heavy work off the main thread, so progress events are
+    // delivered live to the webview while the PDF is being generated. ----
+    let inner = tokio::task::spawn_blocking(move || -> Result<PdfExportResponse, String> {
+        let _ = app.emit(
+            "pdf-export-progress",
+            crate::pdf::PdfProgress {
+                percent: 0,
+                message: "正在统计词汇匹配…".to_string(),
+            },
+        );
 
-    Ok(PdfExportResponse {
-        path: output_path,
-        total_vocab,
-        matched_words,
-        chapter_count,
-        steps_used: steps_str,
+        // ===== Compute coverage stats before generating =====
+        let total_vocab = vocabs.len();
+        let chapter_count = chapters.len();
+        let matched_words: usize = {
+            let mut all_found = std::collections::HashSet::new();
+            let is_en = novel.language == "en";
+            for ch in &chapters {
+                let found: Vec<&VocabWord> = if is_en {
+                    words_found_in_text_en(&ch.content, &vocabs)
+                } else {
+                    words_found_in_text(&ch.content, &vocabs)
+                };
+                for w in found {
+                    all_found.insert(w.id);
+                }
+            }
+            all_found.len()
+        };
+
+        let steps_str = steps_label(steps);
+        let progress = |p: crate::pdf::PdfProgress| {
+            let _ = app.emit("pdf-export-progress", p);
+        };
+        pdf::generate_pdf(
+            &novel,
+            &template,
+            &vocabs,
+            &chapters,
+            steps,
+            &output_path,
+            Some(&progress),
+        )?;
+
+        Ok(PdfExportResponse {
+            path: output_path,
+            total_vocab,
+            matched_words,
+            chapter_count,
+            steps_used: steps_str,
+        })
     })
+    .await
+    .map_err(|e| format!("导出任务执行失败: {}", e))?;
+
+    Ok(inner?)
 }
 
 fn default_template() -> PdfTemplate {

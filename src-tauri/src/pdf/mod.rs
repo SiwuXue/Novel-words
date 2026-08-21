@@ -40,11 +40,12 @@ pub fn text_black() -> Color {
 }
 #[inline]
 pub fn text_gray() -> Color {
-    Color::Greyscale(Greyscale { percent: 40.0, icc_profile: None })
+    // printpdf Greyscale expects 0.0 (black) ..= 1.0 (white).
+    Color::Greyscale(Greyscale { percent: 0.4, icc_profile: None })
 }
 #[inline]
 pub fn text_light_gray() -> Color {
-    Color::Greyscale(Greyscale { percent: 70.0, icc_profile: None })
+    Color::Greyscale(Greyscale { percent: 0.7, icc_profile: None })
 }
 #[inline]
 pub fn table_border() -> Color {
