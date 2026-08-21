@@ -7,7 +7,7 @@
           <el-icon><ArrowLeft /></el-icon> 返回
         </el-button>
         <h2 v-if="book">{{ book.name }}</h2>
-        <span class="word-count" v-if="!store.loading">{{ filteredWords.length }} 词</span>
+        <span class="word-count" v-if="!store.loading">{{ store.total }} 词</span>
       </div>
       <div class="header-right">
         <el-input
@@ -65,14 +65,16 @@
 
     <!-- Word table -->
     <el-table
+      ref="tableRef"
       v-loading="store.loading"
-      :data="filteredWords"
+      :data="store.words"
+      row-key="id"
       stripe
       style="width: 100%"
       empty-text="词汇本还没有单词，点击「添加单词」开始"
       @selection-change="handleSelectionChange"
     >
-      <el-table-column type="selection" width="48" />
+      <el-table-column type="selection" width="48" reserve-selection />
       <el-table-column prop="word" label="单词" min-width="120" />
       <el-table-column prop="phonetic" label="音标" width="140">
         <template #default="{ row }">
@@ -104,6 +106,18 @@
       </el-table-column>
     </el-table>
 
+    <el-pagination
+      v-model:current-page="page"
+      v-model:page-size="pageSize"
+      :total="store.total"
+      :page-sizes="[20, 50, 100, 200]"
+      layout="total, sizes, prev, pager, next, jumper"
+      background
+      class="pagination"
+      @current-change="load"
+      @size-change="onSizeChange"
+    />
+
     <!-- Form dialog -->
     <VocabWordFormDialog
       v-model="dialogVisible"
@@ -114,7 +128,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Search, Plus, Download, Upload, Delete, ArrowDown, Reading } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -140,30 +154,40 @@ const proficiencyFilter = ref<('unknown' | 'familiar' | 'mastered')[]>([
 const dialogVisible = ref(false)
 const editingWord = ref<VocabWord | null>(null)
 const selectedRows = ref<VocabWord[]>([])
+const page = ref(1)
+const pageSize = ref(50)
+const tableRef = ref<{ clearSelection: () => void } | null>(null)
 
 const book = computed(() =>
   bookStore.books.find((b) => b.id === bookId.value) || null,
 )
 
-const filteredWords = computed(() => {
-  let list = store.words
-  // filter by proficiency (multi-select: only show checked)
-  if (proficiencyFilter.value.length > 0) {
-    list = list.filter((w) =>
-      proficiencyFilter.value.includes(w.proficiency as 'unknown' | 'familiar' | 'mastered'),
-    )
-  }
-  // filter by search query
-  const q = searchQuery.value.trim().toLowerCase()
-  if (q) {
-    list = list.filter(
-      (w) =>
-        w.word.toLowerCase().includes(q) ||
-        w.definition.toLowerCase().includes(q) ||
-        w.phonetic.toLowerCase().includes(q),
-    )
-  }
-  return list
+async function load() {
+  await store.fetchPage(bookId.value, {
+    query: searchQuery.value,
+    proficiencies: proficiencyFilter.value,
+    offset: (page.value - 1) * pageSize.value,
+    limit: pageSize.value,
+  })
+}
+
+function onSizeChange() {
+  page.value = 1
+  load()
+}
+
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+watch(searchQuery, () => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    page.value = 1
+    load()
+  }, 300)
+})
+
+watch(proficiencyFilter, () => {
+  page.value = 1
+  load()
 })
 
 onMounted(async () => {
@@ -171,7 +195,7 @@ onMounted(async () => {
   if (bookStore.books.length === 0) {
     await bookStore.fetchAll()
   }
-  store.fetchAll(bookId.value)
+  load()
 })
 
 function proficiencyType(p: string): 'danger' | 'warning' | 'success' {
@@ -205,6 +229,7 @@ async function handleSubmit(data: VocabWordFormData) {
       await store.create(bookId.value, data)
       ElMessage.success('单词已添加')
     }
+    await load()
   } catch (e: any) {
     ElMessage.error(String(e?.message || e || '操作失败'))
   }
@@ -219,6 +244,7 @@ async function confirmDelete(word: VocabWord) {
     )
     await store.remove(word.id)
     ElMessage.success('已删除')
+    await load()
   } catch {
     // user cancelled
   }
@@ -239,7 +265,9 @@ async function handleBatchDelete() {
     )
     const count = await store.removeMany(rows.map((r) => r.id))
     selectedRows.value = []
+    tableRef.value?.clearSelection()
     ElMessage.success(`已删除 ${count} 个单词`)
+    await load()
   } catch {
     // user cancelled
   }
@@ -335,7 +363,7 @@ async function handleImportCsv() {
       ? `已导入 ${result.imported} 个单词，跳过 ${result.skipped} 个重复`
       : `已导入 ${result.imported} 个单词`
     ElMessage.success(msg)
-    await store.fetchAll(bookId.value)
+    await load()
   } catch (e: any) {
     ElMessage.error(String(e?.message || e || '导入失败'))
   }
@@ -344,6 +372,9 @@ async function handleImportCsv() {
 
 <style scoped>
 .vocab-book-detail-page {
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
   padding: 24px;
 }
 
@@ -351,6 +382,8 @@ async function handleImportCsv() {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
   margin-bottom: 16px;
 }
 
@@ -379,5 +412,10 @@ async function handleImportCsv() {
 
 .filter-tabs {
   margin-bottom: 16px;
+}
+
+.pagination {
+  margin-top: 16px;
+  justify-content: flex-end;
 }
 </style>

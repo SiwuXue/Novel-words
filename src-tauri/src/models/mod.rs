@@ -10,4 +10,4 @@ pub use novel::{Chapter, Novel};
 pub use pdf_template::PdfTemplate;
 pub use settings::AppSetting;
 pub use vocab_book::VocabBook;
-pub use vocab_word::{HighlightWord, VocabWord};
+pub use vocab_word::{HighlightWord, VocabWord, VocabWordPage};

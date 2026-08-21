@@ -25,3 +25,11 @@ pub struct HighlightWord {
     pub example_sentence: String,
     pub proficiency: String,
 }
+
+/// A page of vocab words plus the total count matching the current filter.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VocabWordPage {
+    pub total: i64,
+    pub words: Vec<VocabWord>,
+}

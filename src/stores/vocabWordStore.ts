@@ -6,6 +6,7 @@ import { encodeMemoryTag, parseMemoryTag } from '@/utils/srs'
 
 export const useVocabWordStore = defineStore('vocabWord', () => {
   const words = ref<VocabWord[]>([])
+  const total = ref(0)
   const loading = ref(false)
 
   async function fetchAll(bookId: number) {
@@ -14,8 +15,39 @@ export const useVocabWordStore = defineStore('vocabWord', () => {
       words.value = await invoke<VocabWord[]>('get_vocab_words', {
         vocabBookId: bookId,
       })
+      total.value = words.value.length
     } catch (e) {
       console.error('[vocabWordStore] fetchAll failed:', e)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function fetchPage(
+    bookId: number,
+    opts: {
+      query?: string
+      proficiencies?: ('unknown' | 'familiar' | 'mastered')[]
+      offset: number
+      limit: number
+    },
+  ) {
+    loading.value = true
+    try {
+      const page = await invoke<{ total: number; words: VocabWord[] }>(
+        'get_vocab_words_page',
+        {
+          vocabBookId: bookId,
+          query: opts.query?.trim() || null,
+          proficiencies: opts.proficiencies?.length ? opts.proficiencies : null,
+          offset: opts.offset,
+          limit: opts.limit,
+        },
+      )
+      words.value = page.words
+      total.value = page.total
+    } catch (e) {
+      console.error('[vocabWordStore] fetchPage failed:', e)
     } finally {
       loading.value = false
     }
@@ -88,5 +120,5 @@ export const useVocabWordStore = defineStore('vocabWord', () => {
     }
   }
 
-  return { words, loading, fetchAll, create, update, remove, removeMany, search }
+  return { words, total, loading, fetchAll, fetchPage, create, update, remove, removeMany, search }
 })

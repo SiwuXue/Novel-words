@@ -1,5 +1,5 @@
 use crate::db::DbState;
-use crate::models::{HighlightWord, VocabWord};
+use crate::models::{HighlightWord, VocabWord, VocabWordPage};
 use std::collections::HashMap;
 use tauri::State;
 
@@ -55,6 +55,79 @@ pub fn get_vocab_words(
         .collect();
 
     Ok(words)
+}
+
+/// Paginated + filterable vocab words for the detail page, so large books never
+/// render every row at once. `query` matches word/definition/phonetic,
+/// `proficiencies` filters by level (empty/None = all).
+#[tauri::command]
+pub fn get_vocab_words_page(
+    state: State<DbState>,
+    vocab_book_id: i64,
+    query: Option<String>,
+    proficiencies: Option<Vec<String>>,
+    offset: i64,
+    limit: i64,
+) -> Result<VocabWordPage, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+
+    let mut wheres: Vec<String> = vec!["vocab_book_id = ?".to_string()];
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(vocab_book_id)];
+
+    let q = query.map(|s| s.trim().to_string()).unwrap_or_default();
+    if !q.is_empty() {
+        let pattern = format!("%{}%", q);
+        wheres.push("(word LIKE ? OR definition LIKE ? OR phonetic LIKE ?)".to_string());
+        params.push(Box::new(pattern.clone()));
+        params.push(Box::new(pattern.clone()));
+        params.push(Box::new(pattern));
+    }
+
+    if let Some(profs) = proficiencies {
+        let profs: Vec<String> = profs
+            .into_iter()
+            .filter(|p| matches!(p.as_str(), "unknown" | "familiar" | "mastered"))
+            .collect();
+        if !profs.is_empty() {
+            let placeholders = vec!["?"; profs.len()].join(", ");
+            wheres.push(format!("proficiency IN ({})", placeholders));
+            for p in profs {
+                params.push(Box::new(p));
+            }
+        }
+    }
+
+    let where_sql = wheres.join(" AND ");
+
+    let count_sql = format!("SELECT COUNT(*) FROM vocab_word WHERE {}", where_sql);
+    let total: i64 = db
+        .query_row(
+            &count_sql,
+            rusqlite::params_from_iter(params.iter().map(|b| b.as_ref())),
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("统计单词失败: {}", e))?;
+
+    let page_sql = format!(
+        "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, created_at \
+         FROM vocab_word WHERE {} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        where_sql
+    );
+    let mut page_params: Vec<Box<dyn rusqlite::ToSql>> = params;
+    page_params.push(Box::new(limit.max(1)));
+    page_params.push(Box::new(offset.max(0)));
+
+    let mut stmt = db.prepare(&page_sql).map_err(|e| e.to_string())?;
+    let words = stmt
+        .query_map(
+            rusqlite::params_from_iter(page_params.iter().map(|b| b.as_ref())),
+            row_to_vocab_word,
+        )
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(VocabWordPage { total, words })
 }
 
 #[tauri::command]

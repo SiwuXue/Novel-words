@@ -234,6 +234,9 @@ onMounted(() => {
 
 <style scoped>
 .settings-page {
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
   padding: 24px;
 }
 .settings-page h2 {

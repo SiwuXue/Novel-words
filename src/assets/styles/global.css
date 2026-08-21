@@ -53,3 +53,10 @@ a {
 .page-fade-leave-to {
   opacity: 0;
 }
+
+/* Fluid page container: fills the window up to a comfortable max width. */
+.page-container {
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+}

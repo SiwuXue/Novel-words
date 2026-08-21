@@ -206,13 +206,16 @@ function formatDate(dateStr: string): string {
 
 <style scoped>
 .novel-list-page {
-  max-width: 1100px;
+  width: 100%;
+  max-width: 1440px;
   margin: 0 auto;
 }
 .page-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
   margin-bottom: 16px;
 }
 .page-header h2 {
@@ -223,6 +226,8 @@ function formatDate(dateStr: string): string {
   display: flex;
   gap: 12px;
   align-items: center;
+  flex-wrap: wrap;
+  row-gap: 8px;
 }
 .fav-icon {
   cursor: pointer;

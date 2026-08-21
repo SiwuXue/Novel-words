@@ -96,7 +96,8 @@ onMounted(async () => {
 <style scoped>
 .home-page {
   padding: 48px 40px;
-  max-width: 720px;
+  width: 100%;
+  max-width: 1120px;
   margin: 0 auto;
 }
 
@@ -119,9 +120,9 @@ onMounted(async () => {
 }
 
 .stats-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 20px;
-  justify-content: center;
   margin-bottom: 40px;
 }
 
@@ -235,4 +236,15 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 
+@media (max-width: 900px) {
+  .home-page {
+    padding: 28px 20px;
+  }
+  .hero h1 {
+    font-size: 24px;
+  }
+  .stat-card {
+    padding: 16px 20px;
+  }
+}
 </style>

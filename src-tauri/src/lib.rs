@@ -17,8 +17,8 @@ use commands::vocab_book::{
 };
 use commands::vocab_word::{
     create_vocab_word, delete_vocab_word, delete_vocab_words, export_vocab_words_csv,
-    get_highlight_words, get_vocab_words, import_vocab_words_csv, search_vocab_words,
-    update_vocab_word,
+    get_highlight_words, get_vocab_words, get_vocab_words_page, import_vocab_words_csv,
+    search_vocab_words, update_vocab_word,
 };
 use commands::pdf_template::{
     create_pdf_template, delete_pdf_template, get_all_pdf_templates, get_builtin_templates,
@@ -117,6 +117,7 @@ pub fn run() {
             import_cet4_core_words,
             create_vocab_word,
             get_vocab_words,
+            get_vocab_words_page,
             update_vocab_word,
             delete_vocab_word,
             delete_vocab_words,

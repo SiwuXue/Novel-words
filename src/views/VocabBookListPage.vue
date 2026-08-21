@@ -149,6 +149,9 @@ function formatDate(raw: string): string {
 
 <style scoped>
 .vocab-book-list-page {
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
   padding: 24px;
 }
 
@@ -156,6 +159,8 @@ function formatDate(raw: string): string {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
   margin-bottom: 20px;
 }
 
@@ -167,5 +172,7 @@ function formatDate(raw: string): string {
 .header-actions {
   display: flex;
   gap: 12px;
+  flex-wrap: wrap;
+  row-gap: 8px;
 }
 </style>
