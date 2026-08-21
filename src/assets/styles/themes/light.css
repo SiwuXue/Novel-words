@@ -14,4 +14,16 @@
   --highlight-color: #e74c3c;
   --highlight-mastered: #67c23a;
   --shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+
+  /* Aliases used by components (kept in sync with the tokens above). */
+  --text-regular: #303133;
+  --text-placeholder: #c0c4cc;
+  --bg-color: #ffffff;
+  --hover-bg: #f0f2f5;
+  --accent-light: #ecf5ff;
+
+  /* Editor vocab-highlight background colors (light pastels). */
+  --editor-hl-unknown: #fef08a;
+  --editor-hl-familiar: #dbeafe;
+  --editor-hl-mastered: #bbf7d0;
 }

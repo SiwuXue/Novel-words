@@ -14,4 +14,16 @@ html.dark {
   --highlight-color: #ff6b6b;
   --highlight-mastered: #5aab5a;
   --shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+
+  /* Aliases used by components (kept in sync with the tokens above). */
+  --text-regular: #e0e0e0;
+  --text-placeholder: #7a7f8a;
+  --bg-color: #1a1a2e;
+  --hover-bg: #2a3550;
+  --accent-light: rgba(64, 158, 255, 0.15);
+
+  /* Editor vocab-highlight background colors (dark, readable with light text). */
+  --editor-hl-unknown: #6b5d1a;
+  --editor-hl-familiar: #1e3a5f;
+  --editor-hl-mastered: #1f4d2b;
 }

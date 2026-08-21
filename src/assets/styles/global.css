@@ -60,3 +60,10 @@ a {
   max-width: 1440px;
   margin: 0 auto;
 }
+
+/* Vocab highlight tooltip (created imperatively in VocabHighlight.ts). */
+.vocab-highlight-tooltip {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}

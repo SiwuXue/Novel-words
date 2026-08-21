@@ -8,10 +8,11 @@ import { useSettingsStore } from '@/stores/settingsStore'
 
 const PLUGIN_KEY = new PluginKey('vocabHighlight')
 
+// Theme-aware highlight backgrounds (defined in themes/light.css & dark.css).
 const PROFICIENCY_COLORS: Record<string, string> = {
-  unknown: '#fef08a',
-  familiar: '#dbeafe',
-  mastered: '#bbf7d0',
+  unknown: 'var(--editor-hl-unknown)',
+  familiar: 'var(--editor-hl-familiar)',
+  mastered: 'var(--editor-hl-mastered)',
 }
 
 const PROFICIENCY_TEXTS: Record<string, string> = {
@@ -115,7 +116,7 @@ function getTooltip(): HTMLDivElement {
     tooltipEl.className = 'vocab-highlight-tooltip'
     tooltipEl.style.cssText =
       'position:fixed;z-index:9999;display:none;max-width:300px;padding:10px 14px;' +
-      'background:#fff;border:1px solid #e4e7ed;border-radius:6px;box-shadow:0 2px 12px rgba(0,0,0,.12);' +
+      'border-radius:6px;box-shadow:0 2px 12px rgba(0,0,0,.12);' +
       'font-size:13px;line-height:1.6;pointer-events:auto;'
     // Hide when the mouse leaves the tooltip itself (e.g. after clicking 朗读).
     tooltipEl.addEventListener('mouseleave', () => hideTooltip())
@@ -137,12 +138,12 @@ function showTooltip(rect: DOMRect, hw: HighlightWord) {
   tip.innerHTML = `
     <div style="font-weight:600;margin-bottom:4px;">
       ${escapeHtml(hw.word)}
-      ${hw.phonetic ? `<span style="color:#909399;font-weight:400;"> ${escapeHtml(hw.phonetic)}</span>` : ''}
-      <span style="margin-left:6px;font-size:12px;color:#909399;">${PROFICIENCY_TEXTS[hw.proficiency] || ''}</span>
+      ${hw.phonetic ? `<span style="color:var(--text-secondary);font-weight:400;"> ${escapeHtml(hw.phonetic)}</span>` : ''}
+      <span style="margin-left:6px;font-size:12px;color:var(--text-secondary);">${PROFICIENCY_TEXTS[hw.proficiency] || ''}</span>
     </div>
-    ${hw.definition ? `<div style="color:#303133;">${escapeHtml(hw.definition)}</div>` : ''}
-    ${hw.exampleSentence ? `<div style="color:#909399;font-size:12px;margin-top:2px;">例句：${escapeHtml(hw.exampleSentence)}</div>` : ''}
-    <div style="margin-top:6px;"><span data-speak="${escapeHtml(hw.word)}" style="cursor:pointer;color:#409eff;">朗读</span></div>
+    ${hw.definition ? `<div style="color:var(--text-primary);">${escapeHtml(hw.definition)}</div>` : ''}
+    ${hw.exampleSentence ? `<div style="color:var(--text-secondary);font-size:12px;margin-top:2px;">例句：${escapeHtml(hw.exampleSentence)}</div>` : ''}
+    <div style="margin-top:6px;"><span data-speak="${escapeHtml(hw.word)}" style="cursor:pointer;color:var(--accent-color);">朗读</span></div>
   `
 
   // 朗读按钮点击
