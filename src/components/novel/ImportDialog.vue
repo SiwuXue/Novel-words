@@ -1,7 +1,7 @@
 <template>
   <el-dialog
     v-model="visible"
-    title="导入文本文件"
+    title="导入小说文件"
     width="680px"
     :close-on-click-modal="false"
     destroy-on-close
@@ -11,8 +11,8 @@
     <div v-show="step === 1" class="import-step">
       <div class="drop-zone" @click="selectFile">
         <el-icon :size="48" color="var(--text-secondary)"><FolderOpened /></el-icon>
-        <p>点击选择 .txt / .md 文件</p>
-        <p class="hint">支持 UTF-8 / GBK 编码</p>
+        <p>点击选择 .txt / .md / .epub / .fb2 文件</p>
+        <p class="hint">TXT 支持 UTF-8 / GBK 编码</p>
       </div>
       <div v-if="filePath" class="selected-file">
         <el-tag type="info" size="small">{{ fileName }}</el-tag>
@@ -103,7 +103,9 @@ async function selectFile() {
   const selected = await open({
     multiple: false,
     filters: [
+      { name: '小说文件', extensions: ['txt', 'md', 'text', 'epub', 'fb2'] },
       { name: '文本文件', extensions: ['txt', 'md', 'text'] },
+      { name: '电子书', extensions: ['epub', 'fb2'] },
       { name: '所有文件', extensions: ['*'] },
     ],
   })
@@ -116,11 +118,11 @@ async function analyzeFile() {
   if (!filePath.value) return
   analyzing.value = true
   try {
-    const r = await invoke<ImportResult>('import_text_file', { path: filePath.value })
+    const r = await invoke<ImportResult>('import_file', { path: filePath.value })
     result.value = r
     step.value = 2
   } catch (e: any) {
-    console.error('[import_text_file] failed:', e)
+    console.error('[import_file] failed:', e)
     errorMsg.value = String(e?.message || e || '未知错误')
     step.value = 3
   } finally {

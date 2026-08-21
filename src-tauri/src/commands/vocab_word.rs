@@ -144,7 +144,7 @@ fn get_vocab_word_by_id(db: &rusqlite::Connection, id: i64) -> Result<VocabWord,
     .map_err(|e| format!("未找到该单词: {}", e))
 }
 
-fn row_to_vocab_word(row: &rusqlite::Row) -> rusqlite::Result<VocabWord> {
+pub(crate) fn row_to_vocab_word(row: &rusqlite::Row) -> rusqlite::Result<VocabWord> {
     Ok(VocabWord {
         id: row.get(0)?,
         vocab_book_id: row.get(1)?,

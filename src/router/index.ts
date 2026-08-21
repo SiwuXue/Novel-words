@@ -40,6 +40,12 @@ const router = createRouter({
       meta: { title: '词汇详情' },
     },
     {
+      path: '/vocabulary/:id/review',
+      name: 'VocabReview',
+      component: () => import('@/views/ReviewPage.vue'),
+      meta: { title: '卡片复习' },
+    },
+    {
       path: '/settings',
       name: 'Settings',
       component: () => import('@/views/SettingsPage.vue'),

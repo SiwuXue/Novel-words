@@ -42,6 +42,7 @@
 import { ref, reactive, watch } from 'vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import type { VocabWord } from '@/types/vocabWord'
+import { parseMemoryTag } from '@/utils/srs'
 
 const props = defineProps<{
   modelValue: boolean
@@ -91,7 +92,7 @@ watch(
       form.phonetic = w.phonetic
       form.exampleSentence = w.exampleSentence
       form.proficiency = w.proficiency
-      form.memoryTag = w.memoryTag
+      form.memoryTag = parseMemoryTag(w.memoryTag).tag
     } else {
       isEdit.value = false
       form.word = ''

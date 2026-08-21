@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { VocabWord, VocabWordFormData } from '@/types/vocabWord'
+import { encodeMemoryTag, parseMemoryTag } from '@/utils/srs'
 
 export const useVocabWordStore = defineStore('vocabWord', () => {
   const words = ref<VocabWord[]>([])
@@ -36,6 +37,11 @@ export const useVocabWordStore = defineStore('vocabWord', () => {
   }
 
   async function update(id: number, data: VocabWordFormData) {
+    // Preserve any SRS state while allowing the user tag to be edited.
+    const existing = words.value.find((w) => w.id === id)
+    const srs = existing ? parseMemoryTag(existing.memoryTag).srs : null
+    const memoryTag = encodeMemoryTag(data.memoryTag || '', srs)
+
     await invoke('update_vocab_word', {
       id,
       word: data.word,
@@ -43,13 +49,14 @@ export const useVocabWordStore = defineStore('vocabWord', () => {
       phonetic: data.phonetic || '',
       exampleSentence: data.exampleSentence || '',
       proficiency: data.proficiency || 'unknown',
-      memoryTag: data.memoryTag || '',
+      memoryTag,
     })
     const idx = words.value.findIndex((w) => w.id === id)
     if (idx !== -1) {
       words.value[idx] = {
         ...words.value[idx],
         ...data,
+        memoryTag,
       }
     }
   }

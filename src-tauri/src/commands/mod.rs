@@ -8,3 +8,5 @@ pub mod chapter;
 pub mod pdf_export;
 pub mod backup;
 pub mod app_info;
+pub mod export;
+pub mod review;

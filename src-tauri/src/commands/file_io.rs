@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use crate::models::novel::ImportResult;
-use crate::utils::{chapter_detector, text_cleaner};
+use crate::models::novel::{Chapter, ImportResult};
+use crate::utils::{chapter_detector, ebook, text_cleaner};
 
 /// Detect encoding from raw bytes. Tries UTF-8 first, then GBK.
 /// Returns the decoded String.
@@ -98,9 +98,66 @@ fn import_text_file_sync(path: &str) -> Result<ImportResult, String> {
     })
 }
 
+/// Parse an EPUB / FB2 file into the standard ImportResult shape.
+fn import_ebook_sync(path: &str) -> Result<ImportResult, String> {
+    let ext = Path::new(path)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    let ebook::EbookResult { title, chapters } = if ext == "fb2" {
+        ebook::parse_fb2(path)?
+    } else {
+        ebook::parse_epub(path)?
+    };
+
+    let detected_title = if title.is_empty() {
+        filename_title(path)
+    } else {
+        title
+    };
+
+    let full = ebook::full_text(&chapters);
+    let chapters: Vec<Chapter> = chapters
+        .into_iter()
+        .enumerate()
+        .map(|(i, (t, c))| Chapter {
+            id: 0,
+            novel_id: 0,
+            title: t,
+            content: c,
+            sort_order: i as i32,
+            start_index: 0,
+            created_at: String::new(),
+        })
+        .collect();
+
+    Ok(ImportResult {
+        chapters,
+        raw_text: full.clone(),
+        cleaned_text: full,
+        detected_title,
+    })
+}
+
+/// Import a novel file, dispatching on extension: `.epub`/`.fb2` use the ebook
+/// parsers, everything else goes through the plain-text pipeline.
 #[tauri::command]
-pub async fn import_text_file(path: String) -> Result<ImportResult, String> {
-    tokio::task::spawn_blocking(move || import_text_file_sync(&path))
-        .await
-        .map_err(|e| format!("任务执行失败: {}", e))?
+pub async fn import_file(path: String) -> Result<ImportResult, String> {
+    let ext = Path::new(&path)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    if ext == "epub" || ext == "fb2" {
+        tokio::task::spawn_blocking(move || import_ebook_sync(&path))
+            .await
+            .map_err(|e| format!("任务执行失败: {}", e))?
+    } else {
+        tokio::task::spawn_blocking(move || import_text_file_sync(&path))
+            .await
+            .map_err(|e| format!("任务执行失败: {}", e))?
+    }
 }

@@ -30,9 +30,22 @@
         >
           <el-icon><Delete /></el-icon> 批量删除{{ selectedRows.length ? ` (${selectedRows.length})` : '' }}
         </el-button>
-        <el-button @click="handleExportCsv" :disabled="store.words.length === 0">
-          <el-icon><Download /></el-icon> 导出 CSV
+        <el-button type="success" @click="goReview">
+          <el-icon><Reading /></el-icon> 卡片复习
         </el-button>
+        <el-dropdown trigger="click" @command="handleExportCommand">
+          <el-button :disabled="store.words.length === 0">
+            <el-icon><Download /></el-icon> 导出
+            <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="csv">CSV (.csv)</el-dropdown-item>
+              <el-dropdown-item command="xlsx">Excel (.xlsx)</el-dropdown-item>
+              <el-dropdown-item command="apkg">Anki (.apkg)</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-button @click="handleImportCsv">
           <el-icon><Upload /></el-icon> 导入 CSV
         </el-button>
@@ -103,7 +116,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Search, Plus, Download, Upload, Delete } from '@element-plus/icons-vue'
+import { ArrowLeft, Search, Plus, Download, Upload, Delete, ArrowDown, Reading } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
 import { save, open } from '@tauri-apps/plugin-dialog'
@@ -236,6 +249,55 @@ function goBack() {
   router.push('/vocabulary')
 }
 
+function goReview() {
+  router.push(`/vocabulary/${bookId.value}/review`)
+}
+
+async function handleExportCommand(cmd: string) {
+  if (cmd === 'csv') {
+    await handleExportCsv()
+  } else if (cmd === 'xlsx') {
+    await handleExportXlsx()
+  } else if (cmd === 'apkg') {
+    await handleExportApkg()
+  }
+}
+
+async function handleExportXlsx() {
+  try {
+    const filePath = await save({
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+      defaultPath: `${book.value?.name || 'words'}.xlsx`,
+    })
+    if (!filePath) return
+    await invoke('export_vocab_words_xlsx', {
+      vocabBookId: bookId.value,
+      filePath,
+    })
+    ElMessage.success('Excel 导出成功')
+  } catch (e: any) {
+    ElMessage.error(String(e?.message || e || '导出失败'))
+  }
+}
+
+async function handleExportApkg() {
+  try {
+    const filePath = await save({
+      filters: [{ name: 'Anki 卡组', extensions: ['apkg'] }],
+      defaultPath: `${book.value?.name || 'words'}.apkg`,
+    })
+    if (!filePath) return
+    await invoke('export_vocab_words_apkg', {
+      vocabBookId: bookId.value,
+      deckName: book.value?.name || '词阅单词',
+      filePath,
+    })
+    ElMessage.success('Anki 卡组导出成功，可在 Anki 中导入')
+  } catch (e: any) {
+    ElMessage.error(String(e?.message || e || '导出失败'))
+  }
+}
+
 async function handleExportCsv() {
   try {
     const filePath = await save({
@@ -311,6 +373,8 @@ async function handleImportCsv() {
 .header-right {
   display: flex;
   gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .filter-tabs {
