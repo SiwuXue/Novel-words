@@ -27,6 +27,7 @@ use commands::pdf_template::{
 use commands::chapter::{
     delete_chapters_by_novel, get_chapters, save_chapters, update_chapter_title,
 };
+use commands::app_info::get_app_info;
 use commands::backup::{backup_database, restore_database};
 use commands::pdf_export::export_pdf;
 use commands::settings::{get_all_settings, get_setting, set_setting};
@@ -133,6 +134,7 @@ pub fn run() {
             export_pdf,
             backup_database,
             restore_database,
+            get_app_info,
             get_setting,
             set_setting,
             get_all_settings,

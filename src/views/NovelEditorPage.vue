@@ -324,6 +324,18 @@ function sanitizeFilename(name: string): string {
     .slice(0, 200) || 'export'
 }
 
+/** e.g. [1,2,3] -> "S1+2+3"; [3] -> "S3" */
+function pdfStepsMark(): string {
+  return 'S' + normalizeSteps(pdfSteps.value).join('+')
+}
+
+/** Local date as YYYYMMDD, e.g. 20260818 */
+function dateStamp(): string {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`
+}
+
 async function handleExportPdf() {
   const novel = store.currentNovel
   if (!novel) {
@@ -333,7 +345,7 @@ async function handleExportPdf() {
   let filePath: string | null = null
   try {
     filePath = await save({
-      defaultPath: `${sanitizeFilename(novel.title || 'export')}.pdf`,
+      defaultPath: `${sanitizeFilename(novel.title || 'export')}_${pdfStepsMark()}_${dateStamp()}.pdf`,
       filters: [{ name: 'PDF', extensions: ['pdf'] }],
     })
   } catch (e: any) {
@@ -511,9 +523,18 @@ async function handleManualSave() {
 }
 
 function onKeyDown(e: KeyboardEvent) {
-  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+  const mod = e.ctrlKey || e.metaKey
+  if (!mod) return
+  const key = e.key.toLowerCase()
+  if (key === 's') {
     e.preventDefault()
     void handleManualSave()
+  } else if (key === 'p') {
+    e.preventDefault()
+    if (loadState.value === 'loaded') void handleExportPdf()
+  } else if (key === 'w') {
+    e.preventDefault()
+    if (loadState.value === 'loaded') togglePreviewFullscreen()
   }
 }
 

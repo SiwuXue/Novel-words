@@ -7,3 +7,4 @@ pub mod file_io;
 pub mod chapter;
 pub mod pdf_export;
 pub mod backup;
+pub mod app_info;

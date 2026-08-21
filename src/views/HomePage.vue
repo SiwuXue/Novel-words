@@ -23,6 +23,22 @@
       </div>
     </div>
 
+    <div class="recent-section" v-if="recentNovels.length">
+      <h3>最近阅读</h3>
+      <div class="recent-list">
+        <div
+          v-for="n in recentNovels"
+          :key="n.id"
+          class="recent-item"
+          @click="$router.push(`/novels/${n.id}`)"
+        >
+          <span class="recent-title">{{ n.title || '未命名' }}</span>
+          <span class="recent-author">{{ n.author || '未知作者' }}</span>
+          <el-icon class="recent-arrow"><ArrowRight /></el-icon>
+        </div>
+      </div>
+    </div>
+
     <div class="quick-actions">
       <h3>快捷操作</h3>
       <div class="actions-row">
@@ -43,19 +59,22 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Document, Collection, Notebook, Plus, Setting } from '@element-plus/icons-vue'
+import { Document, Collection, Notebook, Plus, Setting, ArrowRight } from '@element-plus/icons-vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { VocabBook } from '@/types/vocabBook'
 import type { VocabWord } from '@/types/vocabWord'
+import type { Novel } from '@/types/novel'
 
 const novelCount = ref(0)
 const bookCount = ref(0)
 const wordCount = ref(0)
+const recentNovels = ref<Novel[]>([])
 
 onMounted(async () => {
   try {
-    const novels = await invoke<Array<{ id: number }>>('get_all_novels')
+    const novels = await invoke<Novel[]>('get_all_novels')
     novelCount.value = novels.length
+    recentNovels.value = novels.slice(0, 3)
   } catch { /* ignore */ }
 
   try {
@@ -138,6 +157,63 @@ onMounted(async () => {
 .stat-label {
   font-size: 13px;
   color: var(--text-secondary, #909399);
+}
+
+.recent-section {
+  margin-bottom: 32px;
+}
+
+.recent-section h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 12px 0;
+  color: var(--text-regular, #303133);
+}
+
+.recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.recent-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: var(--bg-secondary, #f5f7fa);
+  cursor: pointer;
+  transition: background 0.2s, transform 0.2s;
+  user-select: none;
+}
+
+.recent-item:hover {
+  background: var(--accent-light, #ecf5ff);
+  transform: translateY(-1px);
+}
+
+.recent-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-regular, #303133);
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-author {
+  font-size: 12px;
+  color: var(--text-secondary, #909399);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-arrow {
+  color: var(--text-placeholder, #c0c4cc);
 }
 
 .quick-actions {
