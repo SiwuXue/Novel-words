@@ -156,6 +156,25 @@
         </template>
       </el-result>
     </div>
+
+    <!-- PDF export progress overlay -->
+    <Teleport to="body">
+      <div v-if="exportingPdf" class="pdf-export-overlay">
+        <div class="pdf-export-dialog">
+          <div class="pdf-export-dialog-title">
+            <el-icon class="is-loading" :size="18"><Loading /></el-icon>
+            正在导出 PDF
+          </div>
+          <el-progress
+            :percentage="pdfPercent"
+            :stroke-width="12"
+            color="#409eff"
+          />
+          <div class="pdf-export-dialog-msg">{{ pdfMessage }}</div>
+          <div class="pdf-export-dialog-tip">章节较多时可能需要十几秒，请勿关闭窗口</div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -165,6 +184,7 @@ import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { ArrowLeft, Loading, Printer, DArrowLeft, DArrowRight } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { save } from '@tauri-apps/plugin-dialog'
 import { useNovelStore } from '@/stores/novelStore'
 import { useEditorStore } from '@/stores/editorStore'
@@ -196,6 +216,8 @@ const previewRef = ref<InstanceType<typeof PreviewPanel> | null>(null)
 const highlightBookId = ref<number | null>(null)
 const highlightWords = ref<HighlightWord[]>([])
 const exportingPdf = ref(false)
+const pdfPercent = ref(0)
+const pdfMessage = ref('正在准备导出…')
 const previewFullscreen = ref(false)
 const stepNums: StepNum[] = [1, 2, 3]
 const pdfSteps = ref<StepNum[]>([...settingsStore.pdfIntensiveSteps])
@@ -321,6 +343,23 @@ async function handleExportPdf() {
   }
   if (!filePath) return
   exportingPdf.value = true
+  pdfPercent.value = 0
+  pdfMessage.value = '正在准备导出…'
+
+  // Listen for progress events emitted by the Rust backend during generation.
+  let unlisten: UnlistenFn | null = null
+  try {
+    unlisten = await listen<{ percent: number; message: string }>(
+      'pdf-export-progress',
+      (event) => {
+        pdfPercent.value = event.payload.percent
+        pdfMessage.value = event.payload.message
+      },
+    )
+  } catch (e) {
+    console.warn('[PdfExport] listen failed:', e)
+  }
+
   try {
     const resp = await invoke<{
       path: string
@@ -357,6 +396,9 @@ async function handleExportPdf() {
     ElMessage.error(String(e?.message || e || '导出失败'))
   } finally {
     exportingPdf.value = false
+    pdfPercent.value = 0
+    pdfMessage.value = ''
+    unlisten?.()
   }
 }
 
@@ -631,5 +673,46 @@ async function scrollToChapter(index: number) {
 }
 .editor-state-block.error {
   color: var(--danger-color, #f56c6c);
+}
+
+/* PDF export progress overlay */
+.pdf-export-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+}
+.pdf-export-dialog {
+  width: 380px;
+  max-width: 90vw;
+  padding: 24px 28px;
+  border-radius: 12px;
+  background: var(--bg-primary, #ffffff);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.pdf-export-dialog-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary, #303133);
+}
+.pdf-export-dialog-msg {
+  font-size: 13px;
+  color: var(--text-secondary, #606266);
+  min-height: 20px;
+  word-break: break-all;
+}
+.pdf-export-dialog-tip {
+  font-size: 12px;
+  color: var(--text-placeholder, #a8abb2);
 }
 </style>

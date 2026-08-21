@@ -27,6 +27,7 @@ use commands::pdf_template::{
 use commands::chapter::{
     delete_chapters_by_novel, get_chapters, save_chapters, update_chapter_title,
 };
+use commands::backup::{backup_database, restore_database};
 use commands::pdf_export::export_pdf;
 use commands::settings::{get_all_settings, get_setting, set_setting};
 use dictionary::{dict_lookup_chinese, dict_lookup_english, DictDbState};
@@ -130,6 +131,8 @@ pub fn run() {
             update_chapter_title,
             delete_chapters_by_novel,
             export_pdf,
+            backup_database,
+            restore_database,
             get_setting,
             set_setting,
             get_all_settings,

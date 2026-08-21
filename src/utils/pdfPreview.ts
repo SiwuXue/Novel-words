@@ -161,10 +161,126 @@ function escapeHtml(s: string): string {
 
 export function splitParagraphs(content: string): string[] {
   const hasBlank = content.includes('\n\n') || content.includes('\r\n\r\n')
-  const parts: string[] = hasBlank
-    ? content.split('\n\n').map((p) => p.replace(/\r/g, '').replace(/\n/g, ' '))
-    : content.split('\n')
-  return parts.map((p) => p.trim()).filter((p) => p.length > 0)
+  if (hasBlank) {
+    return content
+      .split(/\n\n|\r\n\r\n/)
+      .map((p) => p.replace(/\r/g, '').replace(/\n/g, ' ').trim())
+      .filter((p) => p.length > 0)
+  }
+  return content
+    .split('\n')
+    .map((p) => p.replace(/\r/g, '').trim())
+    .filter((p) => p.length > 0)
+}
+
+// ---------------------------------------------------------------
+// Definition helpers (mirrors Rust `short_definition` in intensive.rs).
+// Strips 【记忆】【搭配】 etc, optionally does context-based sense picking.
+// ---------------------------------------------------------------
+
+function parseSenseLines(raw: string): string[] {
+  if (!raw) return []
+  const lines: string[] = []
+  for (const line of raw.split('\n')) {
+    const t = line.trim()
+    if (!t) continue
+    if (
+      t.startsWith('【记忆】') ||
+      t.startsWith('【搭配】') ||
+      t.startsWith('【真题】') ||
+      t.startsWith('【派生】') ||
+      t.startsWith('【例句】')
+    ) {
+      break
+    }
+    if (t.startsWith('· ')) continue
+    lines.push(t)
+  }
+  return lines
+}
+
+interface FlatSense {
+  pos: string
+  cndef: string
+  lineNo: number
+}
+
+function splitSense(s: string): { pos: string; items: string[] } {
+  const dot = s.indexOf('.')
+  let pos = ''
+  let rest = s.trim()
+  if (dot !== -1) {
+    const head = s.slice(0, dot)
+    if (/^[a-zA-Z/]+$/.test(head)) {
+      pos = s.slice(0, dot + 1).trim()
+      rest = s.slice(dot + 1).trim()
+    }
+  }
+  const items = rest
+    .split(/[\/、；;,，]+/)
+    .map((x) => x.trim())
+    .filter((x) => x.length > 0)
+  return { pos, items }
+}
+
+/**
+ * Shorten a potentially long definition string into 1-2 senses.
+ * For CN novels, each individual cndef substring is checked against the
+ * surrounding line for a best-effort context disambiguation.
+ * Fallback: first 2 senses after dropping memory/phrase blocks.
+ */
+function shortDefinition(definition: string, contextLine: string): string {
+  if (!definition) return '—'
+  const senseLines = parseSenseLines(definition)
+  if (senseLines.length === 0) {
+    // Unstructured (hand-typed). Take the first paragraph, strip blocks, cap 30 chars.
+    const top = definition.split('\n')[0] ?? definition
+    let clean = definition
+    const firstBlock = top.search(/【(记忆|搭配|真题|派生|例句)】/)
+    clean = (firstBlock !== -1 ? top.slice(0, firstBlock) : top).trim()
+    return Array.from(clean).slice(0, 30).join('')
+  }
+
+  const flat: FlatSense[] = []
+  for (let li = 0; li < senseLines.length; li++) {
+    const { pos, items } = splitSense(senseLines[li])
+    for (const it of items) flat.push({ pos, cndef: it, lineNo: li })
+  }
+
+  const hasCjk = /[\u4e00-\u9fff]/.test(contextLine)
+  const selected: FlatSense[] = []
+  if (hasCjk) {
+    for (const f of flat) {
+      if (Array.from(f.cndef).length <= 1) continue
+      if (contextLine.includes(f.cndef)) {
+        selected.push(f)
+        if (selected.length >= 2) break
+      }
+    }
+  }
+  if (selected.length === 0) {
+    for (let i = 0; i < Math.min(2, flat.length); i++) selected.push(flat[i])
+  }
+  if (selected.length === 0) return senseLines[0]
+
+  let out = ''
+  let lastPos = ''
+  for (let i = 0; i < selected.length; i++) {
+    const f = selected[i]
+    const isNewLine = i === 0 || f.lineNo !== selected[i - 1].lineNo
+    if (isNewLine) {
+      if (i > 0) out += ' / '
+      if (f.pos) out += f.pos + ' '
+    } else if (f.pos !== lastPos) {
+      out += '；'
+      if (f.pos) out += f.pos + ' '
+    } else {
+      out += '，'
+    }
+    out += f.cndef
+    lastPos = f.pos
+  }
+  return out
 }
 
 /** Step 1: Chinese → English (by proficiency) + （definition）. */
@@ -178,7 +294,7 @@ function renderParagraphStep1(para: string, words: VocabWord[]): string {
   for (const m of matches) {
     if (m.start > last) out.push(escapeHtml(para.slice(last, m.start)))
     const en = escapeHtml(m.word.word)
-    const def = escapeHtml(m.word.definition || '—')
+    const def = escapeHtml(shortDefinition(m.word.definition || '', para))
     const enColor = textColorFor(m.word.proficiency)
     out.push(
       `<span class="vocab-en" style="color:${enColor}">${en}</span><span class="vocab-paren">（</span><span class="vocab-def">${def}</span><span class="vocab-paren">）</span>`,
@@ -200,7 +316,8 @@ function renderParagraphStep2(para: string, words: VocabWord[]): string {
   for (const m of matches) {
     if (m.start > last) out.push(escapeHtml(para.slice(last, m.start)))
     const en = escapeHtml(m.word.word)
-    const defLen = Math.max((m.word.definition || '').length, 4)
+    const estimated = shortDefinition(m.word.definition || '', para)
+    const defLen = Math.max(estimated.length || 1, 4)
     const blank = Array(defLen + 1).join('\u3000')
     const enColor = textColorFor(m.word.proficiency)
     out.push(
@@ -226,7 +343,7 @@ function renderParagraphStep1En(para: string, words: VocabWord[]): string {
   for (const m of matches) {
     if (m.start > last) out.push(escapeHtml(para.slice(last, m.start)))
     const en = escapeHtml(para.slice(m.start, m.end))
-    const def = escapeHtml(m.word.definition || '—')
+    const def = escapeHtml(shortDefinition(m.word.definition || '', ''))
     const enColor = textColorFor(m.word.proficiency)
     out.push(
       `<span class="vocab-en" style="color:${enColor}">${en}</span><span class="vocab-paren">（</span><span class="vocab-def">${def}</span><span class="vocab-paren">）</span>`,
@@ -248,7 +365,8 @@ function renderParagraphStep2En(para: string, words: VocabWord[]): string {
   for (const m of matches) {
     if (m.start > last) out.push(escapeHtml(para.slice(last, m.start)))
     const en = escapeHtml(para.slice(m.start, m.end))
-    const defLen = Math.max((m.word.definition || '').length, 4)
+    const estimated = shortDefinition(m.word.definition || '', '')
+    const defLen = Math.max(estimated.length || 1, 4)
     const blank = Array(defLen + 1).join('\u3000')
     const enColor = textColorFor(m.word.proficiency)
     out.push(

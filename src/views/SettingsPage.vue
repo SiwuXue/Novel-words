@@ -70,16 +70,39 @@
           </el-form-item>
         </el-form>
       </el-tab-pane>
+
+      <!-- Backup / restore tab -->
+      <el-tab-pane label="数据备份" name="backup">
+        <el-form label-width="120px">
+          <el-form-item label="备份数据">
+            <div style="display:flex;gap:12px;align-items:center;width:100%;">
+              <el-button type="primary" :loading="backingUp" @click="onBackup">
+                导出数据库备份
+              </el-button>
+              <span class="backup-hint">生成一个 .db 文件，可复制到新电脑用于恢复</span>
+            </div>
+          </el-form-item>
+          <el-form-item label="恢复数据">
+            <div style="display:flex;gap:12px;align-items:center;width:100%;">
+              <el-button type="danger" :loading="restoring" @click="onRestore">
+                从备份文件恢复
+              </el-button>
+              <span class="backup-hint">将覆盖当前所有数据，恢复后应用会自动重启</span>
+            </div>
+          </el-form-item>
+        </el-form>
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { invoke } from '@tauri-apps/api/core'
+import { open, save } from '@tauri-apps/plugin-dialog'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
-import { open } from '@tauri-apps/plugin-dialog'
 import { STEP_LABELS, type StepNum } from '@/types/pdfSteps'
 import { speakWord, type SpeechAccent } from '@/utils/speech'
 
@@ -89,6 +112,8 @@ const vocabBookStore = useVocabBookStore()
 const activeTab = ref('general')
 const stepNums: StepNum[] = [1, 2, 3]
 const localSteps = ref<StepNum[]>([...settingsStore.pdfIntensiveSteps])
+const backingUp = ref(false)
+const restoring = ref(false)
 
 watch(
   () => settingsStore.pdfIntensiveSteps,
@@ -137,6 +162,67 @@ function onTestAccent() {
   speakWord('hello', settingsStore.speechAccent)
 }
 
+function backupDefaultName(): string {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return (
+    `词阅备份-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}` +
+    `-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.db`
+  )
+}
+
+async function onBackup() {
+  backingUp.value = true
+  try {
+    const dest = await save({
+      defaultPath: backupDefaultName(),
+      filters: [{ name: 'SQLite 数据库', extensions: ['db'] }],
+    })
+    if (!dest) return
+    const saved = await invoke<string>('backup_database', { destPath: dest })
+    ElMessage.success(`备份成功：${saved}`)
+  } catch (e: any) {
+    ElMessage.error('备份失败: ' + String(e?.message || e))
+  } finally {
+    backingUp.value = false
+  }
+}
+
+async function onRestore() {
+  let src: string | null = null
+  try {
+    src = await open({
+      multiple: false,
+      filters: [{ name: 'SQLite 数据库', extensions: ['db'] }],
+    })
+  } catch (e: any) {
+    ElMessage.error('打开文件失败: ' + String(e?.message || e))
+    return
+  }
+  if (!src) return
+
+  try {
+    await ElMessageBox.confirm(
+      '恢复将覆盖当前所有数据，且应用会自动重启。请确认已备份重要数据。',
+      '恢复数据',
+      { confirmButtonText: '覆盖并恢复', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+
+  restoring.value = true
+  try {
+    await invoke('restore_database', { srcPath: src })
+    ElMessage.success('恢复成功，应用即将重启')
+    setTimeout(() => window.location.reload(), 800)
+  } catch (e: any) {
+    ElMessage.error('恢复失败: ' + String(e?.message || e))
+  } finally {
+    restoring.value = false
+  }
+}
+
 onMounted(() => {
   if (vocabBookStore.books.length === 0) {
     vocabBookStore.fetchAll()
@@ -156,5 +242,9 @@ onMounted(() => {
 }
 .settings-tabs {
   margin-top: 8px;
+}
+.backup-hint {
+  font-size: 12px;
+  color: var(--text-secondary, #909399);
 }
 </style>

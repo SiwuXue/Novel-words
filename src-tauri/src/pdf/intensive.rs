@@ -79,16 +79,165 @@ pub fn parse_steps_from_db(value: Option<&str>) -> IntensiveSteps {
     s
 }
 
+// ---------------------------------------------------------------------------
+// Definition helpers: strip 【记忆】【搭配】 blocks + pick only sense(s) that
+// actually appear in the surrounding line (a rough context-based disambiguation).
+// Falls back to the first 2 senses if no match found or the definition is not
+// from the CET4 preset (has no `\n` structure, e.g. a manual vocab_word).
+// ---------------------------------------------------------------------------
+
+/// Strips 【记忆】/【搭配】/【真题】 blocks and returns only the "词性+释义" lines.
+/// Returns a Vec of (pos: Option<String>, cndefs: Vec<String>).
+fn parse_sense_lines(raw: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    for line in raw.split('\n') {
+        let t = line.trim();
+        if t.is_empty() { continue; }
+        if t.starts_with("【记忆】") || t.starts_with("【搭配】") || t.starts_with("【真题】")
+            || t.starts_with("【派生】") || t.starts_with("【例句】") {
+            break; // auxiliary sections are terminal; stop after first sighting
+        }
+        // Lines that start with "· " (phrase bullets) belong to 【搭配】 but
+        // occasionally a stray bullet appears after the section header — skip.
+        if t.starts_with("· ") { continue; }
+        lines.push(t.to_string());
+    }
+    lines
+}
+
+/// Breaks a sense string like "adj. 特别的，特殊的；讲究的，挑剔的" into
+/// ("adj.", ["特别的", "特殊的", "讲究的", "挑剔的"]). If no pos prefix,
+/// pos is empty string.
+fn split_sense(s: &str) -> (String, Vec<String>) {
+    // Find the first position after the longest leading ASCII-letter / '-'
+    // segment followed by '.'. Examples: "adj. ", "n. ", "vt. ", "n./v. "
+    let end = s.find('.')
+        .filter(|&idx| s[..idx].chars().all(|c| c.is_ascii_alphabetic() || c == '/'));
+    let (pos, rest) = match end {
+        Some(i) => (s[..=i].trim().to_string(), s[i + 1..].trim()),
+        None => (String::new(), s.trim()),
+    };
+    // Split Chinese text by common sense separators: / , ； 、 ; ，
+    let items: Vec<String> = rest
+        .split(|c: char| matches!(c, '/' | '、' | '；' | ';' | '，' | ','))
+        .map(|x| x.trim().to_string())
+        .filter(|x| !x.is_empty())
+        .collect();
+    (pos, items)
+}
+
+/// Returns a short sense string suitable for inline （parens） in Step 1/2.
+/// Strategy:
+///   1. Parse sense lines, drop 【记忆】【搭配】
+///   2. If `context_line` contains Chinese (CN novel), score each CNEF item by
+///      whether any of its chars appear as a substring inside context_line.
+///   3. Keep matched senses (max 2). If no match, keep first 2 total senses.
+///
+/// Output format: "adj. 特别的；讲究的 / n. 讲究"  (semicolons between items of
+/// same pos, slash between different parts of speech).
+fn short_definition(definition: &str, context_line: &str) -> String {
+    if definition.is_empty() {
+        return "—".into();
+    }
+    let sense_lines = parse_sense_lines(definition);
+    if sense_lines.is_empty() {
+        // No structured format (hand-typed vocab). Return:
+        // first paragraph (up to 1st \n【 or \n), max 30 chars.
+        let top = definition.split('\n').next().unwrap_or(definition);
+        let clean = if let Some(idx) = top.find("【记忆】").or_else(|| top.find("【搭配】")) {
+            &top[..idx]
+        } else { top };
+        let clean = clean.trim();
+        return clean.chars().take(30).collect::<String>();
+    }
+
+    // Build flat list of (pos, cndef) with original line-index ordering
+    struct Flat { pos: String, cndef: String, line_no: usize }
+    let mut flat: Vec<Flat> = Vec::with_capacity(sense_lines.len() * 2);
+    for (li, sl) in sense_lines.iter().enumerate() {
+        let (pos, items) = split_sense(sl);
+        for it in items {
+            flat.push(Flat { pos: pos.clone(), cndef: it, line_no: li });
+        }
+    }
+
+    // Determine whether context is usable for matching: needs to contain CJK
+    let has_cjk = context_line.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
+    let mut selected: Vec<&Flat> = Vec::new();
+
+    if has_cjk {
+        // Score each flat item: cndef is a substring of context_line?
+        for f in flat.iter() {
+            // Skip 1-char CNFs (usually classifier fillers like "一") to reduce false positives
+            if f.cndef.chars().count() <= 1 { continue; }
+            if context_line.contains(&f.cndef) {
+                selected.push(f);
+                if selected.len() >= 2 { break; }
+            }
+        }
+    }
+
+    // If no match (or EN novel), take first 2 flat items as fallback
+    if selected.is_empty() {
+        for f in flat.iter().take(2) {
+            selected.push(f);
+        }
+    }
+    if selected.is_empty() {
+        return sense_lines[0].clone();
+    }
+
+    // Render: group consecutive same-pos by line_no, semicolons within group, slashes between lines
+    let mut out = String::new();
+    let mut last_pos = "";
+    for (i, f) in selected.iter().enumerate() {
+        let is_new_line = i == 0 || f.line_no != selected[i - 1].line_no;
+        if is_new_line {
+            if i > 0 { out.push_str(" / "); }
+            if !f.pos.is_empty() {
+                out.push_str(&f.pos);
+                out.push(' ');
+            }
+        } else if f.pos != last_pos {
+            out.push_str("；");
+            if !f.pos.is_empty() {
+                out.push_str(&f.pos);
+                out.push(' ');
+            }
+        } else {
+            out.push_str("，");
+        }
+        out.push_str(&f.cndef);
+        last_pos = &f.pos;
+    }
+    out
+}
+
 pub fn render(
     ctx: &mut PdfContext,
     chapters: &[Chapter],
     vocabs: &[VocabWord],
     steps: IntensiveSteps,
     language: &str,
+    progress: Option<&dyn Fn(super::PdfProgress)>,
 ) {
     let steps = steps.normalize();
     let is_en = language == "en";
+    let total_chapters = chapters.len().max(1);
     for (ci, chapter) in chapters.iter().enumerate() {
+        if let Some(p) = progress {
+            let title = if chapter.title.is_empty() {
+                "全文".to_string()
+            } else {
+                chapter.title.clone()
+            };
+            let percent = ((ci as f32 / total_chapters as f32) * 88.0).round() as u32;
+            p(super::PdfProgress {
+                percent,
+                message: format!("正在生成第 {}/{} 章：{}", ci + 1, total_chapters, title),
+            });
+        }
+
         if ci > 0 {
             ctx.new_page_for_chapter();
         }
@@ -584,9 +733,9 @@ fn render_annotated_paragraph_step1(ctx: &mut PdfContext, line: &str, vocabs: &[
         // Full-width left paren (black)
         draw_segment(ctx, &mut x, max_x, "（", text_black());
 
-        // Definition (purple)
-        let def = if m.word.definition.is_empty() { "—" } else { &m.word.definition };
-        draw_segment(ctx, &mut x, max_x, def, text_purple());
+        // Definition (purple) — sense-picked using the surrounding CN line
+        let def = short_definition(&m.word.definition, line);
+        draw_segment(ctx, &mut x, max_x, &def, text_purple());
 
         // Full-width right paren (black)
         draw_segment(ctx, &mut x, max_x, "）", text_black());
@@ -624,11 +773,12 @@ fn render_annotated_paragraph_step2(ctx: &mut PdfContext, line: &str, vocabs: &[
         let en = &m.word.word;
         draw_segment(ctx, &mut x, max_x, en, text_color_for_proficiency(&m.word.proficiency));
 
-        // Blank full-width parens: estimate width from definition length
-        let def_len = if m.word.definition.is_empty() {
+        // Blank full-width parens: estimate width using *shortened* definition
+        let def_estimate = short_definition(&m.word.definition, line);
+        let def_len = if def_estimate.is_empty() || def_estimate == "—" {
             4
         } else {
-            m.word.definition.chars().count().max(4)
+            def_estimate.chars().count().max(4)
         };
         let blank: String = std::iter::repeat('　').take(def_len).collect();
         let bracket_content = format!("（{}）", blank);
@@ -673,9 +823,9 @@ fn render_annotated_paragraph_step1_en(ctx: &mut PdfContext, line: &str, vocabs:
 
         // Full-width left paren (black)
         draw_segment(ctx, &mut x, max_x, "（", text_black());
-        // Definition (purple)
-        let def = if m.word.definition.is_empty() { "—" } else { &m.word.definition };
-        draw_segment(ctx, &mut x, max_x, def, text_purple());
+        // Definition (purple) — first 2 senses stripped of 记忆/搭配 blocks
+        let def = short_definition(&m.word.definition, "");
+        draw_segment(ctx, &mut x, max_x, &def, text_purple());
         // Full-width right paren (black)
         draw_segment(ctx, &mut x, max_x, "）", text_black());
 
@@ -711,11 +861,12 @@ fn render_annotated_paragraph_step2_en(ctx: &mut PdfContext, line: &str, vocabs:
         let en = &line[m.start..m.end];
         draw_segment(ctx, &mut x, max_x, en, text_color_for_proficiency(&m.word.proficiency));
 
-        // Blank full-width parens sized to the definition length
-        let def_len = if m.word.definition.is_empty() {
+        // Blank full-width parens sized to the SHORTENED definition length
+        let def_estimate = short_definition(&m.word.definition, "");
+        let def_len = if def_estimate.is_empty() || def_estimate == "—" {
             4
         } else {
-            m.word.definition.chars().count().max(4)
+            def_estimate.chars().count().max(4)
         };
         let blank: String = std::iter::repeat('　').take(def_len).collect();
         let bracket_content = format!("（{}）", blank);

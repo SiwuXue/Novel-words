@@ -6,7 +6,7 @@ use crate::models::vocab_word::VocabWord;
 use crate::pdf;
 use crate::pdf::matcher::{words_found_in_text, words_found_in_text_en};
 use crate::pdf::{parse_steps_from_db, IntensiveSteps};
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 fn steps_label(steps: IntensiveSteps) -> String {
     let mut parts = Vec::new();
@@ -18,6 +18,7 @@ fn steps_label(steps: IntensiveSteps) -> String {
 
 #[tauri::command]
 pub fn export_pdf(
+    app: AppHandle,
     state: State<DbState>,
     novel_id: i64,
     _template_id: Option<i64>,
@@ -147,6 +148,14 @@ pub fn export_pdf(
 
     drop(db);
 
+    let _ = app.emit(
+        "pdf-export-progress",
+        crate::pdf::PdfProgress {
+            percent: 0,
+            message: "正在统计词汇匹配…".to_string(),
+        },
+    );
+
     // ===== Compute coverage stats before generating =====
     let total_vocab = vocabs.len();
     let chapter_count = chapters.len();
@@ -167,7 +176,18 @@ pub fn export_pdf(
     };
 
     let steps_str = steps_label(steps);
-    pdf::generate_pdf(&novel, &template, &vocabs, &chapters, steps, &output_path)?;
+    let progress: &dyn Fn(crate::pdf::PdfProgress) = &|p: crate::pdf::PdfProgress| {
+        let _ = app.emit("pdf-export-progress", p);
+    };
+    pdf::generate_pdf(
+        &novel,
+        &template,
+        &vocabs,
+        &chapters,
+        steps,
+        &output_path,
+        Some(progress),
+    )?;
 
     Ok(PdfExportResponse {
         path: output_path,

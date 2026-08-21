@@ -6,3 +6,4 @@ pub mod settings;
 pub mod file_io;
 pub mod chapter;
 pub mod pdf_export;
+pub mod backup;

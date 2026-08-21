@@ -476,6 +476,13 @@ pub fn split_paragraphs(content: &str) -> Vec<String> {
         .collect()
 }
 
+/// Progress payload emitted to the frontend during PDF generation.
+#[derive(Clone, serde::Serialize)]
+pub struct PdfProgress {
+    pub percent: u32,
+    pub message: String,
+}
+
 pub fn generate_pdf(
     novel: &Novel,
     template: &PdfTemplate,
@@ -483,7 +490,14 @@ pub fn generate_pdf(
     chapters: &[Chapter],
     steps: IntensiveSteps,
     output_path: &str,
+    progress: Option<&dyn Fn(PdfProgress)>,
 ) -> Result<(), String> {
+    if let Some(p) = progress {
+        p(PdfProgress {
+            percent: 0,
+            message: "正在加载中文字体…".to_string(),
+        });
+    }
     // 1. Find + load font
     let font_path = font::find_chinese_font()
         .ok_or_else(|| "未找到系统中文字体".to_string())?;
@@ -503,6 +517,13 @@ pub fn generate_pdf(
             let mut w = Vec::new();
             ParsedFont::from_bytes(&b, 0, &mut w)
         });
+
+    if let Some(p) = progress {
+        p(PdfProgress {
+            percent: 2,
+            message: "正在创建文档…".to_string(),
+        });
+    }
 
     // 2. Create document
     let mut doc = PdfDocument::new(
@@ -544,7 +565,7 @@ pub fn generate_pdf(
     };
 
     // 3. Render (intensive reading only)
-    intensive::render(&mut ctx, chapters, vocabs, steps, &novel.language);
+    intensive::render(&mut ctx, chapters, vocabs, steps, &novel.language, progress);
 
     // 4. Add PDF bookmarks for chapter navigation
     for (title, page) in &ctx.bookmarks {
@@ -559,6 +580,12 @@ pub fn generate_pdf(
     }
 
     // 6. Save
+    if let Some(p) = progress {
+        p(PdfProgress {
+            percent: 92,
+            message: "正在生成并写入 PDF 文件…".to_string(),
+        });
+    }
     let opts = PdfSaveOptions::default();
     let mut save_warnings = Vec::new();
     let bytes = ctx.doc.save(&opts, &mut save_warnings);
