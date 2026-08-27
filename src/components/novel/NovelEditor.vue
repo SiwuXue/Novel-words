@@ -366,7 +366,33 @@ watch(
   },
 )
 
-defineExpose({ scrollToText })
+// ===== Scroll position (for reading-position memory) =====
+
+function getScrollEl(): HTMLElement | null {
+  const el = editorContentRef.value?.$el as HTMLElement | undefined
+  if (el) {
+    const scrollable = el.closest('.tiptap-editor') ?? el
+    if (scrollable) return scrollable as HTMLElement
+  }
+  const view = (editor.value as any)?.view as EditorView | undefined
+  return view?.dom?.parentElement?.closest('.tiptap-editor') ?? null
+}
+
+function getScrollPercent(): number {
+  const el = getScrollEl()
+  if (!el) return 0
+  const max = el.scrollHeight - el.clientHeight
+  return max > 0 ? el.scrollTop / max : 0
+}
+
+function setScrollPercent(p: number) {
+  const el = getScrollEl()
+  if (!el) return
+  const max = el.scrollHeight - el.clientHeight
+  el.scrollTop = max * Math.min(1, Math.max(0, p))
+}
+
+defineExpose({ scrollToText, getScrollEl, getScrollPercent, setScrollPercent })
 </script>
 
 <style scoped>

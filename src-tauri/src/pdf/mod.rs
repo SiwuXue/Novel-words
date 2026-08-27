@@ -57,6 +57,17 @@ pub fn table_header_bg() -> Color {
     Color::Rgb(Rgb::new(0xE0 as f32 / 255.0, 0xE8 as f32 / 255.0, 0xEF as f32 / 255.0, None))
 }
 
+/// Accent blue used for titles / chapter labels / cover decorations.
+#[inline]
+pub fn accent_color() -> Color {
+    Color::Rgb(Rgb::new(
+        0x1A as f32 / 255.0,
+        0x56 as f32 / 255.0,
+        0xDB as f32 / 255.0,
+        None,
+    ))
+}
+
 /// Return the text color for a given proficiency level (intensive reading).
 /// - unknown → red (needs study)
 /// - familiar → orange (familiar but needs reinforcement)
@@ -527,6 +538,76 @@ pub struct PdfProgress {
     pub message: String,
 }
 
+/// Draw a full cover page (shared by the intensive and card templates):
+/// centered book title, author, export date and a vocab-stat strip.
+pub(crate) fn draw_cover_page(
+    ctx: &mut PdfContext,
+    total: usize,
+    unknown: usize,
+    familiar: usize,
+    mastered: usize,
+) {
+    let cx = ctx.paper_width / 2.0;
+    let small = ctx.small_font_size;
+    let mut y = ctx.paper_height * 0.72;
+
+    // Decorative accent bar above the title.
+    let bar_w = 46.0;
+    ctx.fill_rect(cx - bar_w / 2.0, y + 7.0, bar_w, 1.4, accent_color());
+
+    // Title.
+    let title = if ctx.novel_title.is_empty() {
+        "未命名".to_string()
+    } else {
+        ctx.novel_title.clone()
+    };
+    let title_size = ctx.font_size + 12.0;
+    let tw = ctx.measure_text_width(&title, title_size);
+    ctx.draw_text_colored(&title, cx - tw / 2.0, y, title_size, text_black());
+    y -= title_size * 0.3528 * 2.4;
+
+    // Author / tagline.
+    let author = if ctx.novel_author.is_empty() {
+        "词阅 · 外语学习".to_string()
+    } else {
+        format!("作者：{}", ctx.novel_author)
+    };
+    let sub_size = ctx.font_size + 1.0;
+    let aw = ctx.measure_text_width(&author, sub_size);
+    ctx.draw_text_colored(&author, cx - aw / 2.0, y, sub_size, text_gray());
+    y -= sub_size * 0.3528 * 2.6;
+
+    // Export date.
+    let date = format!("导出日期：{}", crate::utils::date::today_ymd());
+    let dw = ctx.measure_text_width(&date, small);
+    ctx.draw_text_colored(&date, cx - dw / 2.0, y, small, text_light_gray());
+    y -= small * 0.3528 * 3.2;
+
+    // Stat strip (centered as a group).
+    let stats = [
+        format!("单词数 {}", total),
+        format!("生疏 {}", unknown),
+        format!("熟悉 {}", familiar),
+        format!("掌握 {}", mastered),
+    ];
+    let gap = small * 0.3528 * 2.4;
+    let total_w: f32 = stats
+        .iter()
+        .map(|s| ctx.measure_text_width(s, small) + gap)
+        .sum::<f32>()
+        - gap;
+    let mut x = cx - total_w / 2.0;
+    for (i, s) in stats.iter().enumerate() {
+        ctx.draw_text_colored(s, x, y, small, text_black());
+        x += ctx.measure_text_width(s, small);
+        if i < stats.len() - 1 {
+            let sep = "  |  ";
+            ctx.draw_text_colored(sep, x, y, small, text_light_gray());
+            x += ctx.measure_text_width(sep, small);
+        }
+    }
+}
+
 pub fn generate_pdf(
     novel: &Novel,
     template: &PdfTemplate,
@@ -534,6 +615,7 @@ pub fn generate_pdf(
     chapters: &[Chapter],
     steps: IntensiveSteps,
     background: &str,
+    cover: bool,
     output_path: &str,
     progress: Option<&dyn Fn(PdfProgress)>,
 ) -> Result<(), String> {
@@ -611,8 +693,8 @@ pub fn generate_pdf(
 
     // 3. Render — the template type picks which renderer to run.
     match template.template_type.as_str() {
-        "card" => card::render(&mut ctx, chapters, vocabs, &novel.language, background, progress),
-        _ => intensive::render(&mut ctx, chapters, vocabs, steps, &novel.language, progress),
+        "card" => card::render(&mut ctx, chapters, vocabs, &novel.language, background, cover, progress),
+        _ => intensive::render(&mut ctx, chapters, vocabs, steps, &novel.language, cover, progress),
     }
 
     // 4. Add PDF bookmarks for chapter navigation

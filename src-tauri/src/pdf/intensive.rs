@@ -219,11 +219,40 @@ pub fn render(
     vocabs: &[VocabWord],
     steps: IntensiveSteps,
     language: &str,
+    cover: bool,
     progress: Option<&dyn Fn(super::PdfProgress)>,
 ) {
     let steps = steps.normalize();
     let is_en = language == "en";
     let total_chapters = chapters.len().max(1);
+
+    // Optional cover page: whole-book matched-word stats, then push the cover
+    // page cleanly (no chrome) so chapters start on page 2.
+    if cover {
+        let mut all_matched: Vec<&VocabWord> = Vec::new();
+        for ch in chapters {
+            let found: Vec<&VocabWord> = if is_en {
+                words_found_in_text_en(&ch.content, vocabs)
+            } else {
+                words_found_in_text(&ch.content, vocabs)
+            };
+            for w in found {
+                let key = w.word.to_lowercase();
+                if !all_matched.iter().any(|x| x.word.to_lowercase() == key) {
+                    all_matched.push(w);
+                }
+            }
+        }
+        let total = all_matched.len();
+        let unknown = all_matched.iter().filter(|w| w.proficiency == "unknown").count();
+        let familiar = all_matched.iter().filter(|w| w.proficiency == "familiar").count();
+        let mastered = all_matched.iter().filter(|w| w.proficiency == "mastered").count();
+        super::draw_cover_page(ctx, total, unknown, familiar, mastered);
+        ctx.show_chrome = false;
+        ctx.new_page();
+        ctx.show_chrome = true;
+    }
+
     for (ci, chapter) in chapters.iter().enumerate() {
         if let Some(p) = progress {
             let title = if chapter.title.is_empty() {

@@ -25,9 +25,11 @@ pub async fn export_pdf(
     template_type: Option<String>,
     vocab_book_id: Option<i64>,
     steps: Option<Vec<i64>>,
+    cover: Option<bool>,
     output_path: String,
 ) -> Result<PdfExportResponse, String> {
     let template_type = template_type.unwrap_or_else(|| "intensive".to_string());
+    let cover = cover.unwrap_or(false);
     // ---- Phase 1: read all data from SQLite (fast, hold the lock only briefly) ----
     let (novel, template, vocabs, chapters, steps, background) = {
         let db = state.db.lock().map_err(|e| e.to_string())?;
@@ -213,6 +215,7 @@ pub async fn export_pdf(
             &chapters,
             steps,
             &background,
+            cover,
             &output_path,
             Some(&progress),
         )?;

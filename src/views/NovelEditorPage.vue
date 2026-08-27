@@ -82,6 +82,14 @@
           </el-dropdown-menu>
         </template>
       </el-dropdown>
+      <el-checkbox
+        v-if="loadState === 'loaded'"
+        v-model="coverEnabled"
+        size="small"
+        style="margin-right: 2px;"
+      >
+        封面页
+      </el-checkbox>
       <el-button
         v-if="loadState === 'loaded'"
         size="small"
@@ -249,6 +257,7 @@ type TemplateType = 'intensive' | 'card'
 const pdfTemplateType = ref<TemplateType>('intensive')
 const pdfTemplateLabel = computed(() => TEMPLATE_TYPE_LABELS[pdfTemplateType.value] ?? pdfTemplateType.value)
 const isEnglishMode = computed(() => store.currentNovel?.language === 'en')
+const coverEnabled = ref(false)
 
 function onTemplateSelect(cmd: TemplateType) {
   if (cmd === 'card' && !isEnglishMode.value) {
@@ -354,6 +363,7 @@ const previewHtml = computed(() => {
     language: store.currentNovel?.language,
     templateType: pdfTemplateType.value,
     background: settingsStore.pdfBackground,
+    cover: coverEnabled.value,
   })
 })
 
@@ -428,6 +438,7 @@ async function handleExportPdf() {
       templateType: pdfTemplateType.value,
       vocabBookId: highlightBookId.value,
       steps: normalizeSteps(pdfSteps.value),
+      cover: coverEnabled.value,
       outputPath: filePath,
     })
     const pct =
@@ -496,6 +507,8 @@ async function loadNovel() {
     if (text) await editorStore.loadChapters(id, text)
     loadState.value = 'loaded'
     await nextTick()
+    await restoreReadingPos()
+    attachScrollListener()
   } catch (e: any) {
     if (loadState.value === 'error') return
     errorMessage.value = String(e?.message || e || '未知错误')
@@ -543,6 +556,8 @@ watch(highlightBookId, async (bookId) => {
 
 onBeforeUnmount(() => {
   cleanupTimers()
+  if (posSaveTimer != null) window.clearTimeout(posSaveTimer)
+  scrollElCleanup?.()
   // Flush pending autosave before unmounting
   if (loadState.value === 'loaded') {
     const id = currentNovelId.value
@@ -584,9 +599,12 @@ function onKeyDown(e: KeyboardEvent) {
 
 /** Flush pending save when window becomes hidden (user switches apps). */
 function onVisibilityChange() {
-  if (document.hidden && loadState.value === 'loaded' && editorStore.isDirty) {
+  if (document.hidden && loadState.value === 'loaded') {
     const id = currentNovelId.value
-    if (id) void editorStore.flushSave(id, editorContent.value)
+    if (id) {
+      if (editorStore.isDirty) void editorStore.flushSave(id, editorContent.value)
+      void saveReadingPos()
+    }
   }
 }
 
@@ -612,6 +630,7 @@ onBeforeRouteLeave(async (_to, _from, next) => {
       }
     }
   }
+  await saveReadingPos()
   if (editorStore.isDirty) {
     try {
       await ElMessageBox.confirm(
@@ -637,6 +656,61 @@ async function scrollToChapter(index: number) {
   )
   editorRef.value?.scrollToText(ch.title)
   previewRef.value?.scrollToText(ch.title)
+}
+
+// ===== 阅读进度记忆（存 app_settings: reading_pos_{novelId}） =====
+let posSaveTimer: number | null = null
+let scrollElCleanup: (() => void) | null = null
+
+async function saveReadingPos() {
+  const id = currentNovelId.value
+  if (!id || loadState.value !== 'loaded') return
+  const percent = editorRef.value?.getScrollPercent() ?? 0
+  const chapterIndex = editorStore.activeChapterIndex
+  try {
+    await invoke('set_setting', {
+      key: `reading_pos_${id}`,
+      value: JSON.stringify({ chapterIndex, percent }),
+    })
+  } catch {
+    /* ignore */
+  }
+}
+
+function scheduleSaveReadingPos() {
+  if (posSaveTimer != null) window.clearTimeout(posSaveTimer)
+  posSaveTimer = window.setTimeout(() => void saveReadingPos(), 800)
+}
+
+async function restoreReadingPos() {
+  const id = currentNovelId.value
+  if (!id || loadState.value !== 'loaded') return
+  try {
+    const raw = await invoke<string>('get_setting', { key: `reading_pos_${id}` })
+    if (!raw) return
+    const pos = JSON.parse(raw) as { chapterIndex?: number; percent?: number }
+    const idx = Math.max(
+      0,
+      Math.min(editorStore.chapterList.length - 1, pos.chapterIndex ?? 0),
+    )
+    if (idx > 0) await scrollToChapter(idx)
+    await new Promise<void>((r) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => r())),
+    )
+    if (typeof pos.percent === 'number') {
+      editorRef.value?.setScrollPercent(pos.percent)
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function attachScrollListener() {
+  scrollElCleanup?.()
+  const el = editorRef.value?.getScrollEl()
+  if (!el) return
+  el.addEventListener('scroll', scheduleSaveReadingPos, { passive: true })
+  scrollElCleanup = () => el.removeEventListener('scroll', scheduleSaveReadingPos)
 }
 </script>
 

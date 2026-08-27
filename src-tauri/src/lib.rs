@@ -31,7 +31,7 @@ use commands::app_info::get_app_info;
 use commands::backup::{backup_database, restore_database};
 use commands::export::{export_vocab_words_apkg, export_vocab_words_xlsx};
 use commands::pdf_export::export_pdf;
-use commands::review::{get_due_words, review_vocab_word};
+use commands::review::{get_due_words, get_due_words_count, review_vocab_word};
 use commands::settings::{get_all_settings, get_setting, set_setting};
 use dictionary::{dict_lookup_chinese, dict_lookup_english, DictDbState};
 
@@ -85,6 +85,12 @@ pub fn run() {
             }
             app.manage(db_state);
 
+            // Auto-backup on startup (best effort; failures are logged only).
+            {
+                let state = app.state::<db::DbState>();
+                commands::backup::auto_backup(&app_data_dir, &state);
+            }
+
             // Initialize embedded dictionary (read-only). Failure here is
             // non-fatal: dict_lookup_* commands will return errors and the
             // app continues without lookup feature.
@@ -127,6 +133,7 @@ pub fn run() {
             export_vocab_words_xlsx,
             export_vocab_words_apkg,
             get_due_words,
+            get_due_words_count,
             review_vocab_word,
             import_vocab_words_csv,
             create_pdf_template,

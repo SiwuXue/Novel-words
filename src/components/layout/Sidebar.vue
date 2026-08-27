@@ -21,6 +21,7 @@
         <el-menu-item index="/vocabulary">
           <el-icon><Collection /></el-icon>
           <span>词汇本</span>
+          <span class="due-badge" v-if="dueCount > 0" :title="`今日待复习 ${dueCount} 词`">{{ dueCount > 99 ? '99+' : dueCount }}</span>
         </el-menu-item>
         <el-menu-item index="/settings">
           <el-icon><Setting /></el-icon>
@@ -45,8 +46,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { invoke } from '@tauri-apps/api/core'
 import { HomeFilled, Document, Collection, Setting, InfoFilled, Fold, Expand } from '@element-plus/icons-vue'
 import AboutDialog from '@/components/common/AboutDialog.vue'
 
@@ -60,6 +62,29 @@ const activeRoute = computed(() => {
 
 const showAbout = ref(false)
 const pinned = ref(false)
+
+// ---- 今日待复习徽标（所有词汇本到期词总数） ----
+const dueCount = ref(0)
+let dueTimer: number | null = null
+
+async function refreshDueCount() {
+  try {
+    dueCount.value = await invoke<number>('get_due_words_count')
+  } catch {
+    /* ignore */
+  }
+}
+
+onMounted(() => {
+  refreshDueCount()
+  dueTimer = window.setInterval(refreshDueCount, 60000)
+})
+
+onBeforeUnmount(() => {
+  if (dueTimer != null) window.clearInterval(dueTimer)
+})
+
+watch(route, () => refreshDueCount())
 
 function togglePin() {
   pinned.value = !pinned.value
@@ -134,6 +159,19 @@ function togglePin() {
 .sidebar-menu .el-menu-item.is-active {
   color: var(--accent-color);
   background: rgba(64, 158, 255, 0.1);
+}
+
+.due-badge {
+  margin-left: auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #f56c6c;
+  color: #fff;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
 }
 
 .sidebar-footer {

@@ -447,6 +447,8 @@ export interface BuildPreviewInput {
   templateType?: string
   /** Page background for the card template: 'grid' | 'dots' | 'none'. */
   background?: string
+  /** Whether to render a cover page at the top. */
+  cover?: boolean
 }
 
 function baseCss(fontSize: number, lineHeight: number): string {
@@ -474,15 +476,23 @@ function baseCss(fontSize: number, lineHeight: number): string {
     .pdf-preview-body .step3-tables td.word { width: 34%; font-weight: 500; }
     .pdf-preview-body .step3-tables td.def { width: 46%; color: #222; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pdf-preview-body p { margin: 0 0 8px; text-indent: 2em; }
+    .pdf-preview-body .cover-page { text-align: center; padding: 90px 24px 40px; }
+    .pdf-preview-body .cover-bar { width: 60px; height: 3px; background: #1A56DB; margin: 0 auto 18px; }
+    .pdf-preview-body .cover-title { font-size: 26px; font-weight: 700; color: #222; margin-bottom: 8px; }
+    .pdf-preview-body .cover-sub { font-size: 15px; color: #666; margin-bottom: 22px; }
+    .pdf-preview-body .cover-date { font-size: 12px; color: #999; margin-bottom: 26px; }
+    .pdf-preview-body .cover-stats { font-size: 13px; color: #333; }
+    .pdf-preview-body .cover-stats span + span { margin-left: 16px; }
   `
 }
 
 function buildIntensive(
   chapters: Chapter[],
   words: VocabWord[],
-  _novelTitle?: string,
+  novelTitle?: string,
   stepsInput?: StepNum[],
   language?: string,
+  cover?: boolean,
 ): string {
   const steps = normalizeSteps(stepsInput)
   const includeStep1 = steps.includes(1)
@@ -495,6 +505,25 @@ function buildIntensive(
   const renderStep2 = isEn ? renderParagraphStep2En : renderParagraphStep2
 
   const parts: string[] = []
+  if (cover) {
+    const allMatched: VocabWord[] = []
+    for (const ch of chapters) {
+      const body = looksLikeHtml(ch.content) ? stripHtml(ch.content) : ch.content
+      for (const w of findWords(body, words)) {
+        if (!allMatched.some((x) => x.word.toLowerCase() === w.word.toLowerCase())) {
+          allMatched.push(w)
+        }
+      }
+    }
+    parts.push(
+      buildCoverHtml(novelTitle, {
+        total: allMatched.length,
+        unknown: allMatched.filter((w) => w.proficiency === 'unknown').length,
+        familiar: allMatched.filter((w) => w.proficiency === 'familiar').length,
+        mastered: allMatched.filter((w) => w.proficiency === 'mastered').length,
+      }),
+    )
+  }
   for (let ci = 0; ci < chapters.length; ci++) {
     const ch = chapters[ci]
     const num = ci + 1
@@ -539,17 +568,17 @@ function buildIntensive(
 }
 
 export function buildHtml(input: BuildPreviewInput): string {
-  const { chapters, words, template, novelTitle, steps, language, templateType, background } = input
+  const { chapters, words, template, novelTitle, steps, language, templateType, background, cover } = input
   const lineHeight = template?.lineSpacing ?? 1.5
   const fontSize = template?.fontSize ?? 14
   const isCard = templateType === 'card' || template?.templateType === 'card'
   if (isCard) {
     const css = cardCss(fontSize, lineHeight, background)
-    const body = buildCard(chapters, words, novelTitle)
+    const body = buildCard(chapters, words, novelTitle, cover)
     return `<style>${css}</style><div class="pdf-preview-body card-preview">${body}</div>`
   }
   const css = baseCss(fontSize, lineHeight)
-  const bodyContent = buildIntensive(chapters, words, novelTitle, steps, language)
+  const bodyContent = buildIntensive(chapters, words, novelTitle, steps, language, cover)
   return `<style>${css}</style><div class="pdf-preview-body">${bodyContent}</div>`
 }
 
@@ -647,7 +676,24 @@ function sentenceGroups(para: string): string[] {
   return groups
 }
 
-function buildCard(chapters: Chapter[], words: VocabWord[], novelTitle?: string): string {
+/** Shared cover-page HTML for both templates (title / author / date / stats). */
+function buildCoverHtml(
+  novelTitle: string | undefined,
+  s: { total: number; unknown: number; familiar: number; mastered: number },
+): string {
+  const today = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const date = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`
+  return `<div class="cover-page">
+    <div class="cover-bar"></div>
+    <div class="cover-title">${escapeHtml(novelTitle || '未命名')}</div>
+    <div class="cover-sub">词阅 · 外语学习</div>
+    <div class="cover-date">导出日期：${date}</div>
+    <div class="cover-stats"><span>单词数 ${s.total}</span><span>生疏 ${s.unknown}</span><span>熟悉 ${s.familiar}</span><span>掌握 ${s.mastered}</span></div>
+  </div>`
+}
+
+function buildCard(chapters: Chapter[], words: VocabWord[], novelTitle?: string, cover?: boolean): string {
   const matched: VocabWord[] = []
   for (const ch of chapters) {
     const body = looksLikeHtml(ch.content) ? stripHtml(ch.content) : ch.content
@@ -663,6 +709,9 @@ function buildCard(chapters: Chapter[], words: VocabWord[], novelTitle?: string)
   const mastered = matched.filter((w) => w.proficiency === 'mastered').length
 
   const parts: string[] = []
+  if (cover) {
+    parts.push(buildCoverHtml(novelTitle, { total, unknown, familiar, mastered }))
+  }
   parts.push(`<div class="card-global-header">
     <div class="card-title">${escapeHtml(novelTitle || '未命名')}</div>
     <div class="card-sub">单词卡片 · 语境记忆</div>
@@ -734,5 +783,12 @@ function cardCss(fontSize: number, lineHeight: number, background?: string): str
     .card-preview .wc-word { font-size: ${fontSize + 2}px; font-weight: 700; }
     .card-preview .wc-phon { font-size: ${fontSize - 2}px; color: #555; }
     .card-preview .wc-def { font-size: ${fontSize - 2}px; color: #222; margin-top: 2px; }
+    .card-preview .cover-page { text-align: center; padding: 90px 24px 40px; }
+    .card-preview .cover-bar { width: 60px; height: 3px; background: #1A56DB; margin: 0 auto 18px; }
+    .card-preview .cover-title { font-size: 26px; font-weight: 700; color: #222; margin-bottom: 8px; }
+    .card-preview .cover-sub { font-size: 15px; color: #666; margin-bottom: 22px; }
+    .card-preview .cover-date { font-size: 12px; color: #999; margin-bottom: 26px; }
+    .card-preview .cover-stats { font-size: 13px; color: #333; }
+    .card-preview .cover-stats span + span { margin-left: 16px; }
   `
 }

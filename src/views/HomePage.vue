@@ -21,6 +21,11 @@
         <div class="stat-num">{{ wordCount }}</div>
         <div class="stat-label">生词</div>
       </div>
+      <div class="stat-card" @click="$router.push('/vocabulary')">
+        <el-icon :size="28"><AlarmClock /></el-icon>
+        <div class="stat-num">{{ dueCount }}</div>
+        <div class="stat-label">今日待复习</div>
+      </div>
     </div>
 
     <div class="recent-section" v-if="recentNovels.length">
@@ -59,7 +64,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Document, Collection, Notebook, Plus, Setting, ArrowRight } from '@element-plus/icons-vue'
+import { Document, Collection, Notebook, AlarmClock, Plus, Setting, ArrowRight } from '@element-plus/icons-vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { VocabBook } from '@/types/vocabBook'
 import type { VocabWord } from '@/types/vocabWord'
@@ -68,6 +73,7 @@ import type { Novel } from '@/types/novel'
 const novelCount = ref(0)
 const bookCount = ref(0)
 const wordCount = ref(0)
+const dueCount = ref(0)
 const recentNovels = ref<Novel[]>([])
 
 onMounted(async () => {
@@ -75,6 +81,10 @@ onMounted(async () => {
     const novels = await invoke<Novel[]>('get_all_novels')
     novelCount.value = novels.length
     recentNovels.value = novels.slice(0, 3)
+  } catch { /* ignore */ }
+
+  try {
+    dueCount.value = await invoke<number>('get_due_words_count')
   } catch { /* ignore */ }
 
   try {

@@ -33,6 +33,29 @@ pub fn get_due_words(state: State<DbState>, vocab_book_id: i64) -> Result<Vec<Vo
     Ok(due)
 }
 
+/// Total number of words due for review today across ALL vocab books.
+/// A card without any SRS state is considered new and therefore due.
+#[tauri::command]
+pub fn get_due_words_count(state: State<DbState>) -> Result<i64, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let mut stmt = db
+        .prepare("SELECT memory_tag FROM vocab_word")
+        .map_err(|e| e.to_string())?;
+    let tags: Vec<String> = stmt
+        .query_map([], |row| row.get(0))
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+    let count = tags
+        .iter()
+        .filter(|t| {
+            let (_, srs) = parse_memory_tag(t);
+            is_due(&srs)
+        })
+        .count() as i64;
+    Ok(count)
+}
+
 /// Record a review rating for one card. Applies SM-2 and persists the new
 /// proficiency + SRS state (inside the existing `memory_tag` column).
 #[tauri::command]

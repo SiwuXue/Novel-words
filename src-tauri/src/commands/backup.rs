@@ -1,5 +1,6 @@
 use crate::db::DbState;
 use rusqlite::{Connection, DatabaseName};
+use std::path::Path;
 use tauri::State;
 
 /// Back up the entire SQLite database into a single self-contained file.
@@ -60,4 +61,111 @@ pub fn restore_database(state: State<DbState>, src_path: String) -> Result<(), S
         )
         .map_err(|e| format!("恢复数据库失败: {}", e))?;
     Ok(())
+}
+
+/// Auto-backup on startup, based on the `auto_backup` setting
+/// ("off" | "daily" | "weekly" | "monthly", default weekly). Backs up into
+/// `<app_data_dir>/backups/auto-YYYYMMDD-HHMMSS.db`, keeps the newest 10, and
+/// records `last_auto_backup` so we don't back up on every launch.
+pub fn auto_backup(app_data_dir: &Path, state: &State<DbState>) {
+    let interval_secs: u64 = {
+        let db = match state.db.lock() {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("[auto-backup] 锁获取失败: {}", e);
+                return;
+            }
+        };
+        let val: Result<String, _> = db.query_row(
+            "SELECT value FROM app_settings WHERE key='auto_backup'",
+            [],
+            |row| row.get(0),
+        );
+        match val.ok().as_deref() {
+            Some("off") => return,
+            Some("daily") => 24 * 3600,
+            Some("monthly") => 30 * 24 * 3600,
+            _ => 7 * 24 * 3600, // weekly (also the default when unset)
+        }
+    };
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    // Last successful auto-backup timestamp.
+    let last: u64 = {
+        let db = match state.db.lock() {
+            Ok(g) => g,
+            Err(_) => return,
+        };
+        let val: Result<String, _> = db.query_row(
+            "SELECT value FROM app_settings WHERE key='last_auto_backup'",
+            [],
+            |row| row.get(0),
+        );
+        val.ok()
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(0)
+    };
+    if last > 0 && now.saturating_sub(last) < interval_secs {
+        return;
+    }
+
+    let dir = app_data_dir.join("backups");
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        eprintln!("[auto-backup] 创建备份目录失败: {}", e);
+        return;
+    }
+    let fname = format!("auto-{}.db", crate::utils::date::timestamp_compact());
+    let dest = dir.join(&fname);
+
+    {
+        let db = match state.db.lock() {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("[auto-backup] 锁获取失败: {}", e);
+                return;
+            }
+        };
+        if let Err(e) = db.backup(DatabaseName::Main, &dest, None::<fn(rusqlite::backup::Progress)>)
+        {
+            eprintln!("[auto-backup] 备份失败: {}", e);
+            return;
+        }
+    }
+
+    // Prune old auto-* files, keeping only the newest 10.
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        let mut files: Vec<std::path::PathBuf> = entries
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.starts_with("auto-") && n.ends_with(".db"))
+                    .unwrap_or(false)
+            })
+            .collect();
+        files.sort();
+        while files.len() > 10 {
+            if let Some(old) = files.first() {
+                let _ = std::fs::remove_file(old);
+            }
+            files.remove(0);
+        }
+    }
+
+    {
+        let db = match state.db.lock() {
+            Ok(g) => g,
+            Err(_) => return,
+        };
+        let _ = db.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_auto_backup', ?1)",
+            rusqlite::params![now.to_string()],
+        );
+    }
+    println!("[auto-backup] 已生成自动备份: {}", dest.display());
 }

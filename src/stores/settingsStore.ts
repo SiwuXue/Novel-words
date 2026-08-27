@@ -7,12 +7,15 @@ import type { SpeechAccent } from '@/utils/speech'
 
 export type PdfBackground = 'grid' | 'dots' | 'none'
 
+export type AutoBackup = 'off' | 'daily' | 'weekly' | 'monthly'
+
 export const useSettingsStore = defineStore('settings', () => {
   const theme = ref<'light' | 'dark'>('light')
   const defaultExportFolder = ref('')
   const defaultVocabBookId = ref<number | null>(null)
   const pdfIntensiveSteps = ref<StepNum[]>([1, 2, 3])
   const pdfBackground = ref<PdfBackground>('grid')
+  const autoBackup = ref<AutoBackup>('weekly')
   const speechAccent = ref<SpeechAccent>('us')
   const loaded = ref(false)
 
@@ -47,6 +50,11 @@ export const useSettingsStore = defineStore('settings', () => {
           case 'pdf_background':
             if (s.value === 'grid' || s.value === 'dots' || s.value === 'none') {
               pdfBackground.value = s.value
+            }
+            break
+          case 'auto_backup':
+            if (s.value === 'off' || s.value === 'daily' || s.value === 'weekly' || s.value === 'monthly') {
+              autoBackup.value = s.value
             }
             break
           case 'speech_accent':
@@ -123,6 +131,15 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
+  async function setAutoBackup(v: AutoBackup) {
+    autoBackup.value = v
+    try {
+      await invoke('set_setting', { key: 'auto_backup', value: v })
+    } catch (e) {
+      console.error('[settingsStore] setAutoBackup failed:', e)
+    }
+  }
+
   async function setSpeechAccent(accent: SpeechAccent) {
     speechAccent.value = accent
     try {
@@ -138,6 +155,7 @@ export const useSettingsStore = defineStore('settings', () => {
     defaultVocabBookId,
     pdfIntensiveSteps,
     pdfBackground,
+    autoBackup,
     speechAccent,
     loaded,
     load,
@@ -146,6 +164,7 @@ export const useSettingsStore = defineStore('settings', () => {
     setDefaultVocabBookId,
     setPdfIntensiveSteps,
     setPdfBackground,
+    setAutoBackup,
     setSpeechAccent,
   }
 })

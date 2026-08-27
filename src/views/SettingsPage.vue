@@ -70,6 +70,19 @@
             <span class="backup-hint" style="margin-left:12px;">用于「单词卡片版」导出页面的底纹</span>
           </el-form-item>
 
+          <el-form-item label="自动备份">
+            <el-radio-group
+              :model-value="settingsStore.autoBackup"
+              @change="onAutoBackupChange"
+            >
+              <el-radio-button value="off">关闭</el-radio-button>
+              <el-radio-button value="daily">每天</el-radio-button>
+              <el-radio-button value="weekly">每周</el-radio-button>
+              <el-radio-button value="monthly">每月</el-radio-button>
+            </el-radio-group>
+            <span class="backup-hint" style="margin-left:12px;">应用启动时自动备份到数据目录 backups/ 文件夹，保留最近 10 份</span>
+          </el-form-item>
+
           <el-form-item label="朗读口音">
             <el-radio-group
               :model-value="settingsStore.speechAccent"
@@ -114,7 +127,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { useSettingsStore } from '@/stores/settingsStore'
-import type { PdfBackground } from '@/stores/settingsStore'
+import type { PdfBackground, AutoBackup } from '@/stores/settingsStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
 import { STEP_LABELS, type StepNum } from '@/types/pdfSteps'
 import { speakWord, type SpeechAccent } from '@/utils/speech'
@@ -169,6 +182,10 @@ async function onStepsChange(next: StepNum[]) {
 
 function onBackgroundChange(bg: PdfBackground) {
   settingsStore.setPdfBackground(bg)
+}
+
+function onAutoBackupChange(v: AutoBackup) {
+  settingsStore.setAutoBackup(v)
 }
 
 function onAccentChange(accent: SpeechAccent) {

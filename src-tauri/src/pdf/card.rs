@@ -13,7 +13,7 @@
 
 use super::matcher::{find_matches_in_line_en, words_found_in_text_en};
 use super::{
-    split_paragraphs, table_border, text_black, text_gray, text_light_gray,
+    draw_cover_page, split_paragraphs, table_border, text_black, text_gray, text_light_gray,
     text_color_for_proficiency, wrap_text_to_lines, PdfContext,
 };
 use crate::models::novel::Chapter;
@@ -234,6 +234,7 @@ pub fn render(
     vocabs: &[VocabWord],
     _language: &str,
     background: &str,
+    cover: bool,
     progress: Option<&dyn Fn(super::PdfProgress)>,
 ) {
     // Whole-book matched-word stats for the page-1 header strip.
@@ -254,6 +255,13 @@ pub fn render(
     // Page-1 header. `top` is a bottom-based baseline cursor; we advance it down.
     let mut top = ctx.paper_height - ctx.margins.top;
     draw_background(ctx, background);
+    if cover {
+        // A full cover page first, then the content (with its header) starts
+        // on page 2.
+        draw_cover_page(ctx, total, unknown, familiar, mastered);
+        new_card_page(ctx, background);
+        top = ctx.paper_height - ctx.margins.top;
+    }
     draw_global_header(ctx, &mut top, total, unknown, familiar, mastered);
 
     let mut is_first_section = true;
