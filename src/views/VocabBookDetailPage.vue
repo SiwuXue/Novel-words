@@ -4,15 +4,15 @@
     <div class="page-header">
       <div class="header-left">
         <el-button link @click="goBack">
-          <el-icon><ArrowLeft /></el-icon> 返回
+          <el-icon><ArrowLeft /></el-icon> {{ t('vocabDetail.back') }}
         </el-button>
         <h2 v-if="book">{{ book.name }}</h2>
-        <span class="word-count" v-if="!store.loading">{{ store.total }} 词</span>
+        <span class="word-count" v-if="!store.loading">{{ t('vocabDetail.wordCount', { n: store.total }) }}</span>
       </div>
       <div class="header-right">
         <el-input
           v-model="searchQuery"
-          placeholder="搜索单词..."
+          :placeholder="t('vocabDetail.search')"
           clearable
           style="width: 200px"
         >
@@ -21,21 +21,21 @@
           </template>
         </el-input>
         <el-button type="primary" @click="showCreateDialog">
-          <el-icon><Plus /></el-icon> 添加单词
+          <el-icon><Plus /></el-icon> {{ t('vocabDetail.addWord') }}
         </el-button>
         <el-button
           type="danger"
           :disabled="selectedRows.length === 0"
           @click="handleBatchDelete"
         >
-          <el-icon><Delete /></el-icon> 批量删除{{ selectedRows.length ? ` (${selectedRows.length})` : '' }}
+          <el-icon><Delete /></el-icon> {{ t('vocabDetail.batchDelete') }}{{ selectedRows.length ? ` (${selectedRows.length})` : '' }}
         </el-button>
         <el-button type="success" @click="goReview">
-          <el-icon><Reading /></el-icon> 卡片复习
+          <el-icon><Reading /></el-icon> {{ t('vocabDetail.review') }}
         </el-button>
         <el-dropdown trigger="click" @command="handleExportCommand">
           <el-button :disabled="store.words.length === 0">
-            <el-icon><Download /></el-icon> 导出
+            <el-icon><Download /></el-icon> {{ t('vocabDetail.export') }}
             <el-icon class="el-icon--right"><ArrowDown /></el-icon>
           </el-button>
           <template #dropdown>
@@ -47,7 +47,7 @@
           </template>
         </el-dropdown>
         <el-button @click="handleImportCsv">
-          <el-icon><Upload /></el-icon> 导入 CSV
+          <el-icon><Upload /></el-icon> {{ t('vocabDetail.importCsv') }}
         </el-button>
       </div>
     </div>
@@ -55,11 +55,11 @@
     <!-- Proficiency filter (multi-select: only show checked categories) -->
     <div class="filter-tabs">
       <el-checkbox-group v-model="proficiencyFilter" size="small">
-        <el-checkbox-button value="unknown">生疏</el-checkbox-button>
-        <el-checkbox-button value="familiar">熟悉</el-checkbox-button>
-        <el-checkbox-button value="mastered">已掌握</el-checkbox-button>
-        <el-button size="small" link @click="proficiencyFilter = ['unknown','familiar','mastered']">全选</el-button>
-        <el-button size="small" link @click="proficiencyFilter = ['unknown','familiar']">只看薄弱</el-button>
+        <el-checkbox-button value="unknown">{{ t('vocabDetail.unknown') }}</el-checkbox-button>
+        <el-checkbox-button value="familiar">{{ t('vocabDetail.familiar') }}</el-checkbox-button>
+        <el-checkbox-button value="mastered">{{ t('vocabDetail.mastered') }}</el-checkbox-button>
+        <el-button size="small" link @click="proficiencyFilter = ['unknown','familiar','mastered']">{{ t('vocabDetail.selectAll') }}</el-button>
+        <el-button size="small" link @click="proficiencyFilter = ['unknown','familiar']">{{ t('vocabDetail.weakOnly') }}</el-button>
       </el-checkbox-group>
     </div>
 
@@ -75,33 +75,33 @@
       @selection-change="handleSelectionChange"
     >
       <el-table-column type="selection" width="48" reserve-selection />
-      <el-table-column prop="word" label="单词" min-width="120" />
-      <el-table-column prop="phonetic" label="音标" width="140">
+      <el-table-column prop="word" :label="t('vocabDetail.word')" min-width="120" />
+      <el-table-column prop="phonetic" :label="t('vocabDetail.phonetic')" width="140">
         <template #default="{ row }">
           {{ row.phonetic || '—' }}
         </template>
       </el-table-column>
-      <el-table-column prop="definition" label="释义" min-width="160">
+      <el-table-column prop="definition" :label="t('vocabDetail.definition')" min-width="160">
         <template #default="{ row }">
           {{ row.definition || '—' }}
         </template>
       </el-table-column>
-      <el-table-column prop="exampleSentence" label="例句" min-width="180">
+      <el-table-column prop="exampleSentence" :label="t('vocabDetail.example')" min-width="180">
         <template #default="{ row }">
           {{ row.exampleSentence || '—' }}
         </template>
       </el-table-column>
-      <el-table-column prop="proficiency" label="熟练度" width="100">
+      <el-table-column prop="proficiency" :label="t('vocabDetail.proficiency')" width="100">
         <template #default="{ row }">
           <el-tag :type="proficiencyType(row.proficiency)" size="small">
             {{ proficiencyLabel(row.proficiency) }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="140" fixed="right">
+      <el-table-column :label="t('vocabDetail.actions')" width="140" fixed="right">
         <template #default="{ row }">
-          <el-button size="small" link type="primary" @click="editWord(row)">编辑</el-button>
-          <el-button size="small" link type="danger" @click="confirmDelete(row)">删除</el-button>
+          <el-button size="small" link type="primary" @click="editWord(row)">{{ t('vocabDetail.edit') }}</el-button>
+          <el-button size="small" link type="danger" @click="confirmDelete(row)">{{ t('vocabDetail.delete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -138,6 +138,7 @@ import { useVocabWordStore } from '@/stores/vocabWordStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
 import type { VocabWord, VocabWordFormData } from '@/types/vocabWord'
 import VocabWordFormDialog from '@/components/vocabulary/VocabWordFormDialog.vue'
+import { t } from '@/i18n'
 
 const route = useRoute()
 const router = useRouter()
@@ -205,9 +206,9 @@ function proficiencyType(p: string): 'danger' | 'warning' | 'success' {
 }
 
 function proficiencyLabel(p: string): string {
-  if (p === 'mastered') return '已掌握'
-  if (p === 'familiar') return '熟悉'
-  return '生疏'
+  if (p === 'mastered') return t('vocabDetail.mastered')
+  if (p === 'familiar') return t('vocabDetail.familiar')
+  return t('vocabDetail.unknown')
 }
 
 function showCreateDialog() {

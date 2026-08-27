@@ -7,7 +7,7 @@ mod utils;
 
 use tauri::Manager;
 
-use commands::file_io::import_file;
+use commands::file_io::{import_file, read_text_file, write_text_file};
 use commands::novel::{
     create_novel, delete_novel, get_all_novels, get_novel, search_novels, update_novel,
 };
@@ -29,7 +29,9 @@ use commands::chapter::{
 };
 use commands::app_info::get_app_info;
 use commands::backup::{backup_database, restore_database};
-use commands::export::{export_vocab_words_apkg, export_vocab_words_xlsx};
+use commands::export::{
+    export_vocab_book_json, export_vocab_words_apkg, export_vocab_words_xlsx, import_vocab_book_json,
+};
 use commands::pdf_export::export_pdf;
 use commands::review::{get_due_words, get_due_words_count, get_learning_stats, get_review_progress, review_vocab_word};
 use commands::settings::{get_all_settings, get_setting, set_setting};
@@ -140,6 +142,8 @@ pub fn run() {
             delete_novel,
             search_novels,
             import_file,
+            write_text_file,
+            read_text_file,
             create_vocab_book,
             get_all_vocab_books,
             update_vocab_book,
@@ -156,6 +160,8 @@ pub fn run() {
             export_vocab_words_csv,
             export_vocab_words_xlsx,
             export_vocab_words_apkg,
+            export_vocab_book_json,
+            import_vocab_book_json,
             get_due_words,
             get_due_words_count,
             get_review_progress,

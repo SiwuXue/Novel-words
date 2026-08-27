@@ -201,10 +201,28 @@ fn draw_background(ctx: &mut PdfContext, style: &str) {
     }
 }
 
+/// Draw a small centered page number footer ("第 N 页").
+fn draw_page_footer(ctx: &mut PdfContext) {
+    let n = ctx.page_count + 1;
+    let s = format!("第 {} 页", n);
+    let w = ctx.measure_text_width(&s, ctx.small_font_size);
+    let cx = ctx.paper_width / 2.0;
+    ctx.draw_text_colored(
+        &s,
+        cx - w / 2.0,
+        ctx.margins.bottom - 6.0,
+        ctx.small_font_size,
+        text_light_gray(),
+    );
+}
+
 /// Start a fresh page and lay down the background behind the content.
-fn new_card_page(ctx: &mut PdfContext, background: &str) {
+fn new_card_page(ctx: &mut PdfContext, background: &str, page_numbers: bool) {
     ctx.new_page();
     draw_background(ctx, background);
+    if page_numbers {
+        draw_page_footer(ctx);
+    }
 }
 
 /// Split a paragraph into sentences (breaking on `.`/`!`/`?` followed by
@@ -267,6 +285,7 @@ pub fn render(
     _language: &str,
     background: &str,
     cover: bool,
+    page_numbers: bool,
     progress: Option<&dyn Fn(super::PdfProgress)>,
 ) {
     // Whole-book matched-word stats for the page-1 header strip.
@@ -287,11 +306,14 @@ pub fn render(
     // Page-1 header. `top` is a bottom-based baseline cursor; we advance it down.
     let mut top = ctx.paper_height - ctx.margins.top;
     draw_background(ctx, background);
+    if page_numbers {
+        draw_page_footer(ctx);
+    }
     if cover {
         // A full cover page first, then the content (with its header) starts
         // on page 2.
         draw_cover_page(ctx, total, unknown, familiar, mastered);
-        new_card_page(ctx, background);
+        new_card_page(ctx, background, page_numbers);
         top = ctx.paper_height - ctx.margins.top;
     }
     draw_global_header(ctx, &mut top, total, unknown, familiar, mastered);
@@ -323,7 +345,7 @@ pub fn render(
 
             // The very first section continues on page 1 below the global header.
             if !is_first_section {
-                new_card_page(ctx, background);
+                new_card_page(ctx, background, page_numbers);
                 top = ctx.paper_height - ctx.margins.top;
             }
             is_first_section = false;
@@ -346,7 +368,7 @@ pub fn render(
 
             // Break the left text into 1-2 sentence blocks for an airy layout.
             let display_paras: Vec<String> = sec_body.iter().flat_map(|p| sentence_groups(p)).collect();
-            render_dual_columns(ctx, &display_paras, &section_words, vocabs, top, background);
+            render_dual_columns(ctx, &display_paras, &section_words, vocabs, top, background, page_numbers);
         }
     }
 
@@ -354,7 +376,7 @@ pub fn render(
     // Skip for novels that have no detectable chapter markers (single section
     // fallback) — a single-entry TOC is pointless.
     if toc_entries.len() >= 2 {
-        draw_toc_page(ctx, background, &toc_entries);
+        draw_toc_page(ctx, background, page_numbers, &toc_entries);
     }
 }
 
@@ -416,9 +438,14 @@ fn draw_global_header(
 
 /// Draw a visual table-of-contents page. Title + dotted leader + page number
 /// for each section. Layout mirrors a traditional Chinese book TOC.
-fn draw_toc_page(ctx: &mut PdfContext, background: &str, entries: &[(String, usize)]) {
+fn draw_toc_page(
+    ctx: &mut PdfContext,
+    background: &str,
+    page_numbers: bool,
+    entries: &[(String, usize)],
+) {
     // Start on a fresh page with the same background as the rest.
-    new_card_page(ctx, background);
+    new_card_page(ctx, background, page_numbers);
 
     let left = ctx.margins.left;
     let right = ctx.margins.left + ctx.usable_width;
@@ -445,7 +472,7 @@ fn draw_toc_page(ctx: &mut PdfContext, background: &str, entries: &[(String, usi
 
         // If there's not enough room, push the next batch to a new page.
         if y - body * 0.3528 * 1.4 < ctx.margins.bottom + 20.0 {
-            new_card_page(ctx, background);
+            new_card_page(ctx, background, page_numbers);
             y = ctx.paper_height - ctx.margins.top - 20.0;
             ctx.draw_hline(left, right, y, table_border(), 0.6);
             y -= small * 0.3528 * 1.6;
@@ -804,6 +831,7 @@ fn render_dual_columns(
     vocabs: &[VocabWord],
     top: f32,
     background: &str,
+    page_numbers: bool,
 ) {
     let font_size = ctx.font_size;
     let small = ctx.small_font_size;
@@ -874,7 +902,7 @@ fn render_dual_columns(
         ci += c_count;
 
         if li < left_lines.len() || ci < chapter_words.len() {
-            new_card_page(ctx, background);
+            new_card_page(ctx, background, page_numbers);
             page_top = ctx.paper_height - ctx.margins.top;
         }
     }

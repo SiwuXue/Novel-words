@@ -616,6 +616,7 @@ pub fn generate_pdf(
     steps: IntensiveSteps,
     background: &str,
     cover: bool,
+    page_numbers: bool,
     output_path: &str,
     progress: Option<&dyn Fn(PdfProgress)>,
 ) -> Result<(), String> {
@@ -693,7 +694,7 @@ pub fn generate_pdf(
 
     // 3. Render — the template type picks which renderer to run.
     match template.template_type.as_str() {
-        "card" => card::render(&mut ctx, chapters, vocabs, &novel.language, background, cover, progress),
+        "card" => card::render(&mut ctx, chapters, vocabs, &novel.language, background, cover, page_numbers, progress),
         _ => intensive::render(&mut ctx, chapters, vocabs, steps, &novel.language, cover, progress),
     }
 

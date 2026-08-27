@@ -1,11 +1,14 @@
 <template>
-  <AppLayout />
+  <el-config-provider :locale="elementLocale">
+    <AppLayout />
+  </el-config-provider>
 </template>
 
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { elementLocale } from '@/i18n'
 
 onMounted(async () => {
   // Instant theme from localStorage (no flash)

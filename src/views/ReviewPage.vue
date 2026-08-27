@@ -2,12 +2,12 @@
   <div class="review-page">
     <div class="review-header">
       <el-button link @click="goBack">
-        <el-icon><ArrowLeft /></el-icon> 返回
+        <el-icon><ArrowLeft /></el-icon> {{ t('review.back') }}
       </el-button>
       <h2 v-if="book">{{ book.name }}</h2>
       <span class="review-progress" v-if="progress">
-        今日复习 <strong>{{ progress.reviewed_today }}</strong> / {{ progress.goal }} ·
-        待复习 <strong>{{ progress.due_total }}</strong>
+        {{ t('review.today') }} <strong>{{ progress.reviewed_today }}</strong> / {{ progress.goal }} ·
+        {{ t('review.due') }} <strong>{{ progress.due_total }}</strong>
       </span>
       <el-progress
         v-if="progress"
@@ -20,39 +20,39 @@
 
     <div v-if="loading" class="review-state">
       <el-icon class="is-loading" :size="32"><Loading /></el-icon>
-      <span>加载中…</span>
+      <span>…</span>
     </div>
 
     <!-- Empty state -->
     <div v-else-if="!queue.length && !reviewed" class="review-state">
       <div class="review-done-icon">🎉</div>
-      <h3>今日没有需要复习的单词</h3>
-      <p>所有单词都已安排到未来的复习计划中</p>
+      <h3>{{ t('review.noDueTitle') }}</h3>
+      <p>{{ t('review.noDueDesc') }}</p>
     </div>
 
     <!-- Finished state -->
     <div v-else-if="!queue.length" class="review-state">
       <div class="review-done-icon">✅</div>
-      <h3>今日复习完成</h3>
+      <h3>{{ t('review.doneTitle') }}</h3>
       <div class="review-summary">
         <div class="summary-item">
           <span class="summary-num">{{ reviewed }}</span>
-          <span class="summary-label">已复习</span>
+          <span class="summary-label">{{ t('review.reviewed') }}</span>
         </div>
         <div class="summary-item">
           <span class="summary-num mastered">{{ stats.easy }}</span>
-          <span class="summary-label">掌握</span>
+          <span class="summary-label">{{ t('review.mastered') }}</span>
         </div>
         <div class="summary-item">
           <span class="summary-num familiar">{{ stats.good }}</span>
-          <span class="summary-label">熟悉</span>
+          <span class="summary-label">{{ t('review.familiar') }}</span>
         </div>
         <div class="summary-item">
           <span class="summary-num unknown">{{ stats.again }}</span>
-          <span class="summary-label">生疏</span>
+          <span class="summary-label">{{ t('review.unknown') }}</span>
         </div>
       </div>
-      <el-button type="primary" @click="goBack">返回词汇本</el-button>
+      <el-button type="primary" @click="goBack">{{ t('review.backToBook') }}</el-button>
     </div>
 
     <!-- Card -->
@@ -63,31 +63,31 @@
 
         <template v-if="revealed">
           <el-divider />
-          <div class="card-definition">{{ current?.definition || '（无释义）' }}</div>
+          <div class="card-definition">{{ current?.definition || '—' }}</div>
           <div v-if="current?.exampleSentence" class="card-example">
             {{ current.exampleSentence }}
           </div>
         </template>
         <template v-else>
-          <div class="card-hint">回想一下这个词的意思，然后点击显示答案</div>
+          <div class="card-hint">{{ t('review.hint') }}</div>
         </template>
       </div>
 
       <div class="review-actions">
         <template v-if="!revealed">
           <el-button type="primary" size="large" @click="revealed = true">
-            显示答案
+            {{ t('review.showAnswer') }}
           </el-button>
         </template>
         <template v-else>
           <el-button type="danger" size="large" @click="answer('again')">
-            生疏<br /><span class="btn-sub">再来一遍</span>
+            {{ t('review.again') }}<br /><span class="btn-sub">{{ t('review.againSub') }}</span>
           </el-button>
           <el-button type="warning" size="large" @click="answer('good')">
-            熟悉<br /><span class="btn-sub">记住了</span>
+            {{ t('review.good') }}<br /><span class="btn-sub">{{ t('review.goodSub') }}</span>
           </el-button>
           <el-button type="success" size="large" @click="answer('easy')">
-            掌握<br /><span class="btn-sub">很简单</span>
+            {{ t('review.easy') }}<br /><span class="btn-sub">{{ t('review.easySub') }}</span>
           </el-button>
         </template>
       </div>
@@ -103,6 +103,7 @@ import { ElMessage } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
 import type { VocabWord } from '@/types/vocabWord'
+import { t } from '@/i18n'
 
 interface ReviewProgress {
   vocab_book_id: number | null

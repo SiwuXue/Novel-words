@@ -4,35 +4,42 @@
 
     <el-tabs v-model="activeTab" class="settings-tabs">
       <!-- General tab -->
-      <el-tab-pane label="通用" name="general">
-        <el-form label-width="120px">
-          <el-form-item label="主题">
+      <el-tab-pane :label="t('settings.general')" name="general">
+        <el-form label-width="130px">
+          <el-form-item :label="t('settings.theme')">
             <el-radio-group
               :model-value="settingsStore.theme"
               @change="onThemeChange"
             >
-              <el-radio-button value="light">浅色</el-radio-button>
-              <el-radio-button value="dark">深色</el-radio-button>
+              <el-radio-button value="light">{{ t('settings.light') }}</el-radio-button>
+              <el-radio-button value="dark">{{ t('settings.dark') }}</el-radio-button>
             </el-radio-group>
           </el-form-item>
 
-          <el-form-item label="默认导出目录">
+          <el-form-item :label="t('settings.language')">
+            <el-radio-group :model-value="currentLocale" @change="onLocaleChange">
+              <el-radio-button value="zh">{{ t('settings.zh') }}</el-radio-button>
+              <el-radio-button value="en">{{ t('settings.en') }}</el-radio-button>
+            </el-radio-group>
+          </el-form-item>
+
+          <el-form-item :label="t('settings.exportFolder')">
             <div style="display:flex;gap:8px;width:100%;">
               <el-input
                 :model-value="settingsStore.defaultExportFolder"
-                placeholder="未设置（默认使用系统下载目录）"
+                :placeholder="t('settings.exportFolderPlaceholder')"
                 readonly
                 style="flex:1;"
               />
-              <el-button @click="pickExportFolder">选择目录</el-button>
+              <el-button @click="pickExportFolder">{{ t('settings.chooseFolder') }}</el-button>
             </div>
           </el-form-item>
 
-          <el-form-item label="默认词汇本">
+          <el-form-item :label="t('settings.defaultBook')">
             <el-select
               :model-value="settingsStore.defaultVocabBookId"
               @change="onDefaultVocabBookChange"
-              placeholder="未设置"
+              placeholder="—"
               clearable
               style="width:240px;"
             >
@@ -45,7 +52,7 @@
             </el-select>
           </el-form-item>
 
-          <el-form-item label="精读版导出步骤">
+          <el-form-item :label="t('settings.steps')">
             <el-checkbox-group v-model="localSteps" @change="onStepsChange">
               <el-checkbox
                 v-for="n in stepNums"
@@ -58,40 +65,40 @@
             </el-checkbox-group>
           </el-form-item>
 
-          <el-form-item label="PDF 背景">
+          <el-form-item :label="t('settings.pdfBackground')">
             <el-radio-group
               :model-value="settingsStore.pdfBackground"
               @change="onBackgroundChange"
             >
-              <el-radio-button value="grid">网格</el-radio-button>
-              <el-radio-button value="dots">点阵</el-radio-button>
-              <el-radio-button value="none">无</el-radio-button>
+              <el-radio-button value="grid">{{ t('settings.grid') }}</el-radio-button>
+              <el-radio-button value="dots">{{ t('settings.dots') }}</el-radio-button>
+              <el-radio-button value="none">{{ t('settings.none') }}</el-radio-button>
             </el-radio-group>
-            <span class="backup-hint" style="margin-left:12px;">用于「单词卡片版」导出页面的底纹</span>
+            <span class="backup-hint" style="margin-left:12px;">{{ t('settings.pdfBackgroundHint') }}</span>
           </el-form-item>
 
-          <el-form-item label="自动备份">
+          <el-form-item :label="t('settings.autoBackup')">
             <el-radio-group v-model="autoBackupLocal" @change="onAutoBackupChange">
-              <el-radio-button value="off">关闭</el-radio-button>
-              <el-radio-button value="daily">每天</el-radio-button>
-              <el-radio-button value="weekly">每周</el-radio-button>
-              <el-radio-button value="monthly">每月</el-radio-button>
+              <el-radio-button value="off">{{ t('settings.off') }}</el-radio-button>
+              <el-radio-button value="daily">{{ t('settings.daily') }}</el-radio-button>
+              <el-radio-button value="weekly">{{ t('settings.weekly') }}</el-radio-button>
+              <el-radio-button value="monthly">{{ t('settings.monthly') }}</el-radio-button>
             </el-radio-group>
-            <span class="backup-hint" style="margin-left:12px;">应用启动时自动备份到数据目录 backups/ 文件夹，保留最近 10 份</span>
+            <span class="backup-hint" style="margin-left:12px;">{{ t('settings.autoBackupHint') }}</span>
           </el-form-item>
 
-          <el-form-item label="朗读口音">
+          <el-form-item :label="t('settings.accent')">
             <el-radio-group
               :model-value="settingsStore.speechAccent"
               @change="onAccentChange"
             >
-              <el-radio-button value="us">美式</el-radio-button>
-              <el-radio-button value="uk">英式</el-radio-button>
+              <el-radio-button value="us">{{ t('settings.us') }}</el-radio-button>
+              <el-radio-button value="uk">{{ t('settings.uk') }}</el-radio-button>
             </el-radio-group>
-            <el-button link type="primary" size="small" style="margin-left:12px;" @click="onTestAccent">试听</el-button>
+            <el-button link type="primary" size="small" style="margin-left:12px;" @click="onTestAccent">{{ t('settings.listen') }}</el-button>
           </el-form-item>
 
-          <el-form-item label="复习每日目标">
+          <el-form-item :label="t('settings.reviewGoal')">
             <el-input-number
               :model-value="settingsStore.reviewDailyGoal"
               :min="1"
@@ -100,28 +107,28 @@
               style="width: 120px"
               @change="onReviewGoalChange"
             />
-            <span class="backup-hint" style="margin-left:12px;">每日复习达到此数量算达标，进度会显示在复习页</span>
+            <span class="backup-hint" style="margin-left:12px;">{{ t('settings.reviewGoalHint') }}</span>
           </el-form-item>
         </el-form>
       </el-tab-pane>
 
       <!-- Backup / restore tab -->
-      <el-tab-pane label="数据备份" name="backup">
-        <el-form label-width="120px">
-          <el-form-item label="备份数据">
+      <el-tab-pane :label="t('settings.backup')" name="backup">
+        <el-form label-width="130px">
+          <el-form-item :label="t('settings.backupData')">
             <div style="display:flex;gap:12px;align-items:center;width:100%;">
               <el-button type="primary" :loading="backingUp" @click="onBackup">
-                导出数据库备份
+                {{ t('settings.backupData') }}
               </el-button>
-              <span class="backup-hint">生成一个 .db 文件，可复制到新电脑用于恢复</span>
+              <span class="backup-hint">{{ t('settings.backupHint') }}</span>
             </div>
           </el-form-item>
-          <el-form-item label="恢复数据">
+          <el-form-item :label="t('settings.restoreData')">
             <div style="display:flex;gap:12px;align-items:center;width:100%;">
               <el-button type="danger" :loading="restoring" @click="onRestore">
-                从备份文件恢复
+                {{ t('settings.restoreData') }}
               </el-button>
-              <span class="backup-hint">将覆盖当前所有数据，恢复后应用会自动重启</span>
+              <span class="backup-hint">{{ t('settings.restoreHint') }}</span>
             </div>
           </el-form-item>
         </el-form>
@@ -140,6 +147,7 @@ import type { PdfBackground, AutoBackup } from '@/stores/settingsStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
 import { STEP_LABELS, type StepNum } from '@/types/pdfSteps'
 import { speakWord, type SpeechAccent } from '@/utils/speech'
+import { t, getLocale, setLocale, type Locale } from '@/i18n'
 
 const settingsStore = useSettingsStore()
 const vocabBookStore = useVocabBookStore()
@@ -150,6 +158,12 @@ const localSteps = ref<StepNum[]>([...settingsStore.pdfIntensiveSteps])
 const autoBackupLocal = ref<AutoBackup>(settingsStore.autoBackup)
 const backingUp = ref(false)
 const restoring = ref(false)
+const currentLocale = ref<Locale>(getLocale())
+
+function onLocaleChange(l: Locale) {
+  currentLocale.value = l
+  void setLocale(l)
+}
 
 watch(
   () => settingsStore.autoBackup,

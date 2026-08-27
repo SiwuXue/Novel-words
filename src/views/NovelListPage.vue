@@ -6,11 +6,11 @@
     @drop.prevent="onDrop"
   >
     <div class="page-header">
-      <h2>小说库</h2>
+      <h2>{{ t('novelList.title') }}</h2>
       <div class="header-actions">
         <el-input
           v-model="searchQuery"
-          placeholder="搜索书名、作者、分类..."
+          :placeholder="t('novelList.search')"
           clearable
           style="width: 240px"
           @input="onSearch"
@@ -20,10 +20,10 @@
           </template>
         </el-input>
         <el-button type="primary" @click="showCreateDialog">
-          <el-icon><Plus /></el-icon> 新建小说
+          <el-icon><Plus /></el-icon> {{ t('novelList.new') }}
         </el-button>
         <el-button @click="showImportDialog">
-          <el-icon><FolderOpened /></el-icon> 导入文件
+          <el-icon><FolderOpened /></el-icon> {{ t('novelList.import') }}
         </el-button>
       </div>
     </div>
@@ -32,8 +32,8 @@
     <div v-if="isDragOver" class="drop-overlay">
       <div class="drop-overlay-inner">
         <el-icon :size="56" color="#fff"><FolderOpened /></el-icon>
-        <p>松开鼠标导入文件</p>
-        <p class="hint">支持 .txt / .md / .epub / .fb2</p>
+        <p>{{ t('novelList.dropHint') }}</p>
+        <p class="hint">{{ t('novelList.dropExt') }}</p>
       </div>
     </div>
 
@@ -43,25 +43,25 @@
       :data="store.novels"
       stripe
       style="width: 100%"
-      empty-text="还没有小说，点击上方按钮创建或导入"
+      :empty-text="t('novelList.empty')"
     >
-      <el-table-column prop="title" label="书名" min-width="160">
+      <el-table-column prop="title" :label="t('novelList.name')" min-width="160">
         <template #default="{ row }">
           <el-link type="primary" @click="openNovel(row.id)">{{ row.title }}</el-link>
         </template>
       </el-table-column>
-      <el-table-column prop="author" label="作者" width="140" />
-      <el-table-column prop="category" label="分类" width="80">
+      <el-table-column prop="author" :label="t('novelList.author')" width="140" />
+      <el-table-column prop="category" :label="t('novelList.category')" width="80">
         <template #default="{ row }">
           <el-tag size="small" type="info">{{ row.category }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="updatedAt" label="更新时间" width="170">
+      <el-table-column prop="updatedAt" :label="t('novelList.updatedAt')" width="170">
         <template #default="{ row }">
           {{ formatDate(row.updatedAt) }}
         </template>
       </el-table-column>
-      <el-table-column label="收藏" width="70" align="center">
+      <el-table-column :label="t('novelList.favorite')" width="70" align="center">
         <template #default="{ row }">
           <el-icon
             :class="{ 'is-favorite': row.isFavorite }"
@@ -73,10 +73,10 @@
           </el-icon>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="140" fixed="right">
+      <el-table-column :label="t('novelList.actions')" width="140" fixed="right">
         <template #default="{ row }">
-          <el-button size="small" link type="primary" @click="editNovel(row)">编辑</el-button>
-          <el-button size="small" link type="danger" @click="confirmDelete(row)">删除</el-button>
+          <el-button size="small" link type="primary" @click="editNovel(row)">{{ t('novelList.edit') }}</el-button>
+          <el-button size="small" link type="danger" @click="confirmDelete(row)">{{ t('novelList.delete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -108,6 +108,7 @@ import { useNovelStore } from '@/stores/novelStore'
 import type { Novel, ImportResult } from '@/types/novel'
 import NovelFormDialog from '@/components/novel/NovelFormDialog.vue'
 import ImportDialog from '@/components/novel/ImportDialog.vue'
+import { t } from '@/i18n'
 
 const router = useRouter()
 const store = useNovelStore()
@@ -234,13 +235,13 @@ async function toggleFavorite(novel: Novel) {
 
 async function confirmDelete(novel: Novel) {
   try {
-    await ElMessageBox.confirm(`确定删除「${novel.title}」吗？此操作不可恢复。`, '确认删除', {
+    await ElMessageBox.confirm(t('novelList.confirmDelete', { title: novel.title }), t('novelList.delete'), {
       type: 'warning',
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
+      confirmButtonText: t('novelList.delete'),
+      cancelButtonText: t('import.cancel'),
     })
     await store.remove(novel.id)
-    ElMessage.success('已删除')
+    ElMessage.success(t('novelList.deleted'))
   } catch {
     // cancelled
   }

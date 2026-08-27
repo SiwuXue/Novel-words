@@ -2,12 +2,12 @@
   <div class="editor-page">
     <div class="editor-topbar">
       <el-button link @click="goBack">
-        <el-icon><ArrowLeft /></el-icon> 返回列表
+        <el-icon><ArrowLeft /></el-icon> {{ t('editor.back') }}
       </el-button>
       <span class="novel-title">{{ topbarTitle }}</span>
       <span class="save-status">
         <el-icon v-if="editorStore.saving" class="is-loading"><Loading /></el-icon>
-        <template v-else>{{ editorStore.isDirty ? '未保存' : '已保存' }}</template>
+        <template v-else>{{ editorStore.isDirty ? t('editor.unsaved') : t('editor.saved') }}</template>
         <el-button
           v-if="loadState === 'loaded'"
           size="small"
@@ -15,7 +15,7 @@
           :disabled="!editorStore.isDirty"
           @click="handleManualSave"
         >
-          保存 (Ctrl+S)
+          {{ t('editor.save') }}
         </el-button>
       </span>
       <el-dropdown
@@ -24,7 +24,7 @@
         @change="onStepsDropdownClick"
       >
         <el-button size="small" link>
-          ⚙ 导出步骤：已选 {{ pdfSteps.length }} 项
+          ⚙ {{ t('editor.exportSteps', { n: pdfSteps.length }) }}
         </el-button>
         <template #dropdown>
           <div class="pdf-steps-dropdown">
@@ -52,10 +52,10 @@
         <template #dropdown>
           <el-dropdown-menu>
             <el-dropdown-item command="zh" :disabled="store.currentNovel?.language === 'zh'">
-              中文小说（按释义匹配）
+              {{ t('editor.langZh') }}
             </el-dropdown-item>
             <el-dropdown-item command="en" :disabled="store.currentNovel?.language === 'en'">
-              英文小说（按单词匹配）
+              {{ t('editor.langEn') }}
             </el-dropdown-item>
           </el-dropdown-menu>
         </template>
@@ -66,18 +66,18 @@
         @command="onTemplateSelect"
       >
         <el-button size="small" link>
-          🗂 模板：{{ pdfTemplateLabel }}
+          🗂 {{ t('editor.template', { name: pdfTemplateLabel }) }}
         </el-button>
         <template #dropdown>
           <el-dropdown-menu>
             <el-dropdown-item command="intensive" :disabled="pdfTemplateType === 'intensive'">
-              精读版（三步记忆）
+              {{ t('editor.templateIntensive') }}
             </el-dropdown-item>
             <el-dropdown-item
               command="card"
               :disabled="pdfTemplateType === 'card' || !isEnglishMode"
             >
-              单词卡片版（左文右卡 · 仅英文）
+              {{ t('editor.templateCard') }}
             </el-dropdown-item>
           </el-dropdown-menu>
         </template>
@@ -88,7 +88,15 @@
         size="small"
         style="margin-right: 2px;"
       >
-        封面页
+        {{ t('editor.cover') }}
+      </el-checkbox>
+      <el-checkbox
+        v-if="loadState === 'loaded' && pdfTemplateType === 'card'"
+        v-model="pageNumbersEnabled"
+        size="small"
+        style="margin-right: 2px;"
+      >
+        {{ t('editor.pageNumbers') }}
       </el-checkbox>
       <el-button
         v-if="loadState === 'loaded'"
@@ -96,7 +104,7 @@
         @click="handleExportPdf"
         :loading="exportingPdf"
       >
-        <el-icon><Printer /></el-icon> 导出 PDF
+        <el-icon><Printer /></el-icon> {{ t('editor.exportPdf') }}
       </el-button>
     </div>
 
@@ -227,6 +235,7 @@ import ChapterList from '@/components/novel/ChapterList.vue'
 import PreviewPanel from '@/components/novel/PreviewPanel.vue'
 import { buildHtml as buildPreviewHtml } from '@/utils/pdfPreview'
 import { useSplitLayout } from '@/composables/useSplitLayout'
+import { t } from '@/i18n'
 
 const settingsStore = useSettingsStore()
 
@@ -258,6 +267,7 @@ const pdfTemplateType = ref<TemplateType>('intensive')
 const pdfTemplateLabel = computed(() => TEMPLATE_TYPE_LABELS[pdfTemplateType.value] ?? pdfTemplateType.value)
 const isEnglishMode = computed(() => store.currentNovel?.language === 'en')
 const coverEnabled = ref(false)
+const pageNumbersEnabled = ref(false)
 
 function onTemplateSelect(cmd: TemplateType) {
   if (cmd === 'card' && !isEnglishMode.value) {
@@ -295,7 +305,7 @@ function onPdfStepsChange(next: StepNum[]) {
 }
 
 const novelLanguageLabel = computed(() =>
-  store.currentNovel?.language === 'en' ? '英文模式' : '中文模式',
+  store.currentNovel?.language === 'en' ? t('editor.langLabel') : '中文模式',
 )
 
 async function onLanguageChange(lang: string) {
@@ -439,6 +449,7 @@ async function handleExportPdf() {
       vocabBookId: highlightBookId.value,
       steps: normalizeSteps(pdfSteps.value),
       cover: coverEnabled.value,
+      pageNumbers: pageNumbersEnabled.value,
       outputPath: filePath,
     })
     const pct =

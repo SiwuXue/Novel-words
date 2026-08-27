@@ -307,3 +307,94 @@ pub fn export_vocab_words_apkg(
 
     Ok(rows.len())
 }
+
+/// Export a vocabulary book as a JSON string (lightweight portable format).
+/// Fields: word, definition, phonetic, example_sentence, proficiency.
+#[tauri::command]
+pub fn export_vocab_book_json(state: State<DbState>, vocab_book_id: i64) -> Result<String, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let mut stmt = db
+        .prepare(
+            "SELECT word, definition, phonetic, example_sentence, proficiency \
+             FROM vocab_word WHERE vocab_book_id=?1 ORDER BY created_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(rusqlite::params![vocab_book_id], |row| {
+            Ok(serde_json::json!({
+                "word": row.get::<_, String>(0)?,
+                "definition": row.get::<_, String>(1)?,
+                "phonetic": row.get::<_, String>(2)?,
+                "example_sentence": row.get::<_, String>(3)?,
+                "proficiency": row.get::<_, String>(4)?,
+            }))
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect::<Vec<_>>();
+
+    serde_json::to_string_pretty(&serde_json::json!({ "words": rows }))
+        .map_err(|e| format!("序列化 JSON 失败: {}", e))
+}
+
+/// Import vocabulary words from a JSON string into a vocabulary book.
+/// Duplicate words (case-insensitive) within the same book are skipped.
+/// Returns the number of words actually inserted.
+#[tauri::command]
+pub fn import_vocab_book_json(
+    state: State<DbState>,
+    vocab_book_id: i64,
+    json: String,
+) -> Result<i64, String> {
+    let parsed: serde_json::Value =
+        serde_json::from_str(&json).map_err(|e| format!("JSON 解析失败: {}", e))?;
+    let words = parsed
+        .get("words")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| "缺少 words 数组".to_string())?;
+
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+
+    // Existing words in the book (case-insensitive) to skip duplicates.
+    let mut existing: Vec<String> = Vec::new();
+    {
+        let mut stmt = db
+            .prepare("SELECT word FROM vocab_word WHERE vocab_book_id=?1")
+            .map_err(|e| e.to_string())?;
+        existing = stmt
+            .query_map(rusqlite::params![vocab_book_id], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .map(|w| w.to_lowercase())
+            .collect();
+    }
+
+    let mut inserted: i64 = 0;
+    for w in words {
+        let word = w.get("word").and_then(|v| v.as_str()).unwrap_or("").trim();
+        if word.is_empty() {
+            continue;
+        }
+        if existing.iter().any(|e| e == &word.to_lowercase()) {
+            continue;
+        }
+        let definition = w.get("definition").and_then(|v| v.as_str()).unwrap_or("");
+        let phonetic = w.get("phonetic").and_then(|v| v.as_str()).unwrap_or("");
+        let example = w.get("example_sentence").and_then(|v| v.as_str()).unwrap_or("");
+        let proficiency = w.get("proficiency").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let prof = if proficiency == "familiar" || proficiency == "mastered" {
+            proficiency
+        } else {
+            "unknown"
+        };
+        db.execute(
+            "INSERT INTO vocab_word (vocab_book_id, word, definition, phonetic, example_sentence, proficiency, memory_tag, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, '', datetime('now'))",
+            rusqlite::params![vocab_book_id, word, definition, phonetic, example, prof],
+        )
+        .map_err(|e| format!("写入单词失败: {}", e))?;
+        existing.push(word.to_lowercase());
+        inserted += 1;
+    }
+    Ok(inserted)
+}

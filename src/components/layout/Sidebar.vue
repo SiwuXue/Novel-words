@@ -12,35 +12,35 @@
       >
         <el-menu-item index="/">
           <el-icon><HomeFilled /></el-icon>
-          <span>首页</span>
+          <span>{{ t('nav.home') }}</span>
         </el-menu-item>
         <el-menu-item index="/novels">
           <el-icon><Document /></el-icon>
-          <span>小说库</span>
+          <span>{{ t('nav.novels') }}</span>
         </el-menu-item>
         <el-menu-item index="/vocabulary">
           <el-icon><Collection /></el-icon>
-          <span>词汇本</span>
-          <span class="due-badge" v-if="dueCount > 0" :title="`今日待复习 ${dueCount} 词`">{{ dueCount > 99 ? '99+' : dueCount }}</span>
+          <span>{{ t('nav.vocabulary') }}</span>
+          <span class="due-badge" v-if="dueCount > 0" :title="`${t('home.statDue')} ${dueCount}`">{{ dueCount > 99 ? '99+' : dueCount }}</span>
         </el-menu-item>
         <el-menu-item index="/settings">
           <el-icon><Setting /></el-icon>
-          <span>设置</span>
+          <span>{{ t('nav.settings') }}</span>
         </el-menu-item>
         <el-menu-item index="/stats">
           <el-icon><DataLine /></el-icon>
-          <span>学习统计</span>
+          <span>{{ t('nav.stats') }}</span>
         </el-menu-item>
       </el-menu>
 
       <div class="sidebar-footer">
         <button class="about-link" @click="showAbout = true">
           <el-icon><InfoFilled /></el-icon>
-          <span>关于</span>
+          <span>{{ t('nav.about') }}</span>
         </button>
         <button class="pin-btn" :class="{ active: pinned }" @click="togglePin">
           <el-icon><Fold v-if="!pinned" /><Expand v-else /></el-icon>
-          <span>{{ pinned ? '收起侧边栏' : '固定侧边栏' }}</span>
+          <span>{{ pinned ? t('nav.unpin') : t('nav.pin') }}</span>
         </button>
         <AboutDialog v-model="showAbout" />
       </div>
@@ -55,6 +55,7 @@ import { useRoute } from 'vue-router'
 import { invoke } from '@tauri-apps/api/core'
 import { HomeFilled, Document, Collection, Setting, InfoFilled, Fold, Expand, DataLine } from '@element-plus/icons-vue'
 import AboutDialog from '@/components/common/AboutDialog.vue'
+import { t } from '@/i18n'
 
 const route = useRoute()
 const activeRoute = computed(() => {

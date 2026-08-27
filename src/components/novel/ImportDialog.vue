@@ -1,7 +1,7 @@
 <template>
   <el-dialog
     v-model="visible"
-    title="导入小说文件"
+    :title="t('import.title')"
     width="680px"
     :close-on-click-modal="false"
     destroy-on-close
@@ -21,16 +21,20 @@
         @click="selectFile"
       >
         <el-icon :size="48" color="var(--text-secondary)"><FolderOpened /></el-icon>
-        <p>点击选择 .txt / .md / .epub / .fb2 文件</p>
-        <p class="hint">或将文件拖到此处 · TXT 支持 UTF-8 / GBK 编码</p>
+        <p>{{ t('import.clickSelect') }}</p>
+        <p class="hint">{{ t('import.dragHere') }}</p>
       </div>
       <div v-if="filePath" class="selected-file">
         <el-tag type="info" size="small">{{ fileName }}</el-tag>
       </div>
+      <div v-if="analyzing" class="analyze-progress">
+        <el-progress :percentage="importPercent" :stroke-width="8" :status="importPercent >= 100 ? 'success' : undefined" />
+        <div class="analyze-msg">{{ importMessage }}</div>
+      </div>
       <div class="step-footer">
-        <el-button @click="visible = false">取消</el-button>
+        <el-button @click="visible = false" :disabled="analyzing">{{ t('import.cancel') }}</el-button>
         <el-button type="primary" :disabled="!filePath" :loading="analyzing" @click="analyzeFile">
-          分析文件
+          {{ t('import.analyze') }}
         </el-button>
       </div>
     </div>
@@ -38,44 +42,44 @@
     <!-- Step 2: preview chapters & confirm -->
     <div v-show="step === 2" class="import-step">
       <el-descriptions :column="2" border size="small">
-        <el-descriptions-item label="检测书名">
-          {{ result?.detectedTitle || '未检测到' }}
+        <el-descriptions-item :label="t('import.detectedTitle')">
+          {{ result?.detectedTitle || '—' }}
         </el-descriptions-item>
-        <el-descriptions-item label="章节数">
-          {{ result?.chapters.length || 0 }} 章
+        <el-descriptions-item :label="t('import.chapters')">
+          {{ result?.chapters.length || 0 }}
         </el-descriptions-item>
-        <el-descriptions-item label="总字符数">
+        <el-descriptions-item :label="t('import.chars')">
           {{ (result?.rawText.length || 0).toLocaleString() }}
         </el-descriptions-item>
-        <el-descriptions-item label="清洗后字符数">
+        <el-descriptions-item :label="t('import.cleanedChars')">
           {{ (result?.cleanedText.length || 0).toLocaleString() }}
         </el-descriptions-item>
       </el-descriptions>
 
       <div class="chapter-preview">
-        <h4>章节预览（前 10 章）</h4>
+        <h4>{{ t('import.previewTitle') }}</h4>
         <ul>
           <li v-for="(ch, i) in result?.chapters.slice(0, 10)" :key="i">
             <span class="ch-title">{{ ch.title }}</span>
-            <span class="ch-len">{{ ch.content.length.toLocaleString() }} 字</span>
+            <span class="ch-len">{{ ch.content.length.toLocaleString() }}</span>
           </li>
         </ul>
       </div>
 
       <div class="step-footer">
-        <el-button @click="step = 1">返回重选</el-button>
-        <el-button @click="visible = false">取消</el-button>
+        <el-button @click="step = 1">{{ t('import.back') }}</el-button>
+        <el-button @click="visible = false">{{ t('import.cancel') }}</el-button>
         <el-button type="primary" :loading="importing" @click="handleImport">
-          确认识别结果 → 导入编辑器
+          {{ t('import.confirmImport') }}
         </el-button>
       </div>
     </div>
 
     <!-- Error state -->
     <div v-show="step === 3" class="import-step">
-      <el-result icon="error" title="导入失败" :sub-title="errorMsg">
+      <el-result icon="error" :title="t('import.importFailed')" :sub-title="errorMsg">
         <template #extra>
-          <el-button type="primary" @click="step = 1">重试</el-button>
+          <el-button type="primary" @click="step = 1">{{ t('import.retry') }}</el-button>
         </template>
       </el-result>
     </div>
@@ -83,12 +87,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
 import { ElMessage } from 'element-plus'
 import { FolderOpened } from '@element-plus/icons-vue'
 import type { ImportResult } from '@/types/novel'
+import { t } from '@/i18n'
 
 const props = defineProps<{
   /** If provided, jump straight to analyzing this file (used by drag-drop). */
@@ -107,6 +113,13 @@ const analyzing = ref(false)
 const importing = ref(false)
 const result = ref<ImportResult | null>(null)
 const errorMsg = ref('')
+const importPercent = ref(0)
+const importMessage = ref('')
+
+let unlistenProgress: UnlistenFn | null = null
+onBeforeUnmount(() => {
+  unlistenProgress?.()
+})
 
 const fileName = computed(() => {
   if (!filePath.value) return ''
@@ -162,9 +175,19 @@ async function selectFile() {
 async function analyzeFile() {
   if (!filePath.value) return
   analyzing.value = true
+  importPercent.value = 0
+  importMessage.value = '正在准备…'
   try {
+    unlistenProgress = await listen<{ percent: number; message: string }>(
+      'import-progress',
+      (event) => {
+        importPercent.value = event.payload.percent
+        importMessage.value = event.payload.message
+      },
+    )
     const r = await invoke<ImportResult>('import_file', { path: filePath.value })
     result.value = r
+    importPercent.value = 100
     step.value = 2
   } catch (e: any) {
     console.error('[import_file] failed:', e)
@@ -223,6 +246,16 @@ async function handleImport() {
 }
 .selected-file {
   margin-top: 12px;
+  text-align: center;
+}
+.analyze-progress {
+  margin-top: 16px;
+  padding: 0 8px;
+}
+.analyze-msg {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
   text-align: center;
 }
 .chapter-preview {

@@ -2,34 +2,34 @@
   <div class="home-page">
     <div class="hero">
       <h1>词阅</h1>
-      <p class="subtitle">本地小说阅读与词汇管理，助力外语学习</p>
+      <p class="subtitle">{{ t('home.subtitle') }}</p>
     </div>
 
     <div class="stats-row">
       <div class="stat-card" @click="$router.push('/novels')">
         <el-icon :size="28"><Document /></el-icon>
         <div class="stat-num">{{ novelCount }}</div>
-        <div class="stat-label">小说</div>
+        <div class="stat-label">{{ t('home.statNovels') }}</div>
       </div>
       <div class="stat-card" @click="$router.push('/vocabulary')">
         <el-icon :size="28"><Collection /></el-icon>
         <div class="stat-num">{{ bookCount }}</div>
-        <div class="stat-label">词汇本</div>
+        <div class="stat-label">{{ t('home.statBooks') }}</div>
       </div>
       <div class="stat-card">
         <el-icon :size="28"><Notebook /></el-icon>
         <div class="stat-num">{{ wordCount }}</div>
-        <div class="stat-label">生词</div>
+        <div class="stat-label">{{ t('home.statWords') }}</div>
       </div>
       <div class="stat-card" @click="$router.push('/vocabulary')">
         <el-icon :size="28"><AlarmClock /></el-icon>
         <div class="stat-num">{{ dueCount }}</div>
-        <div class="stat-label">今日待复习</div>
+        <div class="stat-label">{{ t('home.statDue') }}</div>
       </div>
     </div>
 
     <div class="recent-section" v-if="recentNovels.length">
-      <h3>最近阅读</h3>
+      <h3>{{ t('home.recent') }}</h3>
       <div class="recent-list">
         <div
           v-for="n in recentNovels"
@@ -37,24 +37,24 @@
           class="recent-item"
           @click="$router.push(`/novels/${n.id}`)"
         >
-          <span class="recent-title">{{ n.title || '未命名' }}</span>
-          <span class="recent-author">{{ n.author || '未知作者' }}</span>
+          <span class="recent-title">{{ n.title || t('home.unnamed') }}</span>
+          <span class="recent-author">{{ n.author || t('home.unknownAuthor') }}</span>
           <el-icon class="recent-arrow"><ArrowRight /></el-icon>
         </div>
       </div>
     </div>
 
     <div class="quick-actions">
-      <h3>快捷操作</h3>
+      <h3>{{ t('home.quickActions') }}</h3>
       <div class="actions-row">
         <el-button type="primary" size="large" @click="$router.push('/novels/new')">
-          <el-icon><Plus /></el-icon> 导入小说
+          <el-icon><Plus /></el-icon> {{ t('home.importNovel') }}
         </el-button>
         <el-button size="large" @click="$router.push('/vocabulary')">
-          <el-icon><Collection /></el-icon> 词汇本
+          <el-icon><Collection /></el-icon> {{ t('home.vocabulary') }}
         </el-button>
         <el-button size="large" @click="$router.push('/settings')">
-          <el-icon><Setting /></el-icon> 设置
+          <el-icon><Setting /></el-icon> {{ t('home.settings') }}
         </el-button>
       </div>
     </div>
@@ -66,6 +66,7 @@
 import { ref, onMounted } from 'vue'
 import { Document, Collection, Notebook, AlarmClock, Plus, Setting, ArrowRight } from '@element-plus/icons-vue'
 import { invoke } from '@tauri-apps/api/core'
+import { t } from '@/i18n'
 import type { VocabBook } from '@/types/vocabBook'
 import type { VocabWord } from '@/types/vocabWord'
 import type { Novel } from '@/types/novel'

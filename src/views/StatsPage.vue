@@ -1,10 +1,10 @@
 <template>
   <div class="stats-page">
-    <h2>学习统计</h2>
+    <h2>{{ t('stats.title') }}</h2>
 
     <div v-if="loading" class="stats-loading">
       <el-icon class="is-loading" :size="28"><Loading /></el-icon>
-      <span>加载中…</span>
+      <span>…</span>
     </div>
 
     <template v-else-if="stats">
@@ -12,34 +12,34 @@
       <div class="stats-cards">
         <div class="stat-card">
           <div class="stat-num">{{ stats.total_words }}</div>
-          <div class="stat-label">生词总数</div>
+          <div class="stat-label">{{ t('stats.totalWords') }}</div>
         </div>
         <div class="stat-card">
           <div class="stat-num">{{ stats.total_books }}</div>
-          <div class="stat-label">词汇本</div>
+          <div class="stat-label">{{ t('stats.totalBooks') }}</div>
         </div>
         <div class="stat-card">
           <div class="stat-num">{{ stats.total_novels }}</div>
-          <div class="stat-label">小说</div>
+          <div class="stat-label">{{ t('stats.totalNovels') }}</div>
         </div>
         <div class="stat-card">
           <div class="stat-num accent">{{ stats.reviewed_today }}</div>
-          <div class="stat-label">今日已复习</div>
+          <div class="stat-label">{{ t('stats.reviewedToday') }}</div>
         </div>
         <div class="stat-card">
           <div class="stat-num">{{ stats.total_reviews }}</div>
-          <div class="stat-label">累计复习次数</div>
+          <div class="stat-label">{{ t('stats.totalReviews') }}</div>
         </div>
       </div>
 
       <!-- Proficiency distribution -->
       <el-card class="stats-section">
         <template #header>
-          <span class="section-title">熟练度分布</span>
+          <span class="section-title">{{ t('stats.proficiency') }}</span>
         </template>
         <div class="prof-bars">
           <div class="prof-row">
-            <span class="prof-label prof-unknown">生疏</span>
+            <span class="prof-label prof-unknown">{{ t('stats.unknown') }}</span>
             <el-progress
               class="prof-progress"
               :percentage="profPercent('unknown')"
@@ -50,7 +50,7 @@
             <span class="prof-count">{{ stats.by_proficiency.unknown || 0 }}</span>
           </div>
           <div class="prof-row">
-            <span class="prof-label prof-familiar">熟悉</span>
+            <span class="prof-label prof-familiar">{{ t('stats.familiar') }}</span>
             <el-progress
               class="prof-progress"
               :percentage="profPercent('familiar')"
@@ -61,7 +61,7 @@
             <span class="prof-count">{{ stats.by_proficiency.familiar || 0 }}</span>
           </div>
           <div class="prof-row">
-            <span class="prof-label prof-mastered">掌握</span>
+            <span class="prof-label prof-mastered">{{ t('stats.mastered') }}</span>
             <el-progress
               class="prof-progress"
               :percentage="profPercent('mastered')"
@@ -77,7 +77,7 @@
       <!-- Last 7 days reviews -->
       <el-card class="stats-section">
         <template #header>
-          <span class="section-title">最近 7 天复习量</span>
+          <span class="section-title">{{ t('stats.week') }}</span>
         </template>
         <div class="week-bars">
           <div v-for="d in stats.reviews_last_7_days" :key="d.date" class="week-bar-wrap">
@@ -100,6 +100,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { Loading } from '@element-plus/icons-vue'
+import { t } from '@/i18n'
 
 interface DailyReviewCount {
   date: string
