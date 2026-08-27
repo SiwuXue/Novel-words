@@ -445,6 +445,8 @@ export interface BuildPreviewInput {
   language?: string
   /** 'intensive' | 'card' — selects which preview layout to render. */
   templateType?: string
+  /** Page background for the card template: 'grid' | 'dots' | 'none'. */
+  background?: string
 }
 
 function baseCss(fontSize: number, lineHeight: number): string {
@@ -537,12 +539,12 @@ function buildIntensive(
 }
 
 export function buildHtml(input: BuildPreviewInput): string {
-  const { chapters, words, template, novelTitle, steps, language, templateType } = input
+  const { chapters, words, template, novelTitle, steps, language, templateType, background } = input
   const lineHeight = template?.lineSpacing ?? 1.5
   const fontSize = template?.fontSize ?? 14
   const isCard = templateType === 'card' || template?.templateType === 'card'
   if (isCard) {
-    const css = cardCss(fontSize, lineHeight)
+    const css = cardCss(fontSize, lineHeight, background)
     const body = buildCard(chapters, words, novelTitle)
     return `<style>${css}</style><div class="pdf-preview-body card-preview">${body}</div>`
   }
@@ -695,13 +697,23 @@ function buildCard(chapters: Chapter[], words: VocabWord[], novelTitle?: string)
   return parts.join('\n')
 }
 
-function cardCss(fontSize: number, lineHeight: number): string {
+function cardCss(fontSize: number, lineHeight: number, background?: string): string {
+  let bgStyle = ''
+  if (background === 'none') {
+    bgStyle = 'background-color: #ffffff;'
+  } else if (background === 'dots') {
+    bgStyle =
+      'background-color: #ffffff;' +
+      'background-image: radial-gradient(circle, #eef0f2 1px, transparent 1px);' +
+      'background-size: 24px 24px;'
+  } else {
+    bgStyle =
+      'background-color: #ffffff;' +
+      'background-image: linear-gradient(to right, #eef0f2 1px, transparent 1px), linear-gradient(to bottom, #eef0f2 1px, transparent 1px);' +
+      'background-size: 24px 24px;'
+  }
   return `
-    .card-preview { font-size: ${fontSize}px; line-height: ${lineHeight}; color: #222;
-      background-color: #ffffff;
-      background-image: linear-gradient(to right, #eef0f2 1px, transparent 1px), linear-gradient(to bottom, #eef0f2 1px, transparent 1px);
-      background-size: 24px 24px;
-      padding: 4px; }
+    .card-preview { font-size: ${fontSize}px; line-height: ${lineHeight}; color: #222; ${bgStyle} padding: 4px; }
     .card-preview .card-global-header { border-bottom: 1px solid #C8D1D9; padding-bottom: 10px; margin-bottom: 14px; }
     .card-preview .card-title { font-size: ${fontSize + 8}px; color: #1A56DB; font-weight: 700; }
     .card-preview .card-sub { font-size: ${fontSize - 2}px; color: #999; margin: 2px 0 6px; }

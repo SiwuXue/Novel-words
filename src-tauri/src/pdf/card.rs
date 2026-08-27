@@ -123,7 +123,7 @@ fn split_marker_sections(paras: &[String]) -> Vec<(String, Vec<String>)> {
     sections
 }
 
-/// Light grid-line color for the page background.
+/// Light grid-line color for the page background (very subtle).
 fn grid_color() -> Color {
     Color::Rgb(Rgb::new(0xEC as f32 / 255.0, 0xEF as f32 / 255.0, 0xF1 as f32 / 255.0, None))
 }
@@ -144,10 +144,35 @@ fn draw_grid(ctx: &mut PdfContext) {
     }
 }
 
-/// Start a fresh page and lay down the grid background behind the content.
-fn new_card_page(ctx: &mut PdfContext) {
+/// Draw a dot-grid (点阵) across the whole page: small dots at intersections.
+fn draw_dots(ctx: &mut PdfContext) {
+    let spacing = 7.5; // mm
+    let dot = 0.8; // mm
+    let color = grid_color();
+    let mut x = 0.0f32;
+    while x <= ctx.paper_width {
+        let mut y = 0.0f32;
+        while y <= ctx.paper_height {
+            ctx.fill_rect(x - dot / 2.0, y + dot / 2.0, dot, dot, color.clone());
+            y += spacing;
+        }
+        x += spacing;
+    }
+}
+
+/// Draw the page background for the chosen style: "grid", "dots" or "none".
+fn draw_background(ctx: &mut PdfContext, style: &str) {
+    match style {
+        "dots" => draw_dots(ctx),
+        "none" => {}
+        _ => draw_grid(ctx),
+    }
+}
+
+/// Start a fresh page and lay down the background behind the content.
+fn new_card_page(ctx: &mut PdfContext, background: &str) {
     ctx.new_page();
-    draw_grid(ctx);
+    draw_background(ctx, background);
 }
 
 /// Split a paragraph into sentences (breaking on `.`/`!`/`?` followed by
@@ -208,6 +233,7 @@ pub fn render(
     chapters: &[Chapter],
     vocabs: &[VocabWord],
     _language: &str,
+    background: &str,
     progress: Option<&dyn Fn(super::PdfProgress)>,
 ) {
     // Whole-book matched-word stats for the page-1 header strip.
@@ -227,7 +253,7 @@ pub fn render(
 
     // Page-1 header. `top` is a bottom-based baseline cursor; we advance it down.
     let mut top = ctx.paper_height - ctx.margins.top;
-    draw_grid(ctx);
+    draw_background(ctx, background);
     draw_global_header(ctx, &mut top, total, unknown, familiar, mastered);
 
     let mut is_first_section = true;
@@ -254,7 +280,7 @@ pub fn render(
 
             // The very first section continues on page 1 below the global header.
             if !is_first_section {
-                new_card_page(ctx);
+                new_card_page(ctx, background);
                 top = ctx.paper_height - ctx.margins.top;
             }
             is_first_section = false;
@@ -274,7 +300,7 @@ pub fn render(
 
             // Break the left text into 1-2 sentence blocks for an airy layout.
             let display_paras: Vec<String> = sec_body.iter().flat_map(|p| sentence_groups(p)).collect();
-            render_dual_columns(ctx, &display_paras, &section_words, vocabs, top);
+            render_dual_columns(ctx, &display_paras, &section_words, vocabs, top, background);
         }
     }
 }
@@ -668,6 +694,7 @@ fn render_dual_columns(
     chapter_words: &[&VocabWord],
     vocabs: &[VocabWord],
     top: f32,
+    background: &str,
 ) {
     let font_size = ctx.font_size;
     let small = ctx.small_font_size;
@@ -738,7 +765,7 @@ fn render_dual_columns(
         ci += c_count;
 
         if li < left_lines.len() || ci < chapter_words.len() {
-            new_card_page(ctx);
+            new_card_page(ctx, background);
             page_top = ctx.paper_height - ctx.margins.top;
         }
     }

@@ -5,11 +5,14 @@ import type { StepNum } from '@/types/pdfSteps'
 import { normalizeSteps, serializeSteps } from '@/types/pdfSteps'
 import type { SpeechAccent } from '@/utils/speech'
 
+export type PdfBackground = 'grid' | 'dots' | 'none'
+
 export const useSettingsStore = defineStore('settings', () => {
   const theme = ref<'light' | 'dark'>('light')
   const defaultExportFolder = ref('')
   const defaultVocabBookId = ref<number | null>(null)
   const pdfIntensiveSteps = ref<StepNum[]>([1, 2, 3])
+  const pdfBackground = ref<PdfBackground>('grid')
   const speechAccent = ref<SpeechAccent>('us')
   const loaded = ref(false)
 
@@ -41,6 +44,11 @@ export const useSettingsStore = defineStore('settings', () => {
             }
             break
           }
+          case 'pdf_background':
+            if (s.value === 'grid' || s.value === 'dots' || s.value === 'none') {
+              pdfBackground.value = s.value
+            }
+            break
           case 'speech_accent':
             if (s.value === 'uk' || s.value === 'us') {
               speechAccent.value = s.value
@@ -106,6 +114,15 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
+  async function setPdfBackground(bg: PdfBackground) {
+    pdfBackground.value = bg
+    try {
+      await invoke('set_setting', { key: 'pdf_background', value: bg })
+    } catch (e) {
+      console.error('[settingsStore] setPdfBackground failed:', e)
+    }
+  }
+
   async function setSpeechAccent(accent: SpeechAccent) {
     speechAccent.value = accent
     try {
@@ -120,6 +137,7 @@ export const useSettingsStore = defineStore('settings', () => {
     defaultExportFolder,
     defaultVocabBookId,
     pdfIntensiveSteps,
+    pdfBackground,
     speechAccent,
     loaded,
     load,
@@ -127,6 +145,7 @@ export const useSettingsStore = defineStore('settings', () => {
     setDefaultExportFolder,
     setDefaultVocabBookId,
     setPdfIntensiveSteps,
+    setPdfBackground,
     setSpeechAccent,
   }
 })

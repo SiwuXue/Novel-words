@@ -29,7 +29,7 @@ pub async fn export_pdf(
 ) -> Result<PdfExportResponse, String> {
     let template_type = template_type.unwrap_or_else(|| "intensive".to_string());
     // ---- Phase 1: read all data from SQLite (fast, hold the lock only briefly) ----
-    let (novel, template, vocabs, chapters, steps) = {
+    let (novel, template, vocabs, chapters, steps, background) = {
         let db = state.db.lock().map_err(|e| e.to_string())?;
 
         // Load novel
@@ -151,7 +151,19 @@ pub async fn export_pdf(
             }
         };
 
-        (novel, template, vocabs, chapters, steps)
+        // ===== PDF page background style (grid / dots / none) =====
+        let bg_val: Result<String, _> = db.query_row(
+            "SELECT value FROM app_settings WHERE key='pdf_background'",
+            [],
+            |row| row.get(0),
+        );
+        let background = match bg_val.ok().as_deref() {
+            Some("dots") => "dots".to_string(),
+            Some("none") => "none".to_string(),
+            _ => "grid".to_string(),
+        };
+
+        (novel, template, vocabs, chapters, steps, background)
     };
 
     // The word-card template highlights English words found verbatim in the body,
@@ -200,6 +212,7 @@ pub async fn export_pdf(
             &vocabs,
             &chapters,
             steps,
+            &background,
             &output_path,
             Some(&progress),
         )?;

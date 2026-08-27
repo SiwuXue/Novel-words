@@ -353,6 +353,7 @@ const previewHtml = computed(() => {
     steps: normalizeSteps(pdfSteps.value),
     language: store.currentNovel?.language,
     templateType: pdfTemplateType.value,
+    background: settingsStore.pdfBackground,
   })
 })
 

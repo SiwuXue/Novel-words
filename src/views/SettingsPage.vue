@@ -58,6 +58,18 @@
             </el-checkbox-group>
           </el-form-item>
 
+          <el-form-item label="PDF 背景">
+            <el-radio-group
+              :model-value="settingsStore.pdfBackground"
+              @change="onBackgroundChange"
+            >
+              <el-radio-button value="grid">网格</el-radio-button>
+              <el-radio-button value="dots">点阵</el-radio-button>
+              <el-radio-button value="none">无</el-radio-button>
+            </el-radio-group>
+            <span class="backup-hint" style="margin-left:12px;">用于「单词卡片版」导出页面的底纹</span>
+          </el-form-item>
+
           <el-form-item label="朗读口音">
             <el-radio-group
               :model-value="settingsStore.speechAccent"
@@ -102,6 +114,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { useSettingsStore } from '@/stores/settingsStore'
+import type { PdfBackground } from '@/stores/settingsStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
 import { STEP_LABELS, type StepNum } from '@/types/pdfSteps'
 import { speakWord, type SpeechAccent } from '@/utils/speech'
@@ -152,6 +165,10 @@ async function onStepsChange(next: StepNum[]) {
   }
   await settingsStore.setPdfIntensiveSteps(next)
   localSteps.value = [...settingsStore.pdfIntensiveSteps]
+}
+
+function onBackgroundChange(bg: PdfBackground) {
+  settingsStore.setPdfBackground(bg)
 }
 
 function onAccentChange(accent: SpeechAccent) {

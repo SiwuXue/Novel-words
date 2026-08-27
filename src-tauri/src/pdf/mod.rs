@@ -533,6 +533,7 @@ pub fn generate_pdf(
     vocabs: &[VocabWord],
     chapters: &[Chapter],
     steps: IntensiveSteps,
+    background: &str,
     output_path: &str,
     progress: Option<&dyn Fn(PdfProgress)>,
 ) -> Result<(), String> {
@@ -610,7 +611,7 @@ pub fn generate_pdf(
 
     // 3. Render — the template type picks which renderer to run.
     match template.template_type.as_str() {
-        "card" => card::render(&mut ctx, chapters, vocabs, &novel.language, progress),
+        "card" => card::render(&mut ctx, chapters, vocabs, &novel.language, background, progress),
         _ => intensive::render(&mut ctx, chapters, vocabs, steps, &novel.language, progress),
     }
 
