@@ -1,6 +1,7 @@
 mod font;
 pub mod matcher;
 mod intensive;
+mod card;
 
 pub use intensive::{parse_steps_from_db, IntensiveSteps};
 
@@ -9,7 +10,7 @@ use std::fs::File;
 use std::io::Write;
 
 /// Measure the width (mm) of a single character at the given font size.
-fn measure_char_width(ch: char, font_size: f32) -> f32 {
+pub(crate) fn measure_char_width(ch: char, font_size: f32) -> f32 {
     if ch == '…' { font_size * 0.3528 } // approx same as a CJK char
     else if ch.is_ascii() { font_size * 0.55 * 0.3528 }
     else { font_size * 0.3528 }
@@ -71,7 +72,7 @@ pub fn text_color_for_proficiency(proficiency: &str) -> Color {
 
 /// Split `text` into lines that each fit within `max_width` mm.
 /// Returns owned strings to avoid borrow conflicts.
-fn wrap_text_to_lines(text: &str, max_width: f32, font_size: f32) -> Vec<String> {
+pub(crate) fn wrap_text_to_lines(text: &str, max_width: f32, font_size: f32) -> Vec<String> {
     if text.is_empty() {
         return Vec::new();
     }
@@ -244,7 +245,7 @@ impl PdfContext {
     /// Record the current page as the start of a chapter with the given title,
     /// so a PDF bookmark (outline entry) can be created later.
     pub fn record_bookmark(&mut self, title: &str) {
-        let page_idx = self.doc.pages.len().saturating_sub(1);
+        let page_idx = self.doc.pages.len();
         self.bookmarks.push((title.to_string(), page_idx));
     }
 
@@ -374,19 +375,61 @@ impl PdfContext {
     }
 
     /// Fill a rectangle with a solid color. x, y are distance from left / bottom.
+    ///
+    /// NOTE: printpdf 0.9's `Op::DrawRectangle` emits `re ... n` and IGNORES
+    /// `PaintMode::Fill`, so rectangles are never actually filled (just an empty
+    /// path). We draw a 4-corner filled polygon instead, which emits `f`.
     pub fn fill_rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
-        let mm_to_pt = 2.8346;
+        let poly: Polygon = vec![
+            (Point::new(Mm(x), Mm(y - h)), false),
+            (Point::new(Mm(x + w), Mm(y - h)), false),
+            (Point::new(Mm(x + w), Mm(y)), false),
+            (Point::new(Mm(x), Mm(y)), false),
+        ]
+        .into_iter()
+        .collect();
         self.current_ops.push(Op::SetFillColor { col: color });
-        self.current_ops.push(Op::DrawRectangle {
-            rectangle: Rect {
-                x: Pt(x * mm_to_pt),
-                y: Pt((y - h) * mm_to_pt),
-                width: Pt(w * mm_to_pt),
-                height: Pt(h * mm_to_pt),
-                mode: Some(PaintMode::Fill),
-                winding_order: None,
-            },
-        });
+        self.current_ops.push(Op::DrawPolygon { polygon: poly });
+        self.current_ops.push(Op::SetFillColor { col: text_black() });
+    }
+
+    /// Fill a rounded rectangle. x, y are the top edge (bottom-based mm), w, h
+    /// the size, r the corner radius. Uses cubic-bezier corner arcs so printpdf
+    /// renders genuinely rounded corners.
+    pub fn fill_rounded_rect(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, color: Color) {
+        let r = r.min(w / 2.0).min(h / 2.0).max(0.0);
+        let k = 0.552284749831f32;
+        let mut pts: Vec<(Point, bool)> = Vec::with_capacity(17);
+        // start on the left edge, just above the bottom-left corner arc
+        pts.push((Point::new(Mm(x), Mm(y - h + r)), false));
+        // left edge up
+        pts.push((Point::new(Mm(x), Mm(y - r)), false));
+        // top-left corner arc
+        pts.push((Point::new(Mm(x), Mm(y - r + k * r)), true));
+        pts.push((Point::new(Mm(x + r - k * r), Mm(y)), true));
+        pts.push((Point::new(Mm(x + r), Mm(y)), false));
+        // top edge
+        pts.push((Point::new(Mm(x + w - r), Mm(y)), false));
+        // top-right corner arc
+        pts.push((Point::new(Mm(x + w - r + k * r), Mm(y)), true));
+        pts.push((Point::new(Mm(x + w), Mm(y - r + k * r)), true));
+        pts.push((Point::new(Mm(x + w), Mm(y - r)), false));
+        // right edge down
+        pts.push((Point::new(Mm(x + w), Mm(y - h + r)), false));
+        // bottom-right corner arc
+        pts.push((Point::new(Mm(x + w), Mm(y - h + r - k * r)), true));
+        pts.push((Point::new(Mm(x + w - r + k * r), Mm(y - h)), true));
+        pts.push((Point::new(Mm(x + w - r), Mm(y - h)), false));
+        // bottom edge
+        pts.push((Point::new(Mm(x + r), Mm(y - h)), false));
+        // bottom-left corner arc
+        pts.push((Point::new(Mm(x + r - k * r), Mm(y - h)), true));
+        pts.push((Point::new(Mm(x), Mm(y - h + r - k * r)), true));
+        pts.push((Point::new(Mm(x), Mm(y - h + r)), false));
+
+        let polygon: Polygon = pts.into_iter().collect();
+        self.current_ops.push(Op::SetFillColor { col: color });
+        self.current_ops.push(Op::DrawPolygon { polygon });
         self.current_ops.push(Op::SetFillColor { col: text_black() });
     }
 
@@ -559,14 +602,17 @@ pub fn generate_pdf(
         paper_height: paper_h,
         current_ops: Vec::new(),
         bookmarks: Vec::new(),
-        show_chrome: true,
+        show_chrome: template.template_type.as_str() != "card",
         chapter_page: 1,
         novel_title: if novel.title.is_empty() { String::new() } else { novel.title.clone() },
         novel_author: if novel.author.is_empty() { String::new() } else { novel.author.clone() },
     };
 
-    // 3. Render (intensive reading only)
-    intensive::render(&mut ctx, chapters, vocabs, steps, &novel.language, progress);
+    // 3. Render — the template type picks which renderer to run.
+    match template.template_type.as_str() {
+        "card" => card::render(&mut ctx, chapters, vocabs, &novel.language, progress),
+        _ => intensive::render(&mut ctx, chapters, vocabs, steps, &novel.language, progress),
+    }
 
     // 4. Add PDF bookmarks for chapter navigation
     for (title, page) in &ctx.bookmarks {
@@ -575,7 +621,9 @@ pub fn generate_pdf(
 
     // 5. Finalize last page
     if !ctx.current_ops.is_empty() {
-        ctx.render_page_chrome();
+        if ctx.show_chrome {
+            ctx.render_page_chrome();
+        }
         let ops = std::mem::take(&mut ctx.current_ops);
         ctx.doc.pages.push(PdfPage::new(Mm(paper_w), Mm(paper_h), ops));
     }

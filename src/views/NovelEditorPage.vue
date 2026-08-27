@@ -19,7 +19,7 @@
         </el-button>
       </span>
       <el-dropdown
-        v-if="loadState === 'loaded'"
+        v-if="loadState === 'loaded' && pdfTemplateType === 'intensive'"
         trigger="click"
         @change="onStepsDropdownClick"
       >
@@ -56,6 +56,28 @@
             </el-dropdown-item>
             <el-dropdown-item command="en" :disabled="store.currentNovel?.language === 'en'">
               英文小说（按单词匹配）
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+      <el-dropdown
+        v-if="loadState === 'loaded'"
+        trigger="click"
+        @command="onTemplateSelect"
+      >
+        <el-button size="small" link>
+          🗂 模板：{{ pdfTemplateLabel }}
+        </el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="intensive" :disabled="pdfTemplateType === 'intensive'">
+              精读版（三步记忆）
+            </el-dropdown-item>
+            <el-dropdown-item
+              command="card"
+              :disabled="pdfTemplateType === 'card' || !isEnglishMode"
+            >
+              单词卡片版（左文右卡 · 仅英文）
             </el-dropdown-item>
           </el-dropdown-menu>
         </template>
@@ -191,6 +213,7 @@ import { useEditorStore } from '@/stores/editorStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import type { HighlightWord } from '@/types/vocabWord'
 import { normalizeSteps, STEP_LABELS, type StepNum } from '@/types/pdfSteps'
+import { TEMPLATE_TYPE_LABELS } from '@/types/pdf'
 import NovelEditor from '@/components/novel/NovelEditor.vue'
 import ChapterList from '@/components/novel/ChapterList.vue'
 import PreviewPanel from '@/components/novel/PreviewPanel.vue'
@@ -221,6 +244,19 @@ const pdfMessage = ref('正在准备导出…')
 const previewFullscreen = ref(false)
 const stepNums: StepNum[] = [1, 2, 3]
 const pdfSteps = ref<StepNum[]>([...settingsStore.pdfIntensiveSteps])
+
+type TemplateType = 'intensive' | 'card'
+const pdfTemplateType = ref<TemplateType>('intensive')
+const pdfTemplateLabel = computed(() => TEMPLATE_TYPE_LABELS[pdfTemplateType.value] ?? pdfTemplateType.value)
+const isEnglishMode = computed(() => store.currentNovel?.language === 'en')
+
+function onTemplateSelect(cmd: TemplateType) {
+  if (cmd === 'card' && !isEnglishMode.value) {
+    ElMessage.warning('单词卡片版仅支持英文小说，请先切换到「英文模式」')
+    return
+  }
+  pdfTemplateType.value = cmd
+}
 
 // Once store is loaded (async), sync session buffer once.
 watch(
@@ -259,6 +295,11 @@ async function onLanguageChange(lang: string) {
   if (novel.language === lang) return
   try {
     await store.update(novel.id, { language: lang })
+    // 中文小说没有英文正文，单词卡片版不可用：自动切回精读版并提示。
+    if (lang === 'zh' && pdfTemplateType.value === 'card') {
+      pdfTemplateType.value = 'intensive'
+      ElMessage.info('已切回「精读版」：单词卡片版仅支持英文小说')
+    }
     ElMessage.success(`已切换为${lang === 'en' ? '英文' : '中文'}模式`)
   } catch (e: any) {
     ElMessage.error('切换模式失败: ' + String(e?.message || e))
@@ -311,6 +352,7 @@ const previewHtml = computed(() => {
     novelTitle: store.currentNovel?.title,
     steps: normalizeSteps(pdfSteps.value),
     language: store.currentNovel?.language,
+    templateType: pdfTemplateType.value,
   })
 })
 
@@ -344,8 +386,9 @@ async function handleExportPdf() {
   }
   let filePath: string | null = null
   try {
+    const tag = pdfTemplateType.value === 'card' ? '卡片版' : pdfStepsMark()
     filePath = await save({
-      defaultPath: `${sanitizeFilename(novel.title || 'export')}_${pdfStepsMark()}_${dateStamp()}.pdf`,
+      defaultPath: `${sanitizeFilename(novel.title || 'export')}_${tag}_${dateStamp()}.pdf`,
       filters: [{ name: 'PDF', extensions: ['pdf'] }],
     })
   } catch (e: any) {
@@ -381,7 +424,7 @@ async function handleExportPdf() {
       steps_used: string
     }>('export_pdf', {
       novelId: novel.id,
-      templateType: 'intensive',
+      templateType: pdfTemplateType.value,
       vocabBookId: highlightBookId.value,
       steps: normalizeSteps(pdfSteps.value),
       outputPath: filePath,

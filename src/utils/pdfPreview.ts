@@ -443,6 +443,8 @@ export interface BuildPreviewInput {
   steps?: StepNum[]
   /** 'zh' = match vocab by Chinese definition; 'en' = match by English word. */
   language?: string
+  /** 'intensive' | 'card' — selects which preview layout to render. */
+  templateType?: string
 }
 
 function baseCss(fontSize: number, lineHeight: number): string {
@@ -535,10 +537,190 @@ function buildIntensive(
 }
 
 export function buildHtml(input: BuildPreviewInput): string {
-  const { chapters, words, template, novelTitle, steps, language } = input
+  const { chapters, words, template, novelTitle, steps, language, templateType } = input
   const lineHeight = template?.lineSpacing ?? 1.5
   const fontSize = template?.fontSize ?? 14
+  const isCard = templateType === 'card' || template?.templateType === 'card'
+  if (isCard) {
+    const css = cardCss(fontSize, lineHeight)
+    const body = buildCard(chapters, words, novelTitle)
+    return `<style>${css}</style><div class="pdf-preview-body card-preview">${body}</div>`
+  }
   const css = baseCss(fontSize, lineHeight)
   const bodyContent = buildIntensive(chapters, words, novelTitle, steps, language)
   return `<style>${css}</style><div class="pdf-preview-body">${bodyContent}</div>`
+}
+
+/* ------------------------------------------------------------------ *
+ * Word-card preview ("单词卡片版")                                     *
+ * ------------------------------------------------------------------ */
+
+const CARD_TINTS = [
+  { bg: '#BBDEFB', word: '#1565C0' },
+  { bg: '#C8E6C9', word: '#2E7D32' },
+  { bg: '#F8BBD0', word: '#C2185B' },
+  { bg: '#E1BEE7', word: '#7B1FA2' },
+  { bg: '#FFCC80', word: '#E65100' },
+  { bg: '#B2DFDB', word: '#00838F' },
+  { bg: '#FFE082', word: '#F9A825' },
+  { bg: '#D7CCC8', word: '#5D4037' },
+]
+
+/** Short Chinese meaning for the inline gloss (mirrors Rust `short_gloss`). */
+function shortGloss(def: string): string {
+  if (!def) return ''
+  const line = def.split('\n')[0] ?? ''
+  const first = line.split(/[/、；，,;]/)[0].trim()
+  const cleaned = first.split('.').slice(-1)[0].trim()
+  return Array.from(cleaned).slice(0, 12).join('')
+}
+
+/** Card definition: POS/sense lines, with auxiliary blocks stripped. */
+function cardDefHtml(def: string): string {
+  const lines = parseSenseLines(def)
+  const body = lines.length > 0 ? lines : def.trim() ? [def.trim()] : []
+  return body.map(escapeHtml).join('<br>') || '—'
+}
+
+/** Left-column paragraph: matched word colored + inline Chinese gloss. */
+function renderParagraphCardEn(para: string, words: VocabWord[]): string {
+  const matches = findMatchesInLineEn(para, words)
+  if (matches.length === 0) return escapeHtml(para)
+  const out: string[] = []
+  let last = 0
+  for (const m of matches) {
+    if (m.start > last) out.push(escapeHtml(para.slice(last, m.start)))
+    const en = escapeHtml(para.slice(m.start, m.end))
+    const gloss = shortGloss(m.word.definition || '')
+    const enColor = textColorFor(m.word.proficiency)
+    out.push(`<span class="card-en" style="color:${enColor}">${en}</span>`)
+    if (gloss) out.push(`<span class="card-gloss">${escapeHtml(gloss)}</span>`)
+    last = m.end
+  }
+  if (last < para.length) out.push(escapeHtml(para.slice(last)))
+  return out.join('')
+}
+
+function buildWordCard(w: VocabWord, idx: number): string {
+  const tint = CARD_TINTS[idx % CARD_TINTS.length]
+  const word = escapeHtml(w.word)
+  const phon = w.phonetic ? `<div class="wc-phon">[${escapeHtml(w.phonetic)}]</div>` : ''
+  return `<div class="word-card" style="background:${tint.bg}">
+    <div class="wc-word" style="color:${tint.word}">${word}</div>
+    ${phon}
+    <div class="wc-def">${cardDefHtml(w.definition || '')}</div>
+  </div>`
+}
+
+function splitSentences(para: string): string[] {
+  const out: string[] = []
+  let cur = ''
+  for (let i = 0; i < para.length; i++) {
+    const c = para[i]
+    cur += c
+    if (c === '.' || c === '!' || c === '?') {
+      const next = i + 1 >= para.length ? '' : para[i + 1]
+      const nextIsWs = next === '' || next === ' ' || next === '\t' || next === '\n'
+      const prevIsDigit = i > 0 && /\d/.test(para[i - 1])
+      if (nextIsWs && !prevIsDigit) {
+        const s = cur.trim()
+        if (s) out.push(s)
+        cur = ''
+      }
+    }
+  }
+  const s = cur.trim()
+  if (s) out.push(s)
+  return out
+}
+
+function sentenceGroups(para: string): string[] {
+  const sentences = splitSentences(para)
+  if (sentences.length <= 1) return sentences
+  const groups: string[] = []
+  for (let i = 0; i < sentences.length; i += 2) {
+    if (i + 1 < sentences.length) groups.push(`${sentences[i]} ${sentences[i + 1]}`)
+    else groups.push(sentences[i])
+  }
+  return groups
+}
+
+function buildCard(chapters: Chapter[], words: VocabWord[], novelTitle?: string): string {
+  const matched: VocabWord[] = []
+  for (const ch of chapters) {
+    const body = looksLikeHtml(ch.content) ? stripHtml(ch.content) : ch.content
+    for (const w of wordsFoundInTextEn(body, words)) {
+      if (!matched.some((x) => x.word.toLowerCase() === w.word.toLowerCase())) {
+        matched.push(w)
+      }
+    }
+  }
+  const total = matched.length
+  const unknown = matched.filter((w) => w.proficiency === 'unknown').length
+  const familiar = matched.filter((w) => w.proficiency === 'familiar').length
+  const mastered = matched.filter((w) => w.proficiency === 'mastered').length
+
+  const parts: string[] = []
+  parts.push(`<div class="card-global-header">
+    <div class="card-title">${escapeHtml(novelTitle || '未命名')}</div>
+    <div class="card-sub">单词卡片 · 语境记忆</div>
+    <div class="card-stats"><span>单词数 ${total}</span><span>生疏 ${unknown}</span><span>熟悉 ${familiar}</span><span>掌握 ${mastered}</span></div>
+  </div>`)
+
+  for (let ci = 0; ci < chapters.length; ci++) {
+    const ch = chapters[ci]
+    const num = ci + 1
+    const body = looksLikeHtml(ch.content) ? stripHtml(ch.content) : ch.content
+    const chWords = wordsFoundInTextEn(body, words)
+    parts.push(`<div class="card-chapter">`)
+    parts.push(
+      `<div class="card-ch-header"><span class="card-ch-en">Chapter ${num}</span>` +
+        (ch.title ? `<span class="card-ch-cn">${escapeHtml(ch.title)}</span>` : '') +
+        `<span class="card-ch-wc">本章词汇：${chWords.length} 词</span></div>`,
+    )
+    parts.push(`<div class="card-columns">`)
+    parts.push(`<div class="card-left">`)
+    for (const para of splitParagraphs(body)) {
+      for (const grp of sentenceGroups(para)) {
+        parts.push(`<p>${renderParagraphCardEn(grp, words)}</p>`)
+      }
+    }
+    parts.push(`</div>`)
+    parts.push(`<div class="card-right">`)
+    chWords.forEach((w, i) => parts.push(buildWordCard(w, i)))
+    parts.push(`</div>`)
+    parts.push(`</div>`)
+    parts.push(`</div>`)
+  }
+  return parts.join('\n')
+}
+
+function cardCss(fontSize: number, lineHeight: number): string {
+  return `
+    .card-preview { font-size: ${fontSize}px; line-height: ${lineHeight}; color: #222;
+      background-color: #ffffff;
+      background-image: linear-gradient(to right, #eef0f2 1px, transparent 1px), linear-gradient(to bottom, #eef0f2 1px, transparent 1px);
+      background-size: 24px 24px;
+      padding: 4px; }
+    .card-preview .card-global-header { border-bottom: 1px solid #C8D1D9; padding-bottom: 10px; margin-bottom: 14px; }
+    .card-preview .card-title { font-size: ${fontSize + 8}px; color: #1A56DB; font-weight: 700; }
+    .card-preview .card-sub { font-size: ${fontSize - 2}px; color: #999; margin: 2px 0 6px; }
+    .card-preview .card-stats { font-size: ${fontSize - 2}px; color: #333; }
+    .card-preview .card-stats span + span { margin-left: 14px; }
+    .card-preview .card-chapter { margin-bottom: 18px; }
+    .card-preview .card-ch-header { display: flex; align-items: baseline; gap: 10px; border-bottom: 1px solid #E0E8EF; padding-bottom: 4px; margin-bottom: 8px; }
+    .card-preview .card-ch-en { font-size: ${fontSize + 4}px; color: #1A56DB; font-weight: 700; }
+    .card-preview .card-ch-cn { font-size: ${fontSize + 1}px; font-weight: 600; }
+    .card-preview .card-ch-wc { font-size: ${fontSize - 2}px; color: #999; margin-left: auto; }
+    .card-preview .card-columns { display: flex; gap: 16px; align-items: flex-start; }
+    .card-preview .card-left { flex: 1.35; min-width: 0; }
+    .card-preview .card-right { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+    .card-preview .card-left p { margin: 0 0 8px; }
+    .card-preview .card-en { font-weight: 600; }
+    .card-preview .card-gloss { font-size: ${fontSize - 4}px; color: #999; margin-left: 2px; }
+    .card-preview .word-card { border-radius: 6px; padding: 6px 8px; }
+    .card-preview .wc-word { font-size: ${fontSize + 2}px; font-weight: 700; }
+    .card-preview .wc-phon { font-size: ${fontSize - 2}px; color: #555; }
+    .card-preview .wc-def { font-size: ${fontSize - 2}px; color: #222; margin-top: 2px; }
+  `
 }

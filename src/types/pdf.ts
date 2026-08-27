@@ -7,7 +7,7 @@ export interface PdfTemplate {
   lineSpacing: number
   margins: string // JSON: { top, bottom, left, right }
   annotationMode: string
-  templateType: 'intensive'
+  templateType: 'intensive' | 'card'
   isBuiltin: boolean
   createdAt: string
   updatedAt: string
@@ -21,10 +21,11 @@ export interface PdfTemplateFormData {
   lineSpacing: number
   margins: string
   annotationMode: string
-  templateType: 'intensive'
+  templateType: 'intensive' | 'card'
   isBuiltin: boolean
 }
 
 export const TEMPLATE_TYPE_LABELS: Record<string, string> = {
   intensive: '精读版',
+  card: '单词卡片版',
 }

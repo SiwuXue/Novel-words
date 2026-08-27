@@ -22,11 +22,12 @@ pub async fn export_pdf(
     state: State<'_, DbState>,
     novel_id: i64,
     _template_id: Option<i64>,
-    _template_type: Option<String>,
+    template_type: Option<String>,
     vocab_book_id: Option<i64>,
     steps: Option<Vec<i64>>,
     output_path: String,
 ) -> Result<PdfExportResponse, String> {
+    let template_type = template_type.unwrap_or_else(|| "intensive".to_string());
     // ---- Phase 1: read all data from SQLite (fast, hold the lock only briefly) ----
     let (novel, template, vocabs, chapters, steps) = {
         let db = state.db.lock().map_err(|e| e.to_string())?;
@@ -54,8 +55,10 @@ pub async fn export_pdf(
             )
             .map_err(|e| format!("查询小说失败: {}", e))?;
 
-        // Use default template (intensive reading only)
-        let template = default_template();
+        // Use the built-in template matching the requested type (intensive reading
+        // by default). Templates are currently defined in code; persistence (the
+        // `pdf_template` table) is not yet wired into the export path.
+        let template = template_for(&template_type);
 
         // Load vocab words if a book is selected
         let vocabs: Vec<VocabWord> = if let Some(book_id) = vocab_book_id {
@@ -151,6 +154,12 @@ pub async fn export_pdf(
         (novel, template, vocabs, chapters, steps)
     };
 
+    // The word-card template highlights English words found verbatim in the body,
+    // so it only works for English novels. Reject Chinese novels with a clear hint.
+    if template.template_type == "card" && novel.language != "en" {
+        return Err("单词卡片版仅支持英文小说，请先切换到「英文模式」再导出。".to_string());
+    }
+
     // ---- Phase 2: heavy work off the main thread, so progress events are
     // delivered live to the webview while the PDF is being generated. ----
     let inner = tokio::task::spawn_blocking(move || -> Result<PdfExportResponse, String> {
@@ -223,5 +232,18 @@ fn default_template() -> PdfTemplate {
         is_builtin: false,
         created_at: String::new(),
         updated_at: String::new(),
+    }
+}
+
+/// Build the built-in template for the requested `template_type`. Unknown types
+/// fall back to the default intensive template so existing callers keep working.
+fn template_for(template_type: &str) -> PdfTemplate {
+    match template_type {
+        "card" => PdfTemplate {
+            name: "单词卡片版".to_string(),
+            template_type: "card".to_string(),
+            ..default_template()
+        },
+        _ => default_template(),
     }
 }
