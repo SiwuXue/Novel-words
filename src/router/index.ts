@@ -52,6 +52,12 @@ const router = createRouter({
       meta: { title: '设置' },
     },
     {
+      path: '/stats',
+      name: 'Stats',
+      component: () => import('@/views/StatsPage.vue'),
+      meta: { title: '学习统计' },
+    },
+    {
       path: '/:pathMatch(.*)*',
       name: 'NotFound',
       component: () => import('@/views/NotFoundPage.vue'),

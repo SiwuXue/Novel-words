@@ -1,5 +1,10 @@
 <template>
-  <div class="novel-list-page">
+  <div
+    class="novel-list-page"
+    @dragenter.prevent="onDragEnter"
+    @dragover.prevent="onDragOver"
+    @drop.prevent="onDrop"
+  >
     <div class="page-header">
       <h2>小说库</h2>
       <div class="header-actions">
@@ -20,6 +25,15 @@
         <el-button @click="showImportDialog">
           <el-icon><FolderOpened /></el-icon> 导入文件
         </el-button>
+      </div>
+    </div>
+
+    <!-- Full-page drop overlay -->
+    <div v-if="isDragOver" class="drop-overlay">
+      <div class="drop-overlay-inner">
+        <el-icon :size="56" color="#fff"><FolderOpened /></el-icon>
+        <p>松开鼠标导入文件</p>
+        <p class="hint">支持 .txt / .md / .epub / .fb2</p>
       </div>
     </div>
 
@@ -77,8 +91,9 @@
     <!-- Import Dialog -->
     <ImportDialog
       v-if="showImport"
+      :initial-path="initialImportPath"
       @confirm="handleImportConfirm"
-      @close="showImport = false"
+      @close="closeImport"
     />
   </div>
 </template>
@@ -101,6 +116,10 @@ const searchQuery = ref('')
 const dialogVisible = ref(false)
 const editingNovel = ref<Novel | null>(null)
 const showImport = ref(false)
+const initialImportPath = ref('')
+const isDragOver = ref(false)
+
+const ACCEPTED_EXTS = ['txt', 'md', 'text', 'epub', 'fb2']
 
 onMounted(() => {
   store.fetchAll()
@@ -116,6 +135,36 @@ function showCreateDialog() {
 }
 
 function showImportDialog() {
+  initialImportPath.value = ''
+  showImport.value = true
+}
+
+function closeImport() {
+  showImport.value = false
+  initialImportPath.value = ''
+}
+
+// ---- Drag & drop import ----
+function onDragEnter() {
+  isDragOver.value = true
+}
+function onDragOver() {
+  isDragOver.value = true
+}
+function onDrop(e: DragEvent) {
+  isDragOver.value = false
+  const file = e.dataTransfer?.files?.[0] as (File & { path?: string }) | undefined
+  const path = file?.path
+  if (!path) {
+    ElMessage.warning('无法获取文件路径')
+    return
+  }
+  const ext = path.split('.').pop()?.toLowerCase() ?? ''
+  if (!ACCEPTED_EXTS.includes(ext)) {
+    ElMessage.warning(`不支持的文件格式：.${ext}`)
+    return
+  }
+  initialImportPath.value = path
   showImport.value = true
 }
 
@@ -240,5 +289,35 @@ function formatDate(dateStr: string): string {
 }
 .fav-icon:hover {
   color: var(--warning-color);
+}
+
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(64, 158, 255, 0.45);
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+}
+.drop-overlay-inner {
+  padding: 32px 56px;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 16px;
+  text-align: center;
+  color: #fff;
+  pointer-events: none;
+}
+.drop-overlay-inner p {
+  margin: 8px 0 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+.drop-overlay-inner .hint {
+  font-size: 13px;
+  font-weight: 400;
+  opacity: 0.85;
 }
 </style>

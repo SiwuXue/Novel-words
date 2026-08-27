@@ -87,6 +87,16 @@ pub fn update_novel(
 #[tauri::command]
 pub fn delete_novel(state: State<DbState>, id: i64) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
+    // Cascade cleanup so we don't leave orphan rows when a novel is deleted.
+    db.execute("DELETE FROM chapter WHERE novel_id=?1", rusqlite::params![id])
+        .map_err(|e| format!("清理章节失败: {}", e))?;
+    // Detach vocab words from this novel (keep the words in their books; only
+    // clear the novel_id link so high-light lists & statistics stay consistent).
+    db.execute(
+        "UPDATE vocab_word SET novel_id=NULL WHERE novel_id=?1",
+        rusqlite::params![id],
+    )
+    .map_err(|e| format!("更新生词归属失败: {}", e))?;
     db.execute("DELETE FROM novel WHERE id=?1", rusqlite::params![id])
         .map_err(|e| format!("删除小说失败: {}", e))?;
     Ok(())

@@ -71,10 +71,7 @@
           </el-form-item>
 
           <el-form-item label="自动备份">
-            <el-radio-group
-              :model-value="settingsStore.autoBackup"
-              @change="onAutoBackupChange"
-            >
+            <el-radio-group v-model="autoBackupLocal" @change="onAutoBackupChange">
               <el-radio-button value="off">关闭</el-radio-button>
               <el-radio-button value="daily">每天</el-radio-button>
               <el-radio-button value="weekly">每周</el-radio-button>
@@ -92,6 +89,18 @@
               <el-radio-button value="uk">英式</el-radio-button>
             </el-radio-group>
             <el-button link type="primary" size="small" style="margin-left:12px;" @click="onTestAccent">试听</el-button>
+          </el-form-item>
+
+          <el-form-item label="复习每日目标">
+            <el-input-number
+              :model-value="settingsStore.reviewDailyGoal"
+              :min="1"
+              :max="999"
+              size="small"
+              style="width: 120px"
+              @change="onReviewGoalChange"
+            />
+            <span class="backup-hint" style="margin-left:12px;">每日复习达到此数量算达标，进度会显示在复习页</span>
           </el-form-item>
         </el-form>
       </el-tab-pane>
@@ -138,8 +147,16 @@ const vocabBookStore = useVocabBookStore()
 const activeTab = ref('general')
 const stepNums: StepNum[] = [1, 2, 3]
 const localSteps = ref<StepNum[]>([...settingsStore.pdfIntensiveSteps])
+const autoBackupLocal = ref<AutoBackup>(settingsStore.autoBackup)
 const backingUp = ref(false)
 const restoring = ref(false)
+
+watch(
+  () => settingsStore.autoBackup,
+  (v) => {
+    autoBackupLocal.value = v
+  },
+)
 
 watch(
   () => settingsStore.pdfIntensiveSteps,
@@ -185,7 +202,12 @@ function onBackgroundChange(bg: PdfBackground) {
 }
 
 function onAutoBackupChange(v: AutoBackup) {
+  autoBackupLocal.value = v
   settingsStore.setAutoBackup(v)
+}
+
+function onReviewGoalChange(v: number | undefined) {
+  if (typeof v === 'number') settingsStore.setReviewDailyGoal(v)
 }
 
 function onAccentChange(accent: SpeechAccent) {

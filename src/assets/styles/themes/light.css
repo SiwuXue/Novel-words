@@ -22,8 +22,11 @@
   --hover-bg: #f0f2f5;
   --accent-light: #ecf5ff;
 
-  /* Editor vocab-highlight background colors (light pastels). */
-  --editor-hl-unknown: #fef08a;
-  --editor-hl-familiar: #dbeafe;
-  --editor-hl-mastered: #bbf7d0;
+  /* Editor vocab-highlight colors — red / orange / gray (match PDF preview). */
+  --editor-hl-unknown: #cc0000;
+  --editor-hl-unknown-bg: #fdecec;
+  --editor-hl-familiar: #e67e22;
+  --editor-hl-familiar-bg: #fdf0e2;
+  --editor-hl-mastered: #666666;
+  --editor-hl-mastered-bg: #f0f0f0;
 }

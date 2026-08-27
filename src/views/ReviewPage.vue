@@ -5,9 +5,17 @@
         <el-icon><ArrowLeft /></el-icon> 返回
       </el-button>
       <h2 v-if="book">{{ book.name }}</h2>
-      <span class="review-progress" v-if="queue.length || reviewed > 0">
-        剩余 {{ queue.length }} · 已复习 {{ reviewed }}
+      <span class="review-progress" v-if="progress">
+        今日复习 <strong>{{ progress.reviewed_today }}</strong> / {{ progress.goal }} ·
+        待复习 <strong>{{ progress.due_total }}</strong>
       </span>
+      <el-progress
+        v-if="progress"
+        class="review-progress-bar"
+        :percentage="goalPercent"
+        :stroke-width="6"
+        :show-text="false"
+      />
     </div>
 
     <div v-if="loading" class="review-state">
@@ -96,6 +104,13 @@ import { invoke } from '@tauri-apps/api/core'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
 import type { VocabWord } from '@/types/vocabWord'
 
+interface ReviewProgress {
+  vocab_book_id: number | null
+  due_total: number
+  reviewed_today: number
+  goal: number
+}
+
 const route = useRoute()
 const router = useRouter()
 const bookStore = useVocabBookStore()
@@ -109,6 +124,23 @@ const current = computed(() => queue.value[0] ?? null)
 const revealed = ref(false)
 const reviewed = ref(0)
 const stats = ref({ again: 0, good: 0, easy: 0 })
+const progress = ref<ReviewProgress | null>(null)
+
+const goalPercent = computed(() => {
+  if (!progress.value) return 0
+  const goal = progress.value.goal || 1
+  return Math.min(100, Math.round((progress.value.reviewed_today / goal) * 100))
+})
+
+async function refreshProgress() {
+  try {
+    progress.value = await invoke<ReviewProgress>('get_review_progress', {
+      vocabBookId: bookId.value,
+    })
+  } catch {
+    /* ignore */
+  }
+}
 
 onMounted(async () => {
   if (bookStore.books.length === 0) {
@@ -119,6 +151,7 @@ onMounted(async () => {
     queue.value = await invoke<VocabWord[]>('get_due_words', {
       vocabBookId: bookId.value,
     })
+    await refreshProgress()
   } catch (e: any) {
     ElMessage.error(String(e?.message || e || '加载复习队列失败'))
   } finally {
@@ -135,6 +168,7 @@ async function answer(rating: 'again' | 'good' | 'easy') {
     reviewed.value += 1
     queue.value = queue.value.slice(1)
     revealed.value = false
+    await refreshProgress()
   } catch (e: any) {
     ElMessage.error(String(e?.message || e || '提交失败'))
   }
@@ -168,6 +202,14 @@ function goBack() {
   margin-left: auto;
   color: var(--text-secondary, #909399);
   font-size: 14px;
+}
+.review-progress strong {
+  color: var(--accent-color, #409eff);
+  font-size: 16px;
+}
+.review-progress-bar {
+  margin-top: 4px;
+  width: 100%;
 }
 .review-state {
   flex: 1;

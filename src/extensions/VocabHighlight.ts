@@ -8,11 +8,18 @@ import { useSettingsStore } from '@/stores/settingsStore'
 
 const PLUGIN_KEY = new PluginKey('vocabHighlight')
 
-// Theme-aware highlight backgrounds (defined in themes/light.css & dark.css).
+// Theme-aware highlight colors — red / orange / gray to match the PDF preview
+// and the exported PDF (see PROFICIENCY_TEXT in utils/proficiencyColors.ts).
 const PROFICIENCY_COLORS: Record<string, string> = {
   unknown: 'var(--editor-hl-unknown)',
   familiar: 'var(--editor-hl-familiar)',
   mastered: 'var(--editor-hl-mastered)',
+}
+
+const PROFICIENCY_BG: Record<string, string> = {
+  unknown: 'var(--editor-hl-unknown-bg)',
+  familiar: 'var(--editor-hl-familiar-bg)',
+  mastered: 'var(--editor-hl-mastered-bg)',
 }
 
 const PROFICIENCY_TEXTS: Record<string, string> = {
@@ -24,7 +31,11 @@ const PROFICIENCY_TEXTS: Record<string, string> = {
 interface PluginState {
   wordsMap: Map<string, HighlightWord>
   decorations: DecorationSet
+  /** Doc changed but decorations not yet rebuilt (debounced). */
+  dirty: boolean
 }
+
+const REBUILD_DEBOUNCE_MS = 220
 
 // ---- Module-level words store ----
 // Stored at module level so the plugin always reads the latest words
@@ -80,13 +91,14 @@ function buildDecorations(
 
   for (const hw of words) {
     const color = PROFICIENCY_COLORS[hw.proficiency] || PROFICIENCY_COLORS.unknown
+    const bg = PROFICIENCY_BG[hw.proficiency] || PROFICIENCY_BG.unknown
     const positions = findWordPositions(doc, hw.word)
 
     for (const { from, to } of positions) {
       decorations.push(
         Decoration.inline(from, to, {
           class: 'vocab-highlight',
-          style: `background-color: ${color}; border-radius: 2px; cursor: pointer;`,
+          style: `color: ${color}; background-color: ${bg}; border-radius: 2px; cursor: pointer; font-weight: 500;`,
           nodeName: 'span',
         }),
       )
@@ -195,6 +207,22 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
     // Seed the module-level store from initial options
     currentWords = this.options.words
 
+    // Captured in `view()` so we can schedule debounced rebuilds.
+    let editorView: EditorView | null = null
+    let rebuildTimer: ReturnType<typeof setTimeout> | null = null
+
+    function scheduleRebuild() {
+      if (rebuildTimer != null) clearTimeout(rebuildTimer)
+      rebuildTimer = setTimeout(() => {
+        rebuildTimer = null
+        if (editorView) {
+          editorView.dispatch(
+            editorView.state.tr.setMeta('vocabHighlightRebuild', true),
+          )
+        }
+      }, REBUILD_DEBOUNCE_MS)
+    }
+
     return [
       new Plugin<PluginState>({
         key: PLUGIN_KEY,
@@ -205,6 +233,7 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
             return {
               wordsMap,
               decorations: DecorationSet.empty,
+              dirty: false,
             }
           },
 
@@ -212,15 +241,46 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
             const wordsMap = buildWordsMap(currentWords)
             const wordsChanged = !mapsEqual(oldState.wordsMap, wordsMap)
 
-            if (!tr.docChanged && !wordsChanged) {
+            // Vocabulary list changed: rebuild immediately so newly imported
+            // words show up without waiting.
+            if (wordsChanged) {
+              if (rebuildTimer != null) {
+                clearTimeout(rebuildTimer)
+                rebuildTimer = null
+              }
               return {
                 wordsMap,
-                decorations: oldState.decorations.map(tr.mapping, tr.doc),
+                decorations: buildDecorations(newEditorState.doc, currentWords),
+                dirty: false,
               }
             }
 
-            const decorations = buildDecorations(newEditorState.doc, currentWords)
-            return { wordsMap, decorations }
+            // No doc change: keep existing decorations (mapped).
+            if (!tr.docChanged) {
+              return {
+                wordsMap,
+                decorations: oldState.decorations.map(tr.mapping, tr.doc),
+                dirty: oldState.dirty,
+              }
+            }
+
+            // Doc change: if the debounced rebuild timer is firing, do the
+            // heavy rebuild now.
+            if (tr.getMeta('vocabHighlightRebuild')) {
+              return {
+                wordsMap,
+                decorations: buildDecorations(newEditorState.doc, currentWords),
+                dirty: false,
+              }
+            }
+
+            // Typing: keep stale decorations, schedule debounced rebuild.
+            scheduleRebuild()
+            return {
+              wordsMap,
+              decorations: oldState.decorations.map(tr.mapping, tr.doc),
+              dirty: true,
+            }
           },
         },
 
@@ -263,10 +323,16 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
           },
         },
 
-        view() {
+        view(view) {
+          editorView = view
           getTooltip()
           return {
             destroy() {
+              if (rebuildTimer != null) {
+                clearTimeout(rebuildTimer)
+                rebuildTimer = null
+              }
+              editorView = null
               if (tooltipEl?.parentElement) {
                 tooltipEl.parentElement.removeChild(tooltipEl)
               }

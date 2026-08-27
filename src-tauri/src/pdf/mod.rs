@@ -711,6 +711,22 @@ pub fn generate_pdf(
         ctx.doc.pages.push(PdfPage::new(Mm(paper_w), Mm(paper_h), ops));
     }
 
+    // Soft memory safeguard: warn (not fail) for very long exports. Long PDFs
+    // can spike memory due to printpdf buffering all pages until save.
+    let page_count = ctx.doc.pages.len();
+    if page_count > 500 {
+        eprintln!(
+            "[pdf] 注意：本次导出共 {} 页，属于较长 PDF，导出过程内存占用较高",
+            page_count
+        );
+        if let Some(p) = progress {
+            p(PdfProgress {
+                percent: 91,
+                message: format!("文档较长（{} 页），正在写入 PDF 文件……", page_count),
+            });
+        }
+    }
+
     // 6. Save
     if let Some(p) = progress {
         p(PdfProgress {

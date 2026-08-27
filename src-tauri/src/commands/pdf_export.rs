@@ -205,6 +205,18 @@ pub async fn export_pdf(
         };
 
         let steps_str = steps_label(steps);
+        // Emit a pre-generation progress event so the UI can show the matched
+        // word count (helpful for long novels).
+        let _ = app.emit(
+            "pdf-export-progress",
+            crate::pdf::PdfProgress {
+                percent: 5,
+                message: format!(
+                    "已匹配 {} 词（{} 本章节，待排版……）",
+                    matched_words, chapters.len()
+                ),
+            },
+        );
         let progress = |p: crate::pdf::PdfProgress| {
             let _ = app.emit("pdf-export-progress", p);
         };

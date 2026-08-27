@@ -31,7 +31,7 @@ use commands::app_info::get_app_info;
 use commands::backup::{backup_database, restore_database};
 use commands::export::{export_vocab_words_apkg, export_vocab_words_xlsx};
 use commands::pdf_export::export_pdf;
-use commands::review::{get_due_words, get_due_words_count, review_vocab_word};
+use commands::review::{get_due_words, get_due_words_count, get_learning_stats, get_review_progress, review_vocab_word};
 use commands::settings::{get_all_settings, get_setting, set_setting};
 use dictionary::{dict_lookup_chinese, dict_lookup_english, DictDbState};
 
@@ -81,6 +81,30 @@ pub fn run() {
                     Err(e) => {
                         eprintln!("[CET4] 预装四级词汇本失败（不阻断启动）: {}", e);
                     }
+                }
+            }
+            // ---- Database integrity check (run before `app.manage` moves db_state) ----
+            {
+                let conn = db_state.db.get_mut().map_err(|e| e.to_string())?;
+                let integrity: Result<String, _> =
+                    conn.query_row("PRAGMA integrity_check", [], |row| row.get(0));
+                match integrity {
+                    Ok(ref s) if s == "ok" => {}
+                    Ok(s) => eprintln!("[integrity] 数据库完整性异常: {}", s),
+                    Err(e) => eprintln!("[integrity] 完整性检查出错: {}", e),
+                }
+                let fk_count: i64 = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM (PRAGMA foreign_key_check)",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or(0);
+                if fk_count > 0 {
+                    eprintln!(
+                        "[integrity] 外键检查: {} 行违反（PRAGMA foreign_key_check）",
+                        fk_count
+                    );
                 }
             }
             app.manage(db_state);
@@ -134,6 +158,8 @@ pub fn run() {
             export_vocab_words_apkg,
             get_due_words,
             get_due_words_count,
+            get_review_progress,
+            get_learning_stats,
             review_vocab_word,
             import_vocab_words_csv,
             create_pdf_template,

@@ -16,6 +16,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const pdfIntensiveSteps = ref<StepNum[]>([1, 2, 3])
   const pdfBackground = ref<PdfBackground>('grid')
   const autoBackup = ref<AutoBackup>('weekly')
+  const reviewDailyGoal = ref<number>(20)
   const speechAccent = ref<SpeechAccent>('us')
   const loaded = ref(false)
 
@@ -57,6 +58,11 @@ export const useSettingsStore = defineStore('settings', () => {
               autoBackup.value = s.value
             }
             break
+          case 'review_daily_goal': {
+            const n = Number(s.value)
+            if (Number.isFinite(n) && n > 0) reviewDailyGoal.value = Math.floor(n)
+            break
+          }
           case 'speech_accent':
             if (s.value === 'uk' || s.value === 'us') {
               speechAccent.value = s.value
@@ -140,6 +146,16 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
+  async function setReviewDailyGoal(n: number) {
+    const v = Math.max(1, Math.floor(n))
+    reviewDailyGoal.value = v
+    try {
+      await invoke('set_setting', { key: 'review_daily_goal', value: String(v) })
+    } catch (e) {
+      console.error('[settingsStore] setReviewDailyGoal failed:', e)
+    }
+  }
+
   async function setSpeechAccent(accent: SpeechAccent) {
     speechAccent.value = accent
     try {
@@ -156,6 +172,7 @@ export const useSettingsStore = defineStore('settings', () => {
     pdfIntensiveSteps,
     pdfBackground,
     autoBackup,
+    reviewDailyGoal,
     speechAccent,
     loaded,
     load,
@@ -165,6 +182,7 @@ export const useSettingsStore = defineStore('settings', () => {
     setPdfIntensiveSteps,
     setPdfBackground,
     setAutoBackup,
+    setReviewDailyGoal,
     setSpeechAccent,
   }
 })

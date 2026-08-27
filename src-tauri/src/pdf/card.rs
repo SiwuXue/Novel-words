@@ -18,7 +18,7 @@ use super::{
 };
 use crate::models::novel::Chapter;
 use crate::models::vocab_word::VocabWord;
-use printpdf::{Color, Rgb};
+use printpdf::{Color, Line, LinePoint, Mm, Op, PaintMode, Point, Polygon, PolygonRing, Rgb, WindingOrder};
 
 /// Vertical gap (mm) between adjacent word cards.
 const CARD_GAP: f32 = 2.0;
@@ -129,35 +129,67 @@ fn grid_color() -> Color {
 }
 
 /// Draw a subtle grid across the whole page (notebook feel).
+/// Optimization: concatenate all line segments into ONE `DrawLine` op so a
+/// full-page grid only adds 3 ops (color + thickness + line) instead of
+/// ~2 ops per line. This cuts PDF memory and serialize time significantly
+/// for long novels (hundreds of pages).
 fn draw_grid(ctx: &mut PdfContext) {
     let spacing = 5.0; // mm
+    let paper_w = ctx.paper_width;
+    let paper_h = ctx.paper_height;
     let color = grid_color();
+    let mut pts: Vec<LinePoint> = Vec::new();
     let mut x = 0.0f32;
-    while x <= ctx.paper_width + 0.01 {
-        ctx.draw_vline(x, 0.0, ctx.paper_height, color.clone(), 0.3);
+    while x <= paper_w + 0.01 {
+        pts.push(LinePoint { p: Point::new(Mm(x), Mm(0.0)), bezier: false });
+        pts.push(LinePoint { p: Point::new(Mm(x), Mm(paper_h)), bezier: false });
         x += spacing;
     }
     let mut y = 0.0f32;
-    while y <= ctx.paper_height + 0.01 {
-        ctx.draw_hline(0.0, ctx.paper_width, y, color.clone(), 0.3);
+    while y <= paper_h + 0.01 {
+        pts.push(LinePoint { p: Point::new(Mm(0.0), Mm(y)), bezier: false });
+        pts.push(LinePoint { p: Point::new(Mm(paper_w), Mm(y)), bezier: false });
         y += spacing;
     }
+    ctx.current_ops.push(Op::SetOutlineColor { col: color });
+    ctx.current_ops.push(Op::SetOutlineThickness { pt: printpdf::Pt(0.3) });
+    ctx.current_ops.push(Op::DrawLine { line: Line { points: pts, is_closed: false } });
 }
 
 /// Draw a dot-grid (点阵) across the whole page: small dots at intersections.
+/// Optimization: emit all dots as ONE `DrawPolygon` op with many sub-rings
+/// instead of one op per dot. Cuts background ops from ~3·N to 1.
 fn draw_dots(ctx: &mut PdfContext) {
     let spacing = 7.5; // mm
     let dot = 0.8; // mm
+    let paper_w = ctx.paper_width;
+    let paper_h = ctx.paper_height;
     let color = grid_color();
+    let mut rings: Vec<PolygonRing> = Vec::new();
     let mut x = 0.0f32;
-    while x <= ctx.paper_width {
+    while x <= paper_w {
         let mut y = 0.0f32;
-        while y <= ctx.paper_height {
-            ctx.fill_rect(x - dot / 2.0, y + dot / 2.0, dot, dot, color.clone());
+        while y <= paper_h {
+            let h = dot / 2.0;
+            rings.push(PolygonRing {
+                points: vec![
+                    LinePoint { p: Point::new(Mm(x - h), Mm(y + h)), bezier: false },
+                    LinePoint { p: Point::new(Mm(x + h), Mm(y + h)), bezier: false },
+                    LinePoint { p: Point::new(Mm(x + h), Mm(y - h)), bezier: false },
+                    LinePoint { p: Point::new(Mm(x - h), Mm(y - h)), bezier: false },
+                ],
+            });
             y += spacing;
         }
         x += spacing;
     }
+    let polygon = Polygon {
+        rings,
+        mode: PaintMode::Fill,
+        winding_order: WindingOrder::NonZero,
+    };
+    ctx.current_ops.push(Op::SetFillColor { col: color });
+    ctx.current_ops.push(Op::DrawPolygon { polygon });
 }
 
 /// Draw the page background for the chosen style: "grid", "dots" or "none".
@@ -264,6 +296,9 @@ pub fn render(
     }
     draw_global_header(ctx, &mut top, total, unknown, familiar, mastered);
 
+    // Collected section titles + their starting page index for the visual TOC.
+    let mut toc_entries: Vec<(String, usize)> = Vec::new();
+
     let mut is_first_section = true;
     for (_ci, chapter) in chapters.iter().enumerate() {
         let paras = split_paragraphs(&chapter.content);
@@ -301,6 +336,9 @@ pub fn render(
                 sec_title.clone()
             };
 
+            // Record this section's starting page index for the visual TOC.
+            toc_entries.push((header_title.clone(), ctx.doc.pages.len()));
+
             draw_chapter_header(ctx, &mut top, &header_title, section_words.len());
             if !header_title.is_empty() {
                 ctx.record_bookmark(&header_title);
@@ -310,6 +348,13 @@ pub fn render(
             let display_paras: Vec<String> = sec_body.iter().flat_map(|p| sentence_groups(p)).collect();
             render_dual_columns(ctx, &display_paras, &section_words, vocabs, top, background);
         }
+    }
+
+    // ---- Visual table-of-contents page (shown only when there are sections) ----
+    // Skip for novels that have no detectable chapter markers (single section
+    // fallback) — a single-entry TOC is pointless.
+    if toc_entries.len() >= 2 {
+        draw_toc_page(ctx, background, &toc_entries);
     }
 }
 
@@ -367,6 +412,62 @@ fn draw_global_header(
     let rule_y = *y + sub_size * 0.3528 * 0.8;
     ctx.draw_hline(left, right, rule_y, table_border(), 0.6);
     *y -= sub_size * 0.3528 * 1.0;
+}
+
+/// Draw a visual table-of-contents page. Title + dotted leader + page number
+/// for each section. Layout mirrors a traditional Chinese book TOC.
+fn draw_toc_page(ctx: &mut PdfContext, background: &str, entries: &[(String, usize)]) {
+    // Start on a fresh page with the same background as the rest.
+    new_card_page(ctx, background);
+
+    let left = ctx.margins.left;
+    let right = ctx.margins.left + ctx.usable_width;
+    let big = ctx.font_size + 6.0;
+    let body = ctx.font_size;
+    let small = ctx.small_font_size;
+
+    let mut y = ctx.paper_height - ctx.margins.top - 20.0;
+
+    // Title (centered).
+    let title = "目录";
+    let tw = ctx.measure_text_width(title, big);
+    ctx.draw_text_colored(title, left + ctx.usable_width / 2.0 - tw / 2.0, y, big, accent());
+    y -= big * 0.3528 * 2.6;
+
+    // Divider rule.
+    ctx.draw_hline(left, right, y, table_border(), 0.6);
+    y -= small * 0.3528 * 1.6;
+
+    // Entries.
+    for (title, page_idx) in entries {
+        let page_str = format!("{}", page_idx + 1);
+        let page_w = ctx.measure_text_width(&page_str, body);
+
+        // If there's not enough room, push the next batch to a new page.
+        if y - body * 0.3528 * 1.4 < ctx.margins.bottom + 20.0 {
+            new_card_page(ctx, background);
+            y = ctx.paper_height - ctx.margins.top - 20.0;
+            ctx.draw_hline(left, right, y, table_border(), 0.6);
+            y -= small * 0.3528 * 1.6;
+        }
+
+        // Layout: [title ............ page]
+        let title_x = left + 4.0;
+        ctx.draw_text_colored(title, title_x, y, body, text_black());
+        // Dotted leader — cheap: draw tiny dots between the title end and the page number.
+        let leader_start = title_x + ctx.measure_text_width(title, body) + 4.0;
+        let leader_end = right - page_w - 4.0;
+        let leader_y = y + small * 0.3528 * 0.15;
+        let dot = 0.5;
+        let mut lx = leader_start;
+        while lx + dot < leader_end {
+            ctx.fill_rect(lx, leader_y, dot, dot, text_light_gray());
+            lx += dot * 2.4;
+        }
+        ctx.draw_text_colored(&page_str, right - page_w, y, body, text_black());
+
+        y -= body * 0.3528 * 1.6;
+    }
 }
 
 /// Per-section heading block: section title / word count / rule.

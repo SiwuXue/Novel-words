@@ -27,6 +27,10 @@
           <el-icon><Setting /></el-icon>
           <span>设置</span>
         </el-menu-item>
+        <el-menu-item index="/stats">
+          <el-icon><DataLine /></el-icon>
+          <span>学习统计</span>
+        </el-menu-item>
       </el-menu>
 
       <div class="sidebar-footer">
@@ -49,7 +53,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { invoke } from '@tauri-apps/api/core'
-import { HomeFilled, Document, Collection, Setting, InfoFilled, Fold, Expand } from '@element-plus/icons-vue'
+import { HomeFilled, Document, Collection, Setting, InfoFilled, Fold, Expand, DataLine } from '@element-plus/icons-vue'
 import AboutDialog from '@/components/common/AboutDialog.vue'
 
 const route = useRoute()
@@ -57,6 +61,7 @@ const activeRoute = computed(() => {
   const path = route.path
   if (path.startsWith('/novels')) return '/novels'
   if (path.startsWith('/vocabulary')) return '/vocabulary'
+  if (path.startsWith('/stats')) return '/stats'
   return path
 })
 
