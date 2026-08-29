@@ -26,17 +26,102 @@ pub fn full_text(chapters: &[(String, String)]) -> String {
 // EPUB
 // ---------------------------------------------------------------------------
 
-pub fn parse_epub(path: &str) -> Result<EbookResult, String> {
-    let mut doc = epub::doc::EpubDoc::new(path).map_err(|e| format!("无法打开 EPUB: {}", e))?;
-    let title = doc.get_title().unwrap_or_default().trim().to_string();
+/// One manifest item from the OPF.
+struct ManItem {
+    path: String,
+    mime: String,
+    properties: Option<String>,
+}
 
-    let spine = doc.spine.clone();
-    let mut chapters: Vec<(String, String)> = Vec::new();
-    for item in &spine {
-        let (html, _mime) = match doc.get_resource_str(&item.idref) {
-            Some(v) => v,
+/// Parse an EPUB by reading the container → OPF → manifest/spine directly with
+/// zip + roxmltree (no external epub crate behavior). Navigation docs (nav /
+/// NCX) and cover images are skipped so the reading order contains only body
+/// content. Falls back to scanning every XHTML resource if the spine is broken.
+pub fn parse_epub(path: &str) -> Result<EbookResult, String> {
+    let file = std::fs::File::open(path).map_err(|e| format!("无法打开 EPUB: {}", e))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|e| format!("无法解压 EPUB: {}", e))?;
+
+    // 1. container.xml → OPF path
+    let container_bytes = zip_read(&mut archive, "META-INF/container.xml")
+        .ok_or_else(|| "EPUB 缺少 META-INF/container.xml".to_string())?;
+    let container_text = String::from_utf8_lossy(&container_bytes);
+    let container = roxmltree::Document::parse(&container_text)
+        .map_err(|e| format!("container.xml 解析失败: {}", e))?;
+    let opf_path = container
+        .descendants()
+        .find(|n| n.has_tag_name("rootfile"))
+        .and_then(|n| n.attribute("full-path"))
+        .map(|s| s.to_string())
+        .ok_or_else(|| "container.xml 缺少 rootfile".to_string())?;
+
+    // 2. OPF → title, manifest, spine order
+    let opf_bytes = zip_read(&mut archive, &opf_path)
+        .ok_or_else(|| format!("读取 OPF 失败: {}", opf_path))?;
+    let opf_text = String::from_utf8_lossy(&opf_bytes);
+    let opf = roxmltree::Document::parse(&opf_text)
+        .map_err(|e| format!("OPF 解析失败: {}", e))?;
+    let root = opf.root_element();
+
+    let title = root
+        .descendants()
+        .filter(|n| n.has_tag_name("title"))
+        .find_map(|n| n.text().map(|t| t.trim().to_string()))
+        .unwrap_or_default();
+
+    let mut manifest: std::collections::HashMap<String, ManItem> = std::collections::HashMap::new();
+    for item in root.descendants().filter(|n| n.has_tag_name("item")) {
+        let id = match item.attribute("id") {
+            Some(v) => v.to_string(),
             None => continue,
         };
+        let href = match item.attribute("href") {
+            Some(v) => v.to_string(),
+            None => continue,
+        };
+        let mime = item.attribute("media-type").unwrap_or("").to_string();
+        let properties = item.attribute("properties").map(|p| p.to_string());
+        manifest.insert(
+            id,
+            ManItem {
+                path: resolve_opf_path(&opf_path, &href),
+                mime,
+                properties,
+            },
+        );
+    }
+
+    let mut order: Vec<String> = Vec::new();
+    for itemref in root.descendants().filter(|n| n.has_tag_name("itemref")) {
+        if let Some(idref) = itemref.attribute("idref") {
+            order.push(idref.to_string());
+        }
+    }
+
+    eprintln!(
+        "[epub] title={:?} manifest={} spine_items={} ({})",
+        title,
+        manifest.len(),
+        order.len(),
+        path
+    );
+
+    let mut chapters: Vec<(String, String)> = Vec::new();
+
+    // 3. Walk the spine in order, skipping nav/NCX/cover.
+    for idref in &order {
+        let item = match manifest.get(idref) {
+            Some(i) => i,
+            None => continue,
+        };
+        if is_skip_manifest(item) {
+            continue;
+        }
+        let bytes = match zip_read(&mut archive, &item.path) {
+            Some(b) => b,
+            None => continue,
+        };
+        let html = String::from_utf8_lossy(&bytes);
         let content = html_to_text(&html);
         if content.is_empty() {
             continue;
@@ -46,10 +131,115 @@ pub fn parse_epub(path: &str) -> Result<EbookResult, String> {
         chapters.push((ch_title, content));
     }
 
+    // 4. Fallback: broken/empty spine → scan all XHTML resources (sorted).
+    if chapters.is_empty() {
+        eprintln!("[epub] spine 未产出正文，回退到扫描全部 XHTML 资源");
+        let mut items: Vec<&ManItem> = manifest
+            .values()
+            .filter(|i| {
+                !is_skip_manifest(i)
+                    && (i.mime.contains("html") || i.mime.contains("xhtml"))
+            })
+            .collect();
+        items.sort_by(|a, b| a.path.cmp(&b.path));
+        for item in items {
+            let bytes = match zip_read(&mut archive, &item.path) {
+                Some(b) => b,
+                None => continue,
+            };
+            let html = String::from_utf8_lossy(&bytes);
+            let content = html_to_text(&html);
+            if content.is_empty() {
+                continue;
+            }
+            let ch_title = extract_heading(&html)
+                .unwrap_or_else(|| format!("第 {} 章", chapters.len() + 1));
+            chapters.push((ch_title, content));
+        }
+    }
+
+    eprintln!(
+        "[epub] 产出 {} 章: {:?}",
+        chapters.len(),
+        chapters.iter().take(5).map(|(t, _)| t.clone()).collect::<Vec<_>>()
+    );
+
     if chapters.is_empty() {
         return Err("EPUB 中没有可读取的正文".into());
     }
     Ok(EbookResult { title, chapters })
+}
+
+/// Read a zip entry to bytes.
+fn zip_read(archive: &mut zip::ZipArchive<std::fs::File>, path: &str) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let mut entry = archive.by_name(path).ok()?;
+    let mut buf = Vec::new();
+    entry.read_to_end(&mut buf).ok()?;
+    Some(buf)
+}
+
+/// Resolve a manifest `href` against the OPF directory, normalizing "../".
+fn resolve_opf_path(opf_path: &str, href: &str) -> String {
+    let mut out: Vec<String> = opf_path
+        .split('/')
+        .take_while(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+    out.pop(); // drop the OPF file name, keep its directory
+    for seg in href.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                out.pop();
+            }
+            s => out.push(s.to_string()),
+        }
+    }
+    if out.is_empty() {
+        href.to_string()
+    } else {
+        out.join("/")
+    }
+}
+
+/// Should this manifest item be excluded from the reading order?
+fn is_skip_manifest(item: &ManItem) -> bool {
+    if let Some(props) = &item.properties {
+        if props
+            .split_whitespace()
+            .any(|p| p == "nav" || p == "cover-image")
+        {
+            return true;
+        }
+    }
+    let mime = item.mime.to_lowercase();
+    let path = item.path.to_lowercase();
+    mime.contains("ncx") || path.ends_with(".ncx")
+}
+
+/// Common front-matter / non-story chapter titles that appear at the start of
+/// many EPUBs (preface, TOC, copyright, etc.). Matched case-insensitively
+/// against the trimmed heading.
+fn is_front_matter_title(title: &str) -> bool {
+    const ZH: &[&str] = &[
+        "简介", "内容简介", "作品简介", "作品相关", "内容简介", "前言", "序", "序言",
+        "自序", "楔子", "目录", "目次", "后记", "尾声", "致谢", "版权", "版权声明",
+        "制作信息", "作者简介",
+    ];
+    const EN: &[&str] = &[
+        "introduction", "contents", "table of contents", "toc", "preface",
+        "foreword", "prologue", "epigraph", "afterword", "acknowledgments",
+        "dedication", "copyright", "credits", "about the author", "also by",
+    ];
+    let norm: String = title
+        .trim()
+        .trim_end_matches(|c: char| matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | '。' | '，' | '：' | '；' | '！' | '？' | '\n' | '\r'))
+        .to_lowercase();
+    if norm.is_empty() {
+        return false;
+    }
+    ZH.iter().any(|k| *k == norm) || EN.iter().any(|k| *k == norm)
 }
 
 /// Convert a single XHTML chapter to plain text with paragraph breaks.
