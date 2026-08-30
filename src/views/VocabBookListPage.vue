@@ -29,6 +29,9 @@
       <el-table-column prop="name" :label="t('vocabList.name')" min-width="160">
         <template #default="{ row }">
           <el-link type="primary" @click="openDetail(row.id)">{{ row.name }}</el-link>
+          <el-tag v-if="row.isPreset" size="small" type="warning" style="margin-left:6px;">
+            {{ t('preset.preset') }}
+          </el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="description" :label="t('vocabList.description')" min-width="200">
@@ -43,10 +46,10 @@
       </el-table-column>
       <el-table-column :label="t('novelList.actions')" width="200" fixed="right">
         <template #default="{ row }">
-          <el-button size="small" link type="primary" @click="editBook(row)">{{ t('vocabList.edit') }}</el-button>
+          <el-button size="small" link type="primary" :disabled="row.isPreset" @click="editBook(row)">{{ t('vocabList.edit') }}</el-button>
           <el-button size="small" link @click="exportJson(row)">{{ t('vocabList.export') }}</el-button>
           <el-button size="small" link @click="importJson(row)">{{ t('vocabList.import') }}</el-button>
-          <el-button size="small" link type="danger" @click="confirmDelete(row)">{{ t('vocabList.delete') }}</el-button>
+          <el-button size="small" link type="danger" :disabled="row.isPreset" @click="confirmDelete(row)">{{ t('vocabList.delete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>

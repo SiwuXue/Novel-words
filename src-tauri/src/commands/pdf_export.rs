@@ -197,7 +197,7 @@ pub async fn export_pdf(
                 let found: Vec<&VocabWord> = if is_en {
                     words_found_in_text_en(&ch.content, &vocabs)
                 } else {
-                    words_found_in_text(&ch.content, &vocabs)
+                    words_found_in_text(&ch.content, &vocabs, &novel.language)
                 };
                 for w in found {
                     all_found.insert(w.id);

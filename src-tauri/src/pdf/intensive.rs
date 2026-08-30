@@ -234,7 +234,7 @@ pub fn render(
             let found: Vec<&VocabWord> = if is_en {
                 words_found_in_text_en(&ch.content, vocabs)
             } else {
-                words_found_in_text(&ch.content, vocabs)
+                words_found_in_text(&ch.content, vocabs, language)
             };
             for w in found {
                 let key = w.word.to_lowercase();
@@ -276,7 +276,7 @@ pub fn render(
         let chapter_words: Vec<&VocabWord> = if is_en {
             words_found_in_text_en(&chapter.content, vocabs)
         } else {
-            words_found_in_text(&chapter.content, vocabs)
+            words_found_in_text(&chapter.content, vocabs, language)
         };
         let chapter_word_count = chapter_words.len();
 
@@ -294,7 +294,7 @@ pub fn render(
                 if is_en {
                     render_annotated_paragraph_step1_en(ctx, &para, vocabs);
                 } else {
-                    render_annotated_paragraph_step1(ctx, &para, vocabs);
+                    render_annotated_paragraph_step1(ctx, &para, vocabs, "zh");
                 }
                 ctx.current_y -= ctx.line_height * 0.4;
             }
@@ -313,7 +313,7 @@ pub fn render(
                 if is_en {
                     render_annotated_paragraph_step2_en(ctx, &para, vocabs);
                 } else {
-                    render_annotated_paragraph_step2(ctx, &para, vocabs);
+                    render_annotated_paragraph_step2(ctx, &para, vocabs, "zh");
                 }
                 ctx.current_y -= ctx.line_height * 0.4;
             }
@@ -737,8 +737,13 @@ fn draw_segment(ctx: &mut PdfContext, x: &mut f32, max_x: f32, seg: &str, color:
 }
 
 /// Step 1 paragraph: matched Chinese → English (red) + （definition） purple.
-fn render_annotated_paragraph_step1(ctx: &mut PdfContext, line: &str, vocabs: &[VocabWord]) {
-    let matches = find_matches_in_line(line, vocabs);
+fn render_annotated_paragraph_step1(
+    ctx: &mut PdfContext,
+    line: &str,
+    vocabs: &[VocabWord],
+    language: &str,
+) {
+    let matches = find_matches_in_line(line, vocabs, language);
     if matches.is_empty() {
         ctx.draw_text_wrapped(line, ctx.margins.left, ctx.usable_width, ctx.font_size);
         return;
@@ -780,8 +785,13 @@ fn render_annotated_paragraph_step1(ctx: &mut PdfContext, line: &str, vocabs: &[
 }
 
 /// Step 2 paragraph: matched Chinese → English (red) + （          ） blank.
-fn render_annotated_paragraph_step2(ctx: &mut PdfContext, line: &str, vocabs: &[VocabWord]) {
-    let matches = find_matches_in_line(line, vocabs);
+fn render_annotated_paragraph_step2(
+    ctx: &mut PdfContext,
+    line: &str,
+    vocabs: &[VocabWord],
+    language: &str,
+) {
+    let matches = find_matches_in_line(line, vocabs, language);
     if matches.is_empty() {
         ctx.draw_text_wrapped(line, ctx.margins.left, ctx.usable_width, ctx.font_size);
         return;

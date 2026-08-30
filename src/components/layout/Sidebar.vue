@@ -23,6 +23,10 @@
           <span>{{ t('nav.vocabulary') }}</span>
           <span class="due-badge" v-if="dueCount > 0" :title="`${t('home.statDue')} ${dueCount}`">{{ dueCount > 99 ? '99+' : dueCount }}</span>
         </el-menu-item>
+        <el-menu-item index="/presets">
+          <el-icon><Files /></el-icon>
+          <span>{{ t('nav.presets') }}</span>
+        </el-menu-item>
         <el-menu-item index="/settings">
           <el-icon><Setting /></el-icon>
           <span>{{ t('nav.settings') }}</span>
@@ -53,7 +57,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { invoke } from '@tauri-apps/api/core'
-import { HomeFilled, Document, Collection, Setting, InfoFilled, Fold, Expand, DataLine } from '@element-plus/icons-vue'
+import { HomeFilled, Document, Collection, Setting, InfoFilled, Fold, Expand, DataLine, Files } from '@element-plus/icons-vue'
 import AboutDialog from '@/components/common/AboutDialog.vue'
 import { t } from '@/i18n'
 
@@ -62,6 +66,7 @@ const activeRoute = computed(() => {
   const path = route.path
   if (path.startsWith('/novels')) return '/novels'
   if (path.startsWith('/vocabulary')) return '/vocabulary'
+  if (path.startsWith('/presets')) return '/presets'
   if (path.startsWith('/stats')) return '/stats'
   return path
 })

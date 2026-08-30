@@ -68,10 +68,19 @@ pub struct DefMatch<'a> {
 
 /// Find all non-overlapping matches of vocab words in `line`, matched by their
 /// Chinese definitions. Longer terms win over shorter overlapping ones.
+///
+/// NOTE: For Chinese novels this whole approach is unreliable — substring
+/// matching of definition terms produces nonsense glosses (e.g. 声音→advocate).
+/// Callers must pass `language` and we return empty for `zh`, so Chinese novels
+/// get no auto-glossing; users learn via the preset "click-to-study" flow.
 pub fn find_matches_in_line<'a>(
     line: &str,
     words: &'a [VocabWord],
+    language: &str,
 ) -> Vec<DefMatch<'a>> {
+    if language == "zh" {
+        return Vec::new();
+    }
     let mut raw: Vec<DefMatch> = Vec::new();
     for w in words {
         for term in extract_cn_terms(&w.definition) {
@@ -107,7 +116,15 @@ pub fn find_matches_in_line<'a>(
 
 /// Return the subset of `words` whose Chinese meaning appears anywhere in `text`,
 /// deduplicated by the English word (case-insensitive), preserving input order.
-pub fn words_found_in_text<'a>(text: &str, words: &'a [VocabWord]) -> Vec<&'a VocabWord> {
+/// Returns empty for Chinese novels (see note on `find_matches_in_line`).
+pub fn words_found_in_text<'a>(
+    text: &str,
+    words: &'a [VocabWord],
+    language: &str,
+) -> Vec<&'a VocabWord> {
+    if language == "zh" {
+        return Vec::new();
+    }
     let mut found: Vec<&VocabWord> = Vec::new();
     for w in words {
         let hit = extract_cn_terms(&w.definition)

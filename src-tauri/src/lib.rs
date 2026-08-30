@@ -33,6 +33,7 @@ use commands::export::{
     export_vocab_book_json, export_vocab_words_apkg, export_vocab_words_xlsx, import_vocab_book_json,
 };
 use commands::pdf_export::export_pdf;
+use commands::preset_vocab::{commit_preset_clone, list_preset_vocab_books, preview_preset_clone};
 use commands::review::{get_due_words, get_due_words_count, get_learning_stats, get_review_progress, review_vocab_word};
 use commands::settings::{get_all_settings, get_setting, set_setting};
 use dictionary::{dict_lookup_chinese, dict_lookup_english, DictDbState};
@@ -162,6 +163,9 @@ pub fn run() {
             export_vocab_words_apkg,
             export_vocab_book_json,
             import_vocab_book_json,
+            list_preset_vocab_books,
+            preview_preset_clone,
+            commit_preset_clone,
             get_due_words,
             get_due_words_count,
             get_review_progress,

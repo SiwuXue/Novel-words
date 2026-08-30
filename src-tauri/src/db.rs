@@ -112,6 +112,30 @@ pub fn init_db(app_data_dir: &PathBuf) -> Result<DbState, String> {
         }
     }
 
+    // Migration: preset concept on vocab_book (read-only bundled lists like CET4)
+    // plus a cloned_from_preset_key back-reference on the user clone.
+    {
+        let has_preset: bool = conn
+            .prepare("SELECT COUNT(*) > 0 FROM pragma_table_info('vocab_book') WHERE name = 'is_preset'")
+            .and_then(|mut s| s.query_row([], |r| r.get(0)))
+            .unwrap_or(false);
+        if !has_preset {
+            conn.execute_batch(
+                "ALTER TABLE vocab_book ADD COLUMN is_preset INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE vocab_book ADD COLUMN preset_key TEXT NOT NULL DEFAULT '';
+                 ALTER TABLE vocab_book ADD COLUMN cloned_from_preset_key TEXT NOT NULL DEFAULT '';",
+            )
+            .map_err(|e| format!("迁移 vocab_book preset 列失败: {}", e))?;
+            // Mark the existing CET4 seeded book as a preset so it becomes
+            // read-only and gets the "study / clone" flow.
+            conn.execute_batch(
+                "UPDATE vocab_book SET is_preset = 1, preset_key = 'cet4'
+                 WHERE name = '四级真题核心词' AND is_preset = 0;",
+            )
+            .map_err(|e| format!("迁移 CET4 为 preset 失败: {}", e))?;
+        }
+    }
+
     // Seed default settings (inserted here so future-added keys land too)
     conn.execute_batch(
         "INSERT OR IGNORE INTO app_settings (key, value) VALUES ('speech_accent', 'us');",
@@ -141,6 +165,9 @@ CREATE TABLE IF NOT EXISTS vocab_book (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT    NOT NULL,
     description TEXT    NOT NULL DEFAULT '',
+    is_preset          INTEGER NOT NULL DEFAULT 0,
+    preset_key         TEXT    NOT NULL DEFAULT '',
+    cloned_from_preset_key TEXT NOT NULL DEFAULT '',
     created_at  TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
     updated_at  TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
 );

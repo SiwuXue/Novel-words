@@ -18,32 +18,9 @@ import { looksLikeHtml } from './editorHtml'
 /* ------------------------------------------------------------------ *
  * Matching: locate English words in Chinese text via their (chosen) *
  * Chinese definition — same approach as the Rust pdf::matcher.      *
+ * NOTE: for Chinese novels this matching is unreliable and has been  *
+ * disabled (returns no matches); see findMatchesInLine below.       *
  * ------------------------------------------------------------------ */
-
-const CJK_RANGE = /[\u{4E00}-\u{9FFF}\u{3400}-\u{4DBF}\u{F900}-\u{FAFF}]/u
-
-function isCjk(ch: string): boolean {
-  return CJK_RANGE.test(ch)
-}
-
-function extractCnTerms(definition: string): string[] {
-  if (!definition) return []
-  const segments = definition.split(/[;；,，、/|~～()（）【】\[\] \t\n.""'"""'']+/)
-  const terms: string[] = []
-  for (const seg of segments) {
-    let run = ''
-    for (const ch of seg) {
-      if (isCjk(ch)) {
-        run += ch
-      } else if (run) {
-        if (run.length >= 2 && !terms.includes(run)) terms.push(run)
-        run = ''
-      }
-    }
-    if (run.length >= 2 && !terms.includes(run)) terms.push(run)
-  }
-  return terms
-}
 
 interface Match {
   start: number
@@ -51,41 +28,15 @@ interface Match {
   word: VocabWord
 }
 
-function findMatchesInLine(line: string, words: VocabWord[]): Match[] {
-  const raw: Match[] = []
-  for (const w of words) {
-    for (const term of extractCnTerms(w.definition)) {
-      let from = 0
-      while (true) {
-        const pos = line.indexOf(term, from)
-        if (pos < 0) break
-        raw.push({ start: pos, end: pos + term.length, word: w })
-        from = pos + term.length
-        if (from <= pos) break
-      }
-    }
-  }
-  raw.sort((a, b) => a.start - b.start || b.end - b.start - (a.end - a.start))
-  const filtered: Match[] = []
-  for (const m of raw) {
-    if (!filtered.some((f) => m.start < f.end && f.start < m.end)) {
-      filtered.push(m)
-    }
-  }
-  return filtered
+function findMatchesInLine(_line: string, _words: VocabWord[]): Match[] {
+  // Chinese novels: the definition-substring matching produces nonsense glosses
+  // (e.g. 声音→advocate). Short-circuit so Chinese novels are not auto-glossed.
+  return []
 }
 
-function wordsFoundInText(text: string, words: VocabWord[]): VocabWord[] {
-  const found: VocabWord[] = []
-  for (const w of words) {
-    if (
-      extractCnTerms(w.definition).some((t) => text.includes(t)) &&
-      !found.some((f) => f.word.toLowerCase() === w.word.toLowerCase())
-    ) {
-      found.push(w)
-    }
-  }
-  return found
+function wordsFoundInText(_text: string, _words: VocabWord[]): VocabWord[] {
+  // See note on findMatchesInLine — Chinese novels return no auto-matches.
+  return []
 }
 
 /* ------------------------------------------------------------------ *

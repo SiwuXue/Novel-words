@@ -34,6 +34,12 @@ const router = createRouter({
       meta: { title: '词汇本' },
     },
     {
+      path: '/presets',
+      name: 'PresetVocabBooks',
+      component: () => import('@/views/PresetVocabBooksPage.vue'),
+      meta: { title: '预设词表' },
+    },
+    {
       path: '/vocabulary/:id',
       name: 'VocabBookDetail',
       component: () => import('@/views/VocabBookDetailPage.vue'),

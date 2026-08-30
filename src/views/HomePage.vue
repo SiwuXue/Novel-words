@@ -53,6 +53,9 @@
         <el-button size="large" @click="$router.push('/vocabulary')">
           <el-icon><Collection /></el-icon> {{ t('home.vocabulary') }}
         </el-button>
+        <el-button size="large" @click="$router.push('/presets')">
+          <el-icon><Files /></el-icon> {{ t('nav.presets') }}
+        </el-button>
         <el-button size="large" @click="$router.push('/settings')">
           <el-icon><Setting /></el-icon> {{ t('home.settings') }}
         </el-button>
@@ -64,7 +67,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Document, Collection, Notebook, AlarmClock, Plus, Setting, ArrowRight } from '@element-plus/icons-vue'
+import { Document, Collection, Notebook, AlarmClock, Plus, Setting, ArrowRight, Files } from '@element-plus/icons-vue'
 import { invoke } from '@tauri-apps/api/core'
 import { t } from '@/i18n'
 import type { VocabBook } from '@/types/vocabBook'

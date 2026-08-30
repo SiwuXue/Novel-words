@@ -117,7 +117,7 @@ pub fn get_all_vocab_books(state: State<DbState>) -> Result<Vec<VocabBook>, Stri
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let mut stmt = db
         .prepare(
-            "SELECT id, name, description, created_at, updated_at FROM vocab_book ORDER BY updated_at DESC",
+            "SELECT id, name, description, is_preset, preset_key, cloned_from_preset_key, created_at, updated_at FROM vocab_book ORDER BY updated_at DESC",
         )
         .map_err(|e| e.to_string())?;
 
@@ -161,7 +161,7 @@ pub fn delete_vocab_book(state: State<DbState>, id: i64) -> Result<(), String> {
 
 fn get_vocab_book_by_id(db: &rusqlite::Connection, id: i64) -> Result<VocabBook, String> {
     db.query_row(
-        "SELECT id, name, description, created_at, updated_at FROM vocab_book WHERE id=?1",
+        "SELECT id, name, description, is_preset, preset_key, cloned_from_preset_key, created_at, updated_at FROM vocab_book WHERE id=?1",
         rusqlite::params![id],
         row_to_vocab_book,
     )
@@ -173,8 +173,11 @@ fn row_to_vocab_book(row: &rusqlite::Row) -> rusqlite::Result<VocabBook> {
         id: row.get(0)?,
         name: row.get(1)?,
         description: row.get(2)?,
-        created_at: row.get(3)?,
-        updated_at: row.get(4)?,
+        is_preset: row.get::<_, i64>(3)? != 0,
+        preset_key: row.get(4)?,
+        cloned_from_preset_key: row.get(5)?,
+        created_at: row.get(6)?,
+        updated_at: row.get(7)?,
     })
 }
 
