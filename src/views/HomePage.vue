@@ -92,7 +92,9 @@ onMounted(async () => {
   } catch { /* ignore */ }
 
   try {
-    const books = await invoke<VocabBook[]>('get_all_vocab_books')
+    const all = await invoke<VocabBook[]>('get_all_vocab_books')
+    // Preset books live on /presets; don't count them here.
+    const books = all.filter((b) => !b.isPreset)
     bookCount.value = books.length
 
     // Count words across all books

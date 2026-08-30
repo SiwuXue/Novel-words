@@ -83,8 +83,10 @@ const editingBook = ref<VocabBook | null>(null)
 
 const filteredBooks = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
-  if (!q) return store.books
-  return store.books.filter(
+  // Preset books (CET4 etc.) live on the /presets page; hide them here.
+  const userBooks = store.books.filter((b) => !b.isPreset)
+  if (!q) return userBooks
+  return userBooks.filter(
     (b) =>
       b.name.toLowerCase().includes(q) ||
       b.description.toLowerCase().includes(q),

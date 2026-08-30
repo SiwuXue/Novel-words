@@ -344,6 +344,13 @@ pub fn ensure_cet4_book_populated(
             tx.last_insert_rowid()
         });
 
+    // 确保 CET4 作为"预设词表"存在（幂等，每次启动都会自愈）。
+    tx.execute(
+        "UPDATE vocab_book SET is_preset = 1, preset_key = 'cet4' WHERE id = ?1",
+        rusqlite::params![book_id],
+    )
+    .map_err(|e| format!("标记 CET4 为预设失败: {}", e))?;
+
     // 逐词写入
     let mut imported: u32 = 0;
     let mut skipped: u32 = 0;

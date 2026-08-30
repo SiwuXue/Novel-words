@@ -66,13 +66,17 @@ pub fn get_due_words(state: State<DbState>, vocab_book_id: i64) -> Result<Vec<Vo
     Ok(due)
 }
 
-/// Total number of words due for review today across ALL vocab books.
-/// A card without any SRS state is considered new and therefore due.
+/// Total number of words due for review today across ALL user vocab books
+/// (preset/bundled books are excluded — they carry no personal SRS state).
 #[tauri::command]
 pub fn get_due_words_count(state: State<DbState>) -> Result<i64, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let mut stmt = db
-        .prepare("SELECT memory_tag FROM vocab_word")
+        .prepare(
+            "SELECT w.memory_tag FROM vocab_word w \
+             JOIN vocab_book b ON b.id = w.vocab_book_id \
+             WHERE b.is_preset = 0",
+        )
         .map_err(|e| e.to_string())?;
     let tags: Vec<String> = stmt
         .query_map([], |row| row.get(0))
@@ -169,10 +173,12 @@ pub fn get_review_progress(
                     Ok(rows.filter_map(|r| r.ok()).collect())
                 }
                 None => {
+                    // All user books (exclude presets — no personal SRS state).
                     let mut stmt = db
                         .prepare(
-                            "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, created_at \
-                             FROM vocab_word",
+                            "SELECT w.id, w.vocab_book_id, w.word, w.definition, w.phonetic, w.example_sentence, w.novel_id, w.proficiency, w.memory_tag, w.created_at \
+                             FROM vocab_word w JOIN vocab_book b ON b.id = w.vocab_book_id \
+                             WHERE b.is_preset = 0",
                         )
                         .map_err(|e| e.to_string())?;
                     let rows = stmt
@@ -241,10 +247,14 @@ pub fn get_learning_stats(state: State<DbState>) -> Result<LearningStats, String
     let db = state.db.lock().map_err(|e| e.to_string())?;
 
     let total_words: i64 = db
-        .query_row("SELECT COUNT(*) FROM vocab_word", [], |r| r.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM vocab_word w JOIN vocab_book b ON b.id = w.vocab_book_id WHERE b.is_preset = 0",
+            [],
+            |r| r.get(0),
+        )
         .unwrap_or(0);
     let total_books: i64 = db
-        .query_row("SELECT COUNT(*) FROM vocab_book", [], |r| r.get(0))
+        .query_row("SELECT COUNT(*) FROM vocab_book WHERE is_preset = 0", [], |r| r.get(0))
         .unwrap_or(0);
     let total_novels: i64 = db
         .query_row("SELECT COUNT(*) FROM novel", [], |r| r.get(0))
@@ -254,7 +264,8 @@ pub fn get_learning_stats(state: State<DbState>) -> Result<LearningStats, String
     for prof in ["unknown", "familiar", "mastered"] {
         let n: i64 = db
             .query_row(
-                "SELECT COUNT(*) FROM vocab_word WHERE proficiency=?1",
+                "SELECT COUNT(*) FROM vocab_word w JOIN vocab_book b ON b.id = w.vocab_book_id \
+                 WHERE b.is_preset = 0 AND w.proficiency=?1",
                 rusqlite::params![prof],
                 |r| r.get(0),
             )
@@ -267,7 +278,9 @@ pub fn get_learning_stats(state: State<DbState>) -> Result<LearningStats, String
     let seven_days_ago = today_start.saturating_sub(secs_per_day * 6); // include today = 7 days
 
     let mut stmt = db
-        .prepare("SELECT memory_tag FROM vocab_word")
+        .prepare(
+            "SELECT w.memory_tag FROM vocab_word w JOIN vocab_book b ON b.id = w.vocab_book_id WHERE b.is_preset = 0",
+        )
         .map_err(|e| e.to_string())?;
     let tags: Vec<String> = stmt
         .query_map([], |row| row.get(0))

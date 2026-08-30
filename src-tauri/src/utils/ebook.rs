@@ -128,6 +128,10 @@ pub fn parse_epub(path: &str) -> Result<EbookResult, String> {
         }
         let ch_title = extract_heading(&html)
             .unwrap_or_else(|| format!("第 {} 章", chapters.len() + 1));
+        // Skip front matter (简介/目录/前言/序…) so it doesn't become a chapter.
+        if is_front_matter_title(&ch_title) {
+            continue;
+        }
         chapters.push((ch_title, content));
     }
 
@@ -154,6 +158,9 @@ pub fn parse_epub(path: &str) -> Result<EbookResult, String> {
             }
             let ch_title = extract_heading(&html)
                 .unwrap_or_else(|| format!("第 {} 章", chapters.len() + 1));
+            if is_front_matter_title(&ch_title) {
+                continue;
+            }
             chapters.push((ch_title, content));
         }
     }

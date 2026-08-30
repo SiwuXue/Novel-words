@@ -10,7 +10,10 @@ export const useVocabBookStore = defineStore('vocabBook', () => {
   async function fetchAll() {
     loading.value = true
     try {
-      books.value = await invoke<VocabBook[]>('get_all_vocab_books')
+      const all = await invoke<VocabBook[]>('get_all_vocab_books')
+      // Preset (bundled) books live on the /presets page; keep them out of the
+      // user-facing lists/selectors everywhere.
+      books.value = all.filter((b) => !b.isPreset)
     } catch (e) {
       console.error('[vocabBookStore] fetchAll failed:', e)
     } finally {
