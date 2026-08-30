@@ -227,6 +227,7 @@ export default {
   'preset.preparing': '正在准备后台计算…',
   'preset.computingProgress': '正在匹配词表：{processed} / {total}',
   'preset.aiProgress': 'AI 正在复核：第 {processed} / {total} 批',
+  'preset.aiWaiting': 'AI 正在复核：等待第 {current} / {total} 批响应（{seconds} 秒）',
   'preset.previewTitle': '裁剪预览',
   'preset.matchedSummary': '从 {total} 词中匹配到 {matched} 词',
   'preset.word': '单词',

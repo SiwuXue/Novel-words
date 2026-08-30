@@ -227,6 +227,7 @@ export default {
   'preset.preparing': 'Preparing background calculation…',
   'preset.computingProgress': 'Matching word list: {processed} / {total}',
   'preset.aiProgress': 'AI review: batch {processed} / {total}',
+  'preset.aiWaiting': 'AI review: waiting for batch {current} / {total} ({seconds}s)',
   'preset.previewTitle': 'Tailor preview',
   'preset.matchedSummary': '{matched} of {total} words matched',
   'preset.word': 'Word',

@@ -4,6 +4,7 @@
 
 use std::time::Duration;
 
+use reqwest::header::{ACCEPT, ACCEPT_ENCODING, CONNECTION};
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -287,6 +288,11 @@ async fn chat_completion(config: &AiConfig, system: &str, user: &str) -> Result<
     config.validate()?;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(120))
+        .connect_timeout(Duration::from_secs(15))
+        // A few OpenAI-compatible gateways occasionally terminate long HTTP/2
+        // response bodies early. HTTP/1.1 is universally supported by the
+        // configured providers and is more reliable for these small requests.
+        .http1_only()
         .user_agent("novel-words/0.1")
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
@@ -307,37 +313,90 @@ async fn chat_completion(config: &AiConfig, system: &str, user: &str) -> Result<
     if let Some(value) = config.max_tokens {
         payload["max_tokens"] = json!(value);
     }
-    let mut request = client.post(config.chat_completions_url()).json(&payload);
-    if !config.api_key.trim().is_empty() {
-        request = request.bearer_auth(config.api_key.trim());
+    let is_deepseek_v4 = config.provider.eq_ignore_ascii_case("deepseek")
+        && config
+            .model
+            .trim()
+            .to_ascii_lowercase()
+            .starts_with("deepseek-v4");
+    if is_deepseek_v4 {
+        // DeepSeek V4 enables thinking by default. Vocabulary validation is a
+        // short structured-output task; disabling thinking prevents a very
+        // large hidden reasoning response and substantially reduces latency.
+        payload["thinking"] = json!({ "type": "disabled" });
+        payload["response_format"] = json!({ "type": "json_object" });
+        if config.max_tokens.is_none() {
+            payload["max_tokens"] = json!(4096);
+        }
     }
-    let response = request
-        .send()
-        .await
-        .map_err(|e| format!("连接模型服务失败: {}", e))?;
-    let status = response.status();
-    let request_id = response
-        .headers()
-        .get("x-request-id")
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("")
-        .to_string();
-    let body = response
-        .text()
-        .await
-        .map_err(|e| format!("读取模型响应失败: {}", e))?;
-    if !status.is_success() {
-        let detail: String = body.chars().take(800).collect();
-        let suffix = if request_id.is_empty() {
-            String::new()
-        } else {
-            format!(" (request_id: {})", request_id)
+    const MAX_TRANSPORT_ATTEMPTS: usize = 2;
+    let mut completed_body = None;
+    for attempt in 1..=MAX_TRANSPORT_ATTEMPTS {
+        let mut request = client
+            .post(config.chat_completions_url())
+            .header(ACCEPT, "application/json")
+            // Some compatible gateways return a broken gzip/br stream even when
+            // the client did not advertise compression. Identity avoids that
+            // interoperability problem and keeps error bodies readable.
+            .header(ACCEPT_ENCODING, "identity")
+            .header(CONNECTION, "close")
+            .json(&payload);
+        if !config.api_key.trim().is_empty() {
+            request = request.bearer_auth(config.api_key.trim());
+        }
+
+        let response = match request.send().await {
+            Ok(response) => response,
+            Err(error) => {
+                if attempt < MAX_TRANSPORT_ATTEMPTS {
+                    tokio::time::sleep(Duration::from_millis(800)).await;
+                    continue;
+                }
+                return Err(format!(
+                    "连接模型服务失败（已自动重试 {} 次）: {}",
+                    MAX_TRANSPORT_ATTEMPTS - 1,
+                    error
+                ));
+            }
         };
-        return Err(format!(
-            "模型服务返回 HTTP {}{}: {}",
-            status, suffix, detail
-        ));
+        let status = response.status();
+        let request_id = response
+            .headers()
+            .get("x-request-id")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        let bytes = match response.bytes().await {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                if attempt < MAX_TRANSPORT_ATTEMPTS {
+                    tokio::time::sleep(Duration::from_millis(800)).await;
+                    continue;
+                }
+                return Err(format!(
+                    "读取模型响应失败（服务端可能中断了传输，已自动重试 {} 次）: {}",
+                    MAX_TRANSPORT_ATTEMPTS - 1,
+                    error
+                ));
+            }
+        };
+        let body = String::from_utf8_lossy(&bytes).into_owned();
+        if !status.is_success() {
+            let detail: String = body.chars().take(800).collect();
+            let suffix = if request_id.is_empty() {
+                String::new()
+            } else {
+                format!(" (request_id: {})", request_id)
+            };
+            return Err(format!(
+                "模型服务返回 HTTP {}{}: {}",
+                status, suffix, detail
+            ));
+        }
+        completed_body = Some(body);
+        break;
     }
+    let body = completed_body.ok_or_else(|| "模型请求未返回响应".to_string())?;
 
     let value: Value =
         serde_json::from_str(&body).map_err(|e| format!("模型响应不是有效 JSON: {}", e))?;
@@ -486,14 +545,17 @@ pub async fn enhance_vocab_items<F>(
 where
     F: FnMut(usize, usize),
 {
-    const BATCH_SIZE: usize = 20;
+    const BATCH_SIZE: usize = 10;
     if items.is_empty() {
         return Ok(Vec::new());
     }
     let total_batches = items.len().div_ceil(BATCH_SIZE);
-    let system = "You validate English vocabulary selected from a Chinese novel. Return JSON only. You may shorten an example, but must preserve its facts and an exact matched Chinese term. Never invent story facts.";
+    let system = "You validate English vocabulary selected from a Chinese novel. Return one JSON object only. You may shorten an example, but must preserve its facts and an exact matched Chinese term. Never invent story facts.";
     let mut decisions = Vec::with_capacity(items.len());
 
+    // Report the AI stage before the first network request. Otherwise the UI
+    // remains at the completed local-stage percentage while the model thinks.
+    progress(0, total_batches);
     for (batch_index, batch) in items.chunks(BATCH_SIZE).enumerate() {
         let compact: Vec<Value> = batch
             .iter()
@@ -508,7 +570,7 @@ where
             })
             .collect();
         let user = format!(
-            "Review every item below. `keep` is false only when the matched Chinese term does not express a valid sense of the English word in that sentence. `contextDefinition` must be a concise Chinese meaning (max 20 Chinese characters) and contain one exact string from matchedTerms. `exampleSentence` must be a natural, concise Chinese rewrite (max 80 Chinese characters) grounded only in the original exampleSentence and contain one exact string from matchedTerms. Return one object per input in the same order, as a bare JSON array with keys word, keep, contextDefinition, exampleSentence.\n\n{}",
+            "Review every item below. `keep` is false only when the matched Chinese term does not express a valid sense of the English word in that sentence. `contextDefinition` must be a concise Chinese meaning (max 20 Chinese characters) and contain one exact string from matchedTerms. `exampleSentence` must be a natural, concise Chinese rewrite (max 80 Chinese characters) grounded only in the original exampleSentence and contain one exact string from matchedTerms. Return one item per input in the same order as a JSON object shaped exactly like {{\"items\":[{{\"word\":\"...\",\"keep\":true,\"contextDefinition\":\"...\",\"exampleSentence\":\"...\"}}]}}.\n\n{}",
             serde_json::to_string(&compact).map_err(|e| e.to_string())?
         );
         let answer = chat_completion(config, system, &user).await?;
@@ -582,5 +644,15 @@ mod tests {
         assert_eq!(parsed[0].word, "gift");
         assert_eq!(parsed[0].context_definition, "天赋");
         assert_eq!(parsed[0].example_sentence, "他展现了绘画天赋。");
+    }
+
+    #[test]
+    fn parses_decisions_from_json_object() {
+        let parsed = parse_decisions(
+            r#"{"items":[{"word":"gift","keep":true,"contextDefinition":"天赋","exampleSentence":"他展现了绘画天赋。"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].word, "gift");
     }
 }

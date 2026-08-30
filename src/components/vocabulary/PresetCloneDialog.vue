@@ -35,7 +35,13 @@
         <div class="progress-label">
           {{ progressTotal > 0
             ? (progressStage === 'ai'
-              ? t('preset.aiProgress', { processed: progressProcessed, total: progressTotal })
+              ? (progressProcessed < progressTotal
+                ? t('preset.aiWaiting', {
+                    current: progressProcessed + 1,
+                    total: progressTotal,
+                    seconds: progressElapsedSeconds,
+                  })
+                : t('preset.aiProgress', { processed: progressProcessed, total: progressTotal }))
               : t('preset.computingProgress', { processed: progressProcessed, total: progressTotal }))
             : t('preset.preparing') }}
         </div>
@@ -84,7 +90,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { ElMessage } from 'element-plus'
@@ -114,8 +120,10 @@ const progressPercent = ref(0)
 const progressProcessed = ref(0)
 const progressTotal = ref(0)
 const progressStage = ref<'local' | 'ai'>('local')
+const progressElapsedSeconds = ref(0)
 const activeRequestId = ref<string | null>(null)
 const busy = computed(() => computing.value || importing.value)
+let progressTimer: ReturnType<typeof setInterval> | null = null
 
 interface PresetCloneProgress {
   requestId: string
@@ -132,6 +140,8 @@ onMounted(async () => {
     /* ignore */
   }
 })
+
+onBeforeUnmount(() => stopProgressTimer())
 
 watch(
   () => props.modelValue,
@@ -161,6 +171,21 @@ function createRequestId() {
   return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`
 }
 
+function startProgressTimer() {
+  stopProgressTimer()
+  progressElapsedSeconds.value = 0
+  progressTimer = setInterval(() => {
+    progressElapsedSeconds.value += 1
+  }, 1000)
+}
+
+function stopProgressTimer() {
+  if (progressTimer !== null) {
+    clearInterval(progressTimer)
+    progressTimer = null
+  }
+}
+
 async function computePreview() {
   if (!novelId.value || busy.value) return
 
@@ -174,11 +199,18 @@ async function computePreview() {
   progressProcessed.value = 0
   progressTotal.value = 0
   progressStage.value = 'local'
+  startProgressTimer()
 
   try {
     try {
       unlistenProgress = await listen<PresetCloneProgress>('preset-clone-progress', (event) => {
         if (event.payload.requestId !== activeRequestId.value) return
+        if (
+          event.payload.stage === 'ai'
+          && (progressStage.value !== 'ai' || event.payload.processed !== progressProcessed.value)
+        ) {
+          progressElapsedSeconds.value = 0
+        }
         progressPercent.value = event.payload.percent
         progressProcessed.value = event.payload.processed
         progressTotal.value = event.payload.total
@@ -201,6 +233,7 @@ async function computePreview() {
     ElMessage.error(String(e?.message || e || '计算失败'))
   } finally {
     unlistenProgress?.()
+    stopProgressTimer()
     if (activeRequestId.value === requestId) {
       activeRequestId.value = null
       computing.value = false
