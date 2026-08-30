@@ -241,7 +241,7 @@ pub fn get_highlight_words(
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let mut stmt = db
         .prepare(
-            "SELECT word, definition, phonetic, example_sentence, proficiency FROM vocab_word WHERE vocab_book_id=?1 ORDER BY created_at DESC",
+            "SELECT word, definition, phonetic, example_sentence, novel_id, proficiency FROM vocab_word WHERE vocab_book_id=?1 ORDER BY created_at DESC",
         )
         .map_err(|e| e.to_string())?;
 
@@ -252,7 +252,8 @@ pub fn get_highlight_words(
                 definition: row.get(1)?,
                 phonetic: row.get(2)?,
                 example_sentence: row.get(3)?,
-                proficiency: row.get(4)?,
+                novel_id: row.get(4)?,
+                proficiency: row.get(5)?,
             })
         })
         .map_err(|e| e.to_string())?

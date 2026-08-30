@@ -25,5 +25,6 @@ export interface HighlightWord {
   definition: string
   phonetic: string
   exampleSentence: string
+  novelId: number | null
   proficiency: 'unknown' | 'familiar' | 'mastered'
 }

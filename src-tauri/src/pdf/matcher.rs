@@ -55,6 +55,25 @@ fn push_term(terms: &mut Vec<String>, run: &str) {
     }
 }
 
+/// Terms trusted for a Chinese novel clone. A term is eligible only when the
+/// word is linked to a novel and that exact primary-definition term occurs in
+/// the example sentence captured during preset tailoring. This keeps Chinese
+/// matching useful without re-enabling broad, error-prone definition matching.
+fn trusted_cn_terms(word: &VocabWord) -> Vec<String> {
+    if word.novel_id.is_none() || word.example_sentence.trim().is_empty() {
+        return Vec::new();
+    }
+    let primary_definition = word
+        .definition
+        .split('【')
+        .next()
+        .unwrap_or(&word.definition);
+    extract_cn_terms(primary_definition)
+        .into_iter()
+        .filter(|term| word.example_sentence.contains(term))
+        .collect()
+}
+
 /// One matched occurrence of a vocab word inside a line, by its Chinese meaning.
 pub struct DefMatch<'a> {
     /// byte offset in the line where the Chinese term starts
@@ -69,21 +88,22 @@ pub struct DefMatch<'a> {
 /// Find all non-overlapping matches of vocab words in `line`, matched by their
 /// Chinese definitions. Longer terms win over shorter overlapping ones.
 ///
-/// NOTE: For Chinese novels this whole approach is unreliable — substring
-/// matching of definition terms produces nonsense glosses (e.g. 声音→advocate).
-/// Callers must pass `language` and we return empty for `zh`, so Chinese novels
-/// get no auto-glossing; users learn via the preset "click-to-study" flow.
+/// For Chinese novels, only terms proven by a tailored word's captured example
+/// sentence are considered. Generic definition substring matching stays
+/// disabled because it previously produced misleading annotations.
 pub fn find_matches_in_line<'a>(
     line: &str,
     words: &'a [VocabWord],
     language: &str,
 ) -> Vec<DefMatch<'a>> {
-    if language == "zh" {
-        return Vec::new();
-    }
     let mut raw: Vec<DefMatch> = Vec::new();
     for w in words {
-        for term in extract_cn_terms(&w.definition) {
+        let terms = if language == "zh" {
+            trusted_cn_terms(w)
+        } else {
+            extract_cn_terms(&w.definition)
+        };
+        for term in terms {
             let mut start = 0;
             while let Some(pos) = line[start..].find(&term) {
                 let abs = start + pos;
@@ -116,20 +136,20 @@ pub fn find_matches_in_line<'a>(
 
 /// Return the subset of `words` whose Chinese meaning appears anywhere in `text`,
 /// deduplicated by the English word (case-insensitive), preserving input order.
-/// Returns empty for Chinese novels (see note on `find_matches_in_line`).
+/// Chinese novels use only the trusted terms described above.
 pub fn words_found_in_text<'a>(
     text: &str,
     words: &'a [VocabWord],
     language: &str,
 ) -> Vec<&'a VocabWord> {
-    if language == "zh" {
-        return Vec::new();
-    }
     let mut found: Vec<&VocabWord> = Vec::new();
     for w in words {
-        let hit = extract_cn_terms(&w.definition)
-            .iter()
-            .any(|term| text.contains(term.as_str()));
+        let terms = if language == "zh" {
+            trusted_cn_terms(w)
+        } else {
+            extract_cn_terms(&w.definition)
+        };
+        let hit = terms.iter().any(|term| text.contains(term.as_str()));
         if hit {
             let key = w.word.to_lowercase();
             if !found.iter().any(|f| f.word.to_lowercase() == key) {
@@ -296,4 +316,51 @@ pub fn words_found_in_text_en<'a>(text: &str, words: &'a [VocabWord]) -> Vec<&'a
         }
     }
     found
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{find_matches_in_line, words_found_in_text};
+    use crate::models::VocabWord;
+
+    fn word(definition: &str, example_sentence: &str, novel_id: Option<i64>) -> VocabWord {
+        VocabWord {
+            id: 1,
+            vocab_book_id: 1,
+            word: "gift".into(),
+            definition: definition.into(),
+            phonetic: String::new(),
+            example_sentence: example_sentence.into(),
+            novel_id,
+            chapter_id: None,
+            proficiency: "unknown".into(),
+            memory_tag: String::new(),
+            created_at: String::new(),
+        }
+    }
+
+    #[test]
+    fn chinese_matching_accepts_terms_proven_by_tailored_example() {
+        let words = vec![word("n. 天赋；礼物", "他的修炼天赋十分出众。", Some(7))];
+
+        let matches = find_matches_in_line("这位少年拥有罕见天赋。", &words, "zh");
+        assert_eq!(matches.len(), 1);
+        assert_eq!(
+            &"这位少年拥有罕见天赋。"[matches[0].start..matches[0].end],
+            "天赋"
+        );
+        assert_eq!(
+            words_found_in_text("罕见天赋令人惊叹", &words, "zh").len(),
+            1
+        );
+    }
+
+    #[test]
+    fn chinese_matching_rejects_unproven_or_unlinked_terms() {
+        let unproven = word("n. 天赋；礼物", "他收到一件东西。", Some(7));
+        let unlinked = word("n. 天赋；礼物", "他的修炼天赋十分出众。", None);
+
+        assert!(find_matches_in_line("这位少年拥有罕见天赋。", &[unproven], "zh").is_empty());
+        assert!(find_matches_in_line("这位少年拥有罕见天赋。", &[unlinked], "zh").is_empty());
+    }
 }

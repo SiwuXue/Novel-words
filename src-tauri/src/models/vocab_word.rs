@@ -23,6 +23,7 @@ pub struct HighlightWord {
     pub definition: String,
     pub phonetic: String,
     pub example_sentence: String,
+    pub novel_id: Option<i64>,
     pub proficiency: String,
 }
 

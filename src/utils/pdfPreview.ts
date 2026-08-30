@@ -16,10 +16,9 @@ import { textColorFor } from './proficiencyColors'
 import { looksLikeHtml } from './editorHtml'
 
 /* ------------------------------------------------------------------ *
- * Matching: locate English words in Chinese text via their (chosen) *
- * Chinese definition — same approach as the Rust pdf::matcher.      *
- * NOTE: for Chinese novels this matching is unreliable and has been  *
- * disabled (returns no matches); see findMatchesInLine below.       *
+ * Chinese matching: only use primary-definition terms that were      *
+ * captured in a novel-linked word's example sentence. This restores  *
+ * tailored preset matching without enabling broad false positives.   *
  * ------------------------------------------------------------------ */
 
 interface Match {
@@ -28,15 +27,46 @@ interface Match {
   word: VocabWord
 }
 
-function findMatchesInLine(_line: string, _words: VocabWord[]): Match[] {
-  // Chinese novels: the definition-substring matching produces nonsense glosses
-  // (e.g. 声音→advocate). Short-circuit so Chinese novels are not auto-glossed.
-  return []
+function extractCnTerms(text: string): string[] {
+  const terms: string[] = []
+  for (const match of text.matchAll(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+/g)) {
+    const term = match[0]
+    if (Array.from(term).length >= 2 && !terms.includes(term)) terms.push(term)
+  }
+  return terms
 }
 
-function wordsFoundInText(_text: string, _words: VocabWord[]): VocabWord[] {
-  // See note on findMatchesInLine — Chinese novels return no auto-matches.
-  return []
+function trustedCnTerms(word: VocabWord): string[] {
+  if (word.novelId == null || !word.exampleSentence?.trim()) return []
+  const primaryDefinition = (word.definition || '').split('【', 1)[0]
+  return extractCnTerms(primaryDefinition).filter((term) => word.exampleSentence.includes(term))
+}
+
+function findMatchesInLine(line: string, words: VocabWord[]): Match[] {
+  const raw: Match[] = []
+  for (const word of words) {
+    for (const term of trustedCnTerms(word)) {
+      let from = 0
+      while (from <= line.length - term.length) {
+        const start = line.indexOf(term, from)
+        if (start < 0) break
+        raw.push({ start, end: start + term.length, word })
+        from = start + term.length
+      }
+    }
+  }
+  raw.sort((a, b) => a.start - b.start || b.end - b.start - (a.end - a.start))
+  const filtered: Match[] = []
+  for (const match of raw) {
+    if (!filtered.some((item) => match.start < item.end && item.start < match.end)) {
+      filtered.push(match)
+    }
+  }
+  return filtered
+}
+
+function wordsFoundInText(text: string, words: VocabWord[]): VocabWord[] {
+  return words.filter((word) => trustedCnTerms(word).some((term) => text.includes(term)))
 }
 
 /* ------------------------------------------------------------------ *

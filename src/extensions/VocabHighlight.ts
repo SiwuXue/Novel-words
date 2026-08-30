@@ -83,25 +83,49 @@ function findWordPositions(
   return results
 }
 
+function trustedCnTerms(word: HighlightWord): string[] {
+  if (word.novelId == null || !word.exampleSentence?.trim()) return []
+  const primaryDefinition = (word.definition || '').split('【', 1)[0]
+  const terms: string[] = []
+  for (const match of primaryDefinition.matchAll(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+/g)) {
+    const term = match[0]
+    if (
+      Array.from(term).length >= 2 &&
+      word.exampleSentence.includes(term) &&
+      !terms.includes(term)
+    ) {
+      terms.push(term)
+    }
+  }
+  return terms
+}
+
 function buildDecorations(
   doc: { descendants: (fn: (node: { isText: boolean; text?: string }, pos: number) => boolean | void) => void },
   words: HighlightWord[],
 ): DecorationSet {
   const decorations: Decoration[] = []
+  const decoratedRanges = new Set<string>()
 
   for (const hw of words) {
     const color = PROFICIENCY_COLORS[hw.proficiency] || PROFICIENCY_COLORS.unknown
     const bg = PROFICIENCY_BG[hw.proficiency] || PROFICIENCY_BG.unknown
-    const positions = findWordPositions(doc, hw.word)
+    const cnTerms = trustedCnTerms(hw)
+    const targets = cnTerms.length > 0 ? cnTerms : [hw.word]
 
-    for (const { from, to } of positions) {
-      decorations.push(
-        Decoration.inline(from, to, {
-          class: 'vocab-highlight',
-          style: `color: ${color}; background-color: ${bg}; border-radius: 2px; cursor: pointer; font-weight: 500;`,
-          nodeName: 'span',
-        }),
-      )
+    for (const target of targets) {
+      for (const { from, to } of findWordPositions(doc, target)) {
+        const rangeKey = `${from}:${to}`
+        if (decoratedRanges.has(rangeKey)) continue
+        decoratedRanges.add(rangeKey)
+        decorations.push(
+          Decoration.inline(from, to, {
+            class: 'vocab-highlight',
+            style: `color: ${color}; background-color: ${bg}; border-radius: 2px; cursor: pointer; font-weight: 500;`,
+            nodeName: 'span',
+          }),
+        )
+      }
     }
   }
 
@@ -113,6 +137,9 @@ function buildWordsMap(words: HighlightWord[]): Map<string, HighlightWord> {
   for (const hw of words) {
     if (!map.has(hw.word)) {
       map.set(hw.word, hw)
+    }
+    for (const term of trustedCnTerms(hw)) {
+      if (!map.has(term)) map.set(term, hw)
     }
   }
   return map
