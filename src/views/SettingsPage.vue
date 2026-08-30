@@ -268,7 +268,7 @@ import type { PdfBackground, AutoBackup } from '@/stores/settingsStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
 import { STEP_LABELS, type StepNum } from '@/types/pdfSteps'
 import { speakWord, type SpeechAccent } from '@/utils/speech'
-import { t, getLocale, setLocale, type Locale } from '@/i18n'
+import { currentLocale, t, setLocale, type Locale } from '@/i18n'
 import { AI_PROVIDER_PRESETS, getAiProvider } from '@/config/aiProviders'
 
 const settingsStore = useSettingsStore()
@@ -280,7 +280,6 @@ const localSteps = ref<StepNum[]>([...settingsStore.pdfIntensiveSteps])
 const autoBackupLocal = ref<AutoBackup>(settingsStore.autoBackup)
 const backingUp = ref(false)
 const restoring = ref(false)
-const currentLocale = ref<Locale>(getLocale())
 const aiEnabled = ref(false)
 const aiProvider = ref('openai')
 const aiBaseUrl = ref('https://api.openai.com/v1')
@@ -322,7 +321,6 @@ watch([aiProvider, aiBaseUrl], ([provider, baseUrl]) => {
 })
 
 function onLocaleChange(l: Locale) {
-  currentLocale.value = l
   void setLocale(l)
 }
 

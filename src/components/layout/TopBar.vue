@@ -2,12 +2,13 @@
   <header class="topbar" data-tauri-drag-region>
     <div class="topbar-left" data-tauri-drag-region>
       <el-breadcrumb separator="/">
-        <el-breadcrumb-item :to="{ path: '/' }">首页</el-breadcrumb-item>
+        <el-breadcrumb-item :to="{ path: '/' }">{{ t('nav.home') }}</el-breadcrumb-item>
         <el-breadcrumb-item v-if="currentPage">{{ currentPage }}</el-breadcrumb-item>
       </el-breadcrumb>
     </div>
     <div class="topbar-right">
       <ThemeToggle />
+      <LanguageToggle />
       <WindowControls />
     </div>
   </header>
@@ -17,22 +18,20 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import ThemeToggle from '@/components/common/ThemeToggle.vue'
+import LanguageToggle from '@/components/common/LanguageToggle.vue'
+import { t } from '@/i18n'
 import WindowControls from './WindowControls.vue'
 
 const route = useRoute()
 
-const pageNameMap: Record<string, string> = {
-  '/': '',
-  '/novels': '小说库',
-  '/vocabulary': '词汇本',
-  '/settings': '设置',
-}
-
 const currentPage = computed(() => {
   const path = route.path
-  if (path.startsWith('/novels')) return '小说库'
-  if (path.startsWith('/vocabulary')) return '词汇本'
-  return pageNameMap[path] || ''
+  if (path.startsWith('/novels')) return t('nav.novels')
+  if (path.startsWith('/vocabulary')) return t('nav.vocabulary')
+  if (path.startsWith('/presets')) return t('nav.presets')
+  if (path.startsWith('/stats')) return t('nav.stats')
+  if (path.startsWith('/settings')) return t('nav.settings')
+  return ''
 })
 </script>
 

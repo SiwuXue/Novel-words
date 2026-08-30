@@ -20,6 +20,9 @@ const saved = (typeof localStorage !== 'undefined' ? localStorage.getItem(STORAG
   | null
 const locale = ref<Locale>(saved === 'en' ? 'en' : 'zh')
 
+/** Reactive current locale for controls that need to stay in sync. */
+export const currentLocale = computed(() => locale.value)
+
 /** Translate a key, interpolating `{name}` placeholders. Falls back to zh → key. */
 export function t(key: string, params?: Record<string, string | number>): string {
   let s = messages[locale.value]?.[key] ?? messages.zh[key] ?? key
