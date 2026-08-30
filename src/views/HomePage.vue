@@ -112,20 +112,30 @@ onMounted(async () => {
 <style scoped>
 .home-page {
   width: 100%;
+  height: 100%;
   min-width: 0;
-  min-height: 100%;
-  padding: clamp(20px, 4vw, 48px) clamp(8px, 3vw, 40px);
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  grid-template-areas:
+    "hero"
+    "stats"
+    "recent"
+    "actions";
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: clamp(8px, 1.8vh, 18px);
+  padding: clamp(6px, 1.8vh, 18px) clamp(8px, 3vw, 40px);
 }
 
 .hero {
+  grid-area: hero;
   text-align: center;
-  margin-bottom: 40px;
 }
 
 .hero h1 {
-  font-size: 28px;
+  font-size: clamp(22px, 3.2vh, 28px);
   font-weight: 700;
-  margin: 0 0 8px 0;
+  margin: 0 0 clamp(2px, 0.6vh, 8px) 0;
   color: var(--text-regular, #303133);
 }
 
@@ -136,18 +146,18 @@ onMounted(async () => {
 }
 
 .stats-row {
+  grid-area: stats;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
   gap: clamp(10px, 2vw, 20px);
-  margin-bottom: 40px;
 }
 
 .stat-card {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 24px 32px;
+  gap: clamp(3px, 0.8vh, 8px);
+  padding: clamp(8px, 1.8vh, 18px) clamp(12px, 2.5vw, 32px);
   border-radius: 12px;
   background: var(--bg-secondary, #f5f7fa);
   cursor: pointer;
@@ -162,10 +172,13 @@ onMounted(async () => {
 
 .stat-card .el-icon {
   color: var(--accent-color, #409eff);
+  width: clamp(20px, 3.2vh, 28px);
+  height: clamp(20px, 3.2vh, 28px);
+  font-size: clamp(20px, 3.2vh, 28px) !important;
 }
 
 .stat-num {
-  font-size: 28px;
+  font-size: clamp(22px, 3.5vh, 28px);
   font-weight: 700;
   color: var(--text-regular, #303133);
   line-height: 1;
@@ -177,27 +190,32 @@ onMounted(async () => {
 }
 
 .recent-section {
-  margin-bottom: 32px;
+  grid-area: recent;
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
 }
 
 .recent-section h3 {
   font-size: 16px;
   font-weight: 600;
-  margin: 0 0 12px 0;
+  margin: 0 0 clamp(4px, 0.8vh, 10px) 0;
   color: var(--text-regular, #303133);
 }
 
 .recent-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  min-height: 0;
+  gap: clamp(3px, 0.8vh, 8px);
 }
 
 .recent-item {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 16px;
+  min-height: 0;
+  padding: clamp(6px, 1.1vh, 11px) 16px;
   border-radius: 10px;
   background: var(--bg-secondary, #f5f7fa);
   cursor: pointer;
@@ -234,14 +252,14 @@ onMounted(async () => {
 }
 
 .quick-actions {
+  grid-area: actions;
   text-align: center;
-  margin-bottom: 8px;
 }
 
 .quick-actions h3 {
   font-size: 16px;
   font-weight: 600;
-  margin: 0 0 16px 0;
+  margin: 0 0 clamp(5px, 1vh, 12px) 0;
   color: var(--text-regular, #303133);
 }
 
@@ -252,31 +270,31 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 
+.actions-row :deep(.el-button--large) {
+  height: clamp(34px, 5.2vh, 40px);
+  min-height: 34px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
 @media (max-width: 900px) {
   .home-page {
-    padding: 28px 20px;
-  }
-  .hero h1 {
-    font-size: 24px;
-  }
-  .stat-card {
-    padding: 16px 20px;
+    padding-right: 12px;
+    padding-left: 12px;
   }
 }
 
 @media (max-width: 560px) {
   .home-page {
-    padding: 16px 4px;
-  }
-  .hero {
-    margin-bottom: 24px;
+    padding-right: 4px;
+    padding-left: 4px;
   }
   .stats-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    margin-bottom: 26px;
   }
   .stat-card {
-    padding: 14px 8px;
+    padding-right: 8px;
+    padding-left: 8px;
   }
   .recent-item {
     gap: 8px;
@@ -295,10 +313,36 @@ onMounted(async () => {
   }
 }
 
-@media (max-width: 360px) {
-  .stats-row,
-  .actions-row {
-    grid-template-columns: 1fr;
+@media (max-height: 650px) {
+  .home-page {
+    gap: 6px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+  .hero h1 {
+    font-size: 22px;
+  }
+  .subtitle {
+    font-size: 13px;
+  }
+  .stats-row {
+    gap: 8px;
+  }
+  .stat-card {
+    gap: 2px;
+    padding-top: 5px;
+    padding-bottom: 5px;
+  }
+  .recent-section h3,
+  .quick-actions h3 {
+    margin-bottom: 4px;
+  }
+  .recent-item {
+    padding-top: 5px;
+    padding-bottom: 5px;
+  }
+  .actions-row :deep(.el-button--large) {
+    height: 34px;
   }
 }
 </style>

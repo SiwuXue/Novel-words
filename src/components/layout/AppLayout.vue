@@ -3,7 +3,11 @@
     <Sidebar />
     <div class="main-area">
       <TopBar />
-      <main class="main-content" :class="{ 'editor-mode': isEditorRoute }">
+      <main
+        ref="mainContentRef"
+        class="main-content"
+        :class="{ 'editor-mode': isEditorRoute, 'home-mode': isHomeRoute }"
+      >
         <RouterView v-slot="{ Component, route: r }">
           <Transition name="page-fade" mode="out-in">
             <component :is="Component" :key="r.path" />
@@ -15,13 +19,25 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import Sidebar from './Sidebar.vue'
 import TopBar from './TopBar.vue'
 
 const route = useRoute()
+const mainContentRef = ref<HTMLElement | null>(null)
 const isEditorRoute = computed(() => route.name === 'NovelEdit')
+const isHomeRoute = computed(() => route.name === 'Home')
+
+watch(
+  () => route.name,
+  async (name) => {
+    if (name !== 'Home') return
+    await nextTick()
+    mainContentRef.value?.scrollTo({ top: 0, left: 0 })
+  },
+  { immediate: true },
+)
 </script>
 
 <style scoped>
@@ -46,6 +62,17 @@ const isEditorRoute = computed(() => route.name === 'NovelEdit')
 .main-content.editor-mode {
   padding: 0;
   overflow: hidden;
+}
+
+.main-content.home-mode {
+  overflow: hidden;
+}
+
+@media (max-height: 650px) {
+  .main-content.home-mode {
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
 }
 
 @media (max-width: 760px) {
