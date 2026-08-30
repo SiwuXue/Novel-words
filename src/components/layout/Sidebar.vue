@@ -218,4 +218,15 @@ function togglePin() {
 .pin-btn.active {
   color: var(--accent-color, #409eff);
 }
+
+@media (max-width: 760px) {
+  .sidebar-wrapper:hover,
+  .sidebar-wrapper.pinned {
+    width: 0;
+  }
+  .sidebar-wrapper:hover .sidebar,
+  .sidebar-wrapper.pinned .sidebar {
+    box-shadow: 4px 0 20px rgba(0, 0, 0, 0.22);
+  }
+}
 </style>

@@ -47,4 +47,16 @@ const isEditorRoute = computed(() => route.name === 'NovelEdit')
   padding: 0;
   overflow: hidden;
 }
+
+@media (max-width: 760px) {
+  .main-content {
+    padding: 10px;
+  }
+}
+
+@media (max-width: 420px) {
+  .main-content {
+    padding: 8px;
+  }
+}
 </style>

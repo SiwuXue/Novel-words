@@ -142,7 +142,7 @@ function formatShortDate(iso: string): string {
   // "2026-03-12" → "3/12"
   const parts = iso.split('-')
   if (parts.length !== 3) return iso
-  return `${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)}}`
+  return `${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)}`
 }
 
 onMounted(async () => {
@@ -159,9 +159,9 @@ onMounted(async () => {
 <style scoped>
 .stats-page {
   width: 100%;
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 24px;
+  min-width: 0;
+  min-height: 100%;
+  padding: clamp(8px, 1.5vw, 24px);
 }
 .stats-page h2 {
   margin: 0 0 20px;
@@ -178,14 +178,14 @@ onMounted(async () => {
 
 .stats-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
+  gap: clamp(8px, 1.2vw, 16px);
   margin-bottom: 20px;
 }
 .stat-card {
   background: var(--bg-secondary, #f5f7fa);
   border-radius: 10px;
-  padding: 18px 16px;
+  padding: clamp(13px, 1.5vw, 20px) clamp(10px, 1.2vw, 16px);
   text-align: center;
 }
 .stat-num {
@@ -205,6 +205,10 @@ onMounted(async () => {
 
 .stats-section {
   margin-bottom: 16px;
+  min-width: 0;
+}
+.stats-section :deep(.el-card__body) {
+  padding: clamp(12px, 2vw, 20px);
 }
 .section-title {
   font-size: 14px;
@@ -242,7 +246,7 @@ onMounted(async () => {
 
 .week-bars {
   display: flex;
-  gap: 12px;
+  gap: clamp(3px, 1.2vw, 12px);
   align-items: flex-end;
   height: 180px;
   padding: 0 4px;
@@ -279,5 +283,43 @@ onMounted(async () => {
 .week-bar-date {
   font-size: 11px;
   color: var(--text-secondary);
+}
+
+@media (max-width: 560px) {
+  .stats-page {
+    padding: 4px;
+  }
+  .stats-page h2 {
+    margin-bottom: 14px;
+  }
+  .stats-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-bottom: 12px;
+  }
+  .stat-num {
+    font-size: clamp(22px, 8vw, 28px);
+  }
+  .prof-row {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) 38px;
+    gap: 8px;
+  }
+  .prof-label,
+  .prof-count {
+    width: auto;
+  }
+  .week-bars {
+    height: 150px;
+    padding: 0;
+  }
+  .week-bar-date {
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 360px) {
+  .stats-cards {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

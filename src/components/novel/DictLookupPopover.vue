@@ -252,8 +252,9 @@ onBeforeUnmount(() => {
 .dict-lookup-popover {
   position: fixed;
   z-index: 3000;
-  min-width: 280px;
-  max-width: 360px;
+  width: min(360px, calc(100vw - 16px));
+  min-width: 0;
+  max-width: calc(100vw - 16px);
   max-height: 60vh;
   background: var(--bg-primary, #fff);
   border: 1px solid var(--border-color, #dcdfe6);

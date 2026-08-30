@@ -2,10 +2,10 @@
   <el-dialog
     v-model="visible"
     :title="isEdit ? '编辑小说' : '新建小说'"
-    width="500px"
+    width="min(500px, calc(100vw - 32px))"
     :close-on-click-modal="false"
   >
-    <el-form ref="formRef" :model="form" :rules="rules" label-width="60px">
+    <el-form class="responsive-dialog-form" ref="formRef" :model="form" :rules="rules" label-width="60px">
       <el-form-item label="书名" prop="title">
         <el-input v-model="form.title" placeholder="请输入书名" />
       </el-form-item>
@@ -102,3 +102,16 @@ async function handleSubmit() {
   }
 }
 </script>
+
+<style scoped>
+@media (max-width: 520px) {
+  .responsive-dialog-form :deep(.el-form-item) { display: block; }
+  .responsive-dialog-form :deep(.el-form-item__label) {
+    width: 100% !important;
+    height: auto;
+    justify-content: flex-start;
+    margin-bottom: 6px;
+  }
+  .responsive-dialog-form :deep(.el-form-item__content) { margin-left: 0 !important; }
+}
+</style>

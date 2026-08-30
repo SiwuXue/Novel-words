@@ -735,7 +735,8 @@ function attachScrollListener() {
 .editor-topbar {
   display: flex;
   align-items: center;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 8px clamp(8px, 1.5vw, 16px);
   padding: 8px 16px;
   border-bottom: 1px solid var(--border-color, #ebeef5);
   background: var(--bg-secondary, #fafafa);
@@ -744,6 +745,11 @@ function attachScrollListener() {
 .novel-title {
   font-size: 15px;
   font-weight: 600;
+  min-width: 0;
+  max-width: min(34vw, 420px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .save-status {
   margin-left: auto;
@@ -864,5 +870,55 @@ function attachScrollListener() {
 .pdf-export-dialog-tip {
   font-size: 12px;
   color: var(--text-placeholder, #a8abb2);
+}
+
+@media (max-width: 900px) {
+  .editor-topbar {
+    max-height: 34vh;
+    padding: 7px 10px;
+    overflow-y: auto;
+  }
+  .novel-title {
+    max-width: 45vw;
+  }
+  .editor-body {
+    flex-direction: column;
+  }
+  .left-pane,
+  .split-divider {
+    display: none !important;
+  }
+  .editor-pane.center-pane {
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    flex: 1 1 58%;
+  }
+  .editor-pane.right-pane {
+    width: 100% !important;
+    height: 42%;
+    min-height: 160px;
+    flex: 0 1 42%;
+    border-top: 1px solid var(--border-color, #ebeef5);
+  }
+}
+
+@media (max-width: 560px) {
+  .editor-topbar {
+    align-content: flex-start;
+  }
+  .novel-title {
+    max-width: calc(100vw - 150px);
+  }
+  .save-status {
+    width: 100%;
+    margin-left: 0;
+    order: 3;
+  }
+  .pdf-export-dialog {
+    width: calc(100vw - 28px);
+    max-width: none;
+    padding: 20px 18px;
+  }
 }
 </style>

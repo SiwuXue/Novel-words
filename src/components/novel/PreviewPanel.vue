@@ -230,4 +230,23 @@ defineExpose({ scrollToText })
 :deep(.preview-content .pdf-preview-body .vocab-table th) {
   background: #f5f5f5;
 }
+
+@media (max-width: 900px) {
+  .preview-panel {
+    border-left: none;
+  }
+  .panel-header {
+    padding: 8px 12px;
+  }
+  .preview-content {
+    padding: 14px 12px;
+  }
+  .preview-panel.fullscreen .preview-content {
+    padding: 24px clamp(14px, 6vw, 72px);
+  }
+  :deep(.preview-content .pdf-preview-body .vocab-table) {
+    display: block;
+    overflow-x: auto;
+  }
+}
 </style>

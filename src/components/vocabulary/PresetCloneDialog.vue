@@ -2,7 +2,7 @@
   <el-dialog
     :model-value="modelValue"
     :title="t('preset.previewTitle')"
-    width="760px"
+    width="min(760px, calc(100vw - 32px))"
     :close-on-click-modal="false"
     :close-on-press-escape="!busy"
     :show-close="!busy"
@@ -11,7 +11,7 @@
   >
     <!-- Step 1: configure -->
     <div v-if="!preview">
-      <el-form label-width="110px">
+      <el-form class="clone-form" label-width="110px">
         <el-form-item :label="t('preset.chooseNovel')">
           <el-select
             v-model="novelId"
@@ -57,13 +57,13 @@
         show-icon
       />
 
-      <el-table :data="preview.items" max-height="340" size="small" style="margin-top: 8px">
+      <el-table class="preview-table" :data="preview.items" max-height="min(340px, 42vh)" size="small">
         <el-table-column :label="t('preset.word')" width="120" prop="word" />
         <el-table-column :label="t('preset.definition')" min-width="140" prop="definition" show-overflow-tooltip />
         <el-table-column :label="t('preset.example')" min-width="220" prop="exampleSentence" show-overflow-tooltip />
       </el-table>
 
-      <el-form label-width="110px" style="margin-top: 12px">
+      <el-form class="clone-form result-form" label-width="110px">
         <el-form-item :label="t('preset.newBookName')">
           <el-input v-model="newBookName" placeholder="CET4 · {小说}精选" />
         </el-form-item>
@@ -242,6 +242,13 @@ async function doImport() {
 .ai-result-alert {
   margin-top: 10px;
 }
+.preview-table {
+  width: 100%;
+  margin-top: 8px;
+}
+.result-form {
+  margin-top: 12px;
+}
 .calculation-progress {
   margin: 8px 16px 0 110px;
 }
@@ -250,5 +257,36 @@ async function doImport() {
   font-size: 12px;
   color: var(--text-secondary, #909399);
   text-align: center;
+}
+
+@media (max-width: 560px) {
+  .clone-form :deep(.el-form-item) {
+    display: block;
+  }
+  .clone-form :deep(.el-form-item__label) {
+    width: 100% !important;
+    height: auto;
+    justify-content: flex-start;
+    margin-bottom: 6px;
+    line-height: 1.4;
+  }
+  .clone-form :deep(.el-form-item__content) {
+    margin-left: 0 !important;
+  }
+  .calculation-progress {
+    margin: 8px 0 0;
+  }
+  :deep(.el-dialog__body) {
+    padding: 14px 16px;
+  }
+  :deep(.el-dialog__footer) {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  :deep(.el-dialog__footer .el-button) {
+    margin-left: 0;
+  }
 }
 </style>

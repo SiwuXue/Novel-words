@@ -5,7 +5,7 @@
     <el-tabs v-model="activeTab" class="settings-tabs">
       <!-- General tab -->
       <el-tab-pane :label="t('settings.general')" name="general">
-        <el-form label-width="130px">
+        <el-form class="settings-form" label-width="130px">
           <el-form-item :label="t('settings.theme')">
             <el-radio-group
               :model-value="settingsStore.theme"
@@ -24,12 +24,12 @@
           </el-form-item>
 
           <el-form-item :label="t('settings.exportFolder')">
-            <div style="display:flex;gap:8px;width:100%;">
+            <div class="inline-field">
               <el-input
                 :model-value="settingsStore.defaultExportFolder"
                 :placeholder="t('settings.exportFolderPlaceholder')"
                 readonly
-                style="flex:1;"
+                class="fluid-input"
               />
               <el-button @click="pickExportFolder">{{ t('settings.chooseFolder') }}</el-button>
             </div>
@@ -41,7 +41,7 @@
               @change="onDefaultVocabBookChange"
               placeholder="—"
               clearable
-              style="width:240px;"
+              class="book-select"
             >
               <el-option
                 v-for="book in vocabBookStore.books"
@@ -74,7 +74,7 @@
               <el-radio-button value="dots">{{ t('settings.dots') }}</el-radio-button>
               <el-radio-button value="none">{{ t('settings.none') }}</el-radio-button>
             </el-radio-group>
-            <span class="backup-hint" style="margin-left:12px;">{{ t('settings.pdfBackgroundHint') }}</span>
+            <span class="backup-hint inline-hint">{{ t('settings.pdfBackgroundHint') }}</span>
           </el-form-item>
 
           <el-form-item :label="t('settings.autoBackup')">
@@ -84,7 +84,7 @@
               <el-radio-button value="weekly">{{ t('settings.weekly') }}</el-radio-button>
               <el-radio-button value="monthly">{{ t('settings.monthly') }}</el-radio-button>
             </el-radio-group>
-            <span class="backup-hint" style="margin-left:12px;">{{ t('settings.autoBackupHint') }}</span>
+            <span class="backup-hint inline-hint">{{ t('settings.autoBackupHint') }}</span>
           </el-form-item>
 
           <el-form-item :label="t('settings.accent')">
@@ -95,7 +95,7 @@
               <el-radio-button value="us">{{ t('settings.us') }}</el-radio-button>
               <el-radio-button value="uk">{{ t('settings.uk') }}</el-radio-button>
             </el-radio-group>
-            <el-button link type="primary" size="small" style="margin-left:12px;" @click="onTestAccent">{{ t('settings.listen') }}</el-button>
+            <el-button class="inline-hint" link type="primary" size="small" @click="onTestAccent">{{ t('settings.listen') }}</el-button>
           </el-form-item>
 
           <el-form-item :label="t('settings.reviewGoal')">
@@ -107,7 +107,7 @@
               style="width: 120px"
               @change="onReviewGoalChange"
             />
-            <span class="backup-hint" style="margin-left:12px;">{{ t('settings.reviewGoalHint') }}</span>
+            <span class="backup-hint inline-hint">{{ t('settings.reviewGoalHint') }}</span>
           </el-form-item>
         </el-form>
       </el-tab-pane>
@@ -122,7 +122,7 @@
           show-icon
           style="margin-bottom: 20px;"
         />
-        <el-form label-width="140px" style="max-width: 760px;">
+        <el-form class="settings-form ai-form" label-width="140px">
           <el-form-item :label="t('settings.aiEnabled')">
             <el-switch v-model="aiEnabled" />
           </el-form-item>
@@ -235,9 +235,9 @@
 
       <!-- Backup / restore tab -->
       <el-tab-pane :label="t('settings.backup')" name="backup">
-        <el-form label-width="130px">
+        <el-form class="settings-form" label-width="130px">
           <el-form-item :label="t('settings.backupData')">
-            <div style="display:flex;gap:12px;align-items:center;width:100%;">
+            <div class="backup-action">
               <el-button type="primary" :loading="backingUp" @click="onBackup">
                 {{ t('settings.backupData') }}
               </el-button>
@@ -245,7 +245,7 @@
             </div>
           </el-form-item>
           <el-form-item :label="t('settings.restoreData')">
-            <div style="display:flex;gap:12px;align-items:center;width:100%;">
+            <div class="backup-action">
               <el-button type="danger" :loading="restoring" @click="onRestore">
                 {{ t('settings.restoreData') }}
               </el-button>
@@ -616,9 +616,9 @@ onMounted(() => {
 <style scoped>
 .settings-page {
   width: 100%;
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 24px;
+  min-width: 0;
+  min-height: 100%;
+  padding: clamp(8px, 1.5vw, 24px);
 }
 .settings-page h2 {
   margin: 0 0 16px 0;
@@ -626,6 +626,33 @@ onMounted(() => {
 }
 .settings-tabs {
   margin-top: 8px;
+  min-width: 0;
+}
+.settings-form,
+.ai-form {
+  width: 100%;
+  max-width: none;
+}
+.inline-field,
+.backup-action {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+}
+.inline-field {
+  gap: 8px;
+}
+.fluid-input {
+  flex: 1;
+  min-width: 0;
+}
+.book-select {
+  width: min(100%, 320px);
+}
+.inline-hint {
+  margin-left: 12px;
 }
 .backup-hint {
   font-size: 12px;
@@ -657,5 +684,70 @@ onMounted(() => {
 }
 .ai-advanced :deep(.el-form-item) {
   margin-left: -140px;
+}
+
+@media (max-width: 760px) {
+  .settings-page {
+    padding: 4px;
+  }
+  .settings-page h2 {
+    margin-bottom: 10px;
+  }
+  .settings-page :deep(.el-form-item) {
+    display: block;
+    margin-bottom: 18px;
+  }
+  .settings-page :deep(.el-form-item__label) {
+    width: 100% !important;
+    height: auto;
+    justify-content: flex-start;
+    margin-bottom: 7px;
+    line-height: 1.4;
+  }
+  .settings-page :deep(.el-form-item__content) {
+    width: 100%;
+    min-width: 0;
+    margin-left: 0 !important;
+  }
+  .settings-page :deep(.el-radio-group),
+  .settings-page :deep(.el-checkbox-group) {
+    display: flex;
+    flex-wrap: wrap;
+  }
+  .inline-hint {
+    display: block;
+    width: 100%;
+    margin: 6px 0 0;
+    line-height: 1.5;
+  }
+  .ai-advanced {
+    margin: 0 0 18px;
+  }
+  .ai-advanced :deep(.el-form-item) {
+    margin-left: 0;
+  }
+  .backup-action {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 520px) {
+  .inline-field,
+  .model-picker {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .inline-field .el-button,
+  .model-picker .el-button {
+    width: 100%;
+  }
+  .ai-actions {
+    width: 100%;
+  }
+  .ai-actions .el-button {
+    flex: 1 1 calc(50% - 8px);
+    margin-left: 0;
+  }
 }
 </style>

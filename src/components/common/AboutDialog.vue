@@ -2,7 +2,7 @@
   <el-dialog
     v-model="visible"
     title="关于"
-    width="420px"
+    width="min(420px, calc(100vw - 32px))"
     :close-on-click-modal="false"
     :append-to-body="true"
     center
@@ -185,5 +185,18 @@ async function openDataDir() {
   font-size: 12px;
   color: var(--text-placeholder, #c0c4cc);
   margin: 0;
+}
+
+@media (max-width: 440px) {
+  .about-icon {
+    font-size: 40px;
+  }
+  .feature-row {
+    align-items: flex-start;
+  }
+  .about-data-actions .el-button {
+    flex: 1;
+    margin-left: 0;
+  }
 }
 </style>

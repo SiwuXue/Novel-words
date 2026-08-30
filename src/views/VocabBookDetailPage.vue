@@ -11,10 +11,10 @@
       </div>
       <div class="header-right">
         <el-input
+          class="header-search"
           v-model="searchQuery"
           :placeholder="t('vocabDetail.search')"
           clearable
-          style="width: 200px"
         >
           <template #prefix>
             <el-icon><Search /></el-icon>
@@ -374,9 +374,9 @@ async function handleImportCsv() {
 <style scoped>
 .vocab-book-detail-page {
   width: 100%;
-  max-width: 1440px;
-  margin: 0 auto;
-  padding: 24px;
+  min-width: 0;
+  min-height: 100%;
+  padding: clamp(4px, 1.5vw, 20px);
 }
 
 .page-header {
@@ -392,11 +392,17 @@ async function handleImportCsv() {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .header-left h2 {
   margin: 0;
   font-size: 20px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .word-count {
@@ -410,6 +416,9 @@ async function handleImportCsv() {
   align-items: center;
   flex-wrap: wrap;
 }
+.header-search {
+  width: min(100%, 240px);
+}
 
 .filter-tabs {
   margin-bottom: 16px;
@@ -418,5 +427,52 @@ async function handleImportCsv() {
 .pagination {
   margin-top: 16px;
   justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px 0;
+}
+
+@media (max-width: 760px) {
+  .page-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .header-left {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .header-left .word-count {
+    grid-column: 1 / -1;
+  }
+  .header-right {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .header-search {
+    width: 100%;
+    grid-column: 1 / -1;
+  }
+  .header-right .el-button,
+  .header-right :deep(.el-dropdown),
+  .header-right :deep(.el-dropdown .el-button) {
+    width: 100%;
+    margin-left: 0;
+  }
+  .filter-tabs :deep(.el-checkbox-group) {
+    display: flex;
+    flex-wrap: wrap;
+  }
+  .pagination :deep(.el-pagination__sizes),
+  .pagination :deep(.el-pagination__jump) {
+    display: none;
+  }
+}
+
+@media (max-width: 440px) {
+  .header-right {
+    grid-template-columns: 1fr;
+  }
+  .pagination :deep(.el-pagination__total) {
+    display: none;
+  }
 }
 </style>

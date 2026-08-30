@@ -111,10 +111,10 @@ onMounted(async () => {
 
 <style scoped>
 .home-page {
-  padding: 48px 40px;
   width: 100%;
-  max-width: 1120px;
-  margin: 0 auto;
+  min-width: 0;
+  min-height: 100%;
+  padding: clamp(20px, 4vw, 48px) clamp(8px, 3vw, 40px);
 }
 
 .hero {
@@ -137,8 +137,8 @@ onMounted(async () => {
 
 .stats-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+  gap: clamp(10px, 2vw, 20px);
   margin-bottom: 40px;
 }
 
@@ -261,6 +261,44 @@ onMounted(async () => {
   }
   .stat-card {
     padding: 16px 20px;
+  }
+}
+
+@media (max-width: 560px) {
+  .home-page {
+    padding: 16px 4px;
+  }
+  .hero {
+    margin-bottom: 24px;
+  }
+  .stats-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-bottom: 26px;
+  }
+  .stat-card {
+    padding: 14px 8px;
+  }
+  .recent-item {
+    gap: 8px;
+    padding: 11px 12px;
+  }
+  .recent-title {
+    max-width: 55%;
+  }
+  .actions-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .actions-row .el-button {
+    width: 100%;
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 360px) {
+  .stats-row,
+  .actions-row {
+    grid-template-columns: 1fr;
   }
 }
 </style>

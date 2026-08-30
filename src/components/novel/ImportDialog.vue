@@ -2,7 +2,7 @@
   <el-dialog
     v-model="visible"
     :title="t('import.title')"
-    width="680px"
+    width="min(680px, calc(100vw - 32px))"
     :close-on-click-modal="false"
     destroy-on-close
     @closed="emit('close')"
@@ -305,5 +305,28 @@ async function handleImport() {
   margin-top: 20px;
   padding-top: 16px;
   border-top: 1px solid var(--border-color, #ebeef5);
+}
+
+@media (max-width: 560px) {
+  .import-step {
+    min-height: 0;
+    padding: 8px 0;
+  }
+  .drop-zone {
+    padding: 32px 12px;
+  }
+  :deep(.el-descriptions__body .el-descriptions__table) {
+    table-layout: fixed;
+  }
+  :deep(.el-descriptions__cell) {
+    word-break: break-word;
+  }
+  .step-footer {
+    flex-wrap: wrap;
+  }
+  .step-footer .el-button {
+    flex: 1 1 100px;
+    margin-left: 0;
+  }
 }
 </style>

@@ -182,9 +182,9 @@ function goBack() {
 
 <style scoped>
 .review-page {
-  max-width: 720px;
-  margin: 0 auto;
-  padding: 24px;
+  width: 100%;
+  min-width: 0;
+  padding: clamp(4px, 2vw, 24px);
   display: flex;
   flex-direction: column;
   min-height: 100%;
@@ -192,6 +192,7 @@ function goBack() {
 .review-header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   margin-bottom: 24px;
 }
@@ -211,6 +212,7 @@ function goBack() {
 .review-progress-bar {
   margin-top: 4px;
   width: 100%;
+  flex-basis: 100%;
 }
 .review-state {
   flex: 1;
@@ -261,7 +263,7 @@ function goBack() {
 .review-card {
   background: var(--bg-secondary, #f5f7fa);
   border-radius: 16px;
-  padding: 48px 32px;
+  padding: clamp(28px, 6vw, 64px) clamp(16px, 5vw, 48px);
   text-align: center;
   margin-bottom: 24px;
 }
@@ -299,7 +301,7 @@ function goBack() {
   justify-content: center;
 }
 .review-actions .el-button {
-  min-width: 120px;
+  min-width: min(120px, 100%);
   height: auto;
   padding: 12px 0;
 }
@@ -307,5 +309,57 @@ function goBack() {
   font-size: 11px;
   font-weight: normal;
   opacity: 0.85;
+}
+
+@media (max-width: 640px) {
+  .review-header {
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .review-header h2 {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .review-progress {
+    width: 100%;
+    margin-left: 0;
+  }
+  .review-summary {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px 28px;
+    width: min(100%, 360px);
+  }
+  .review-card {
+    margin-bottom: 16px;
+    border-radius: 12px;
+  }
+  .card-word {
+    font-size: clamp(28px, 10vw, 36px);
+  }
+  .review-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .review-actions .el-button {
+    width: 100%;
+    min-width: 0;
+    margin-left: 0;
+    white-space: normal;
+  }
+  .review-actions .el-button:only-child {
+    grid-column: 1 / -1;
+    max-width: 240px;
+    justify-self: center;
+  }
+}
+
+@media (max-width: 390px) {
+  .review-actions {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

@@ -9,10 +9,10 @@
       <h2>{{ t('novelList.title') }}</h2>
       <div class="header-actions">
         <el-input
+          class="header-search"
           v-model="searchQuery"
           :placeholder="t('novelList.search')"
           clearable
-          style="width: 240px"
           @input="onSearch"
         >
           <template #prefix>
@@ -257,8 +257,9 @@ function formatDate(dateStr: string): string {
 <style scoped>
 .novel-list-page {
   width: 100%;
-  max-width: 1440px;
-  margin: 0 auto;
+  min-width: 0;
+  min-height: 100%;
+  padding: clamp(4px, 1.5vw, 20px);
 }
 .page-header {
   display: flex;
@@ -278,6 +279,9 @@ function formatDate(dateStr: string): string {
   align-items: center;
   flex-wrap: wrap;
   row-gap: 8px;
+}
+.header-search {
+  width: min(100%, 280px);
 }
 .fav-icon {
   cursor: pointer;
@@ -320,5 +324,34 @@ function formatDate(dateStr: string): string {
   font-size: 13px;
   font-weight: 400;
   opacity: 0.85;
+}
+
+@media (max-width: 640px) {
+  .novel-list-page {
+    padding: 4px;
+  }
+  .page-header,
+  .header-actions {
+    align-items: stretch;
+  }
+  .page-header {
+    flex-direction: column;
+  }
+  .header-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .header-search {
+    width: 100%;
+    grid-column: 1 / -1;
+  }
+  .header-actions .el-button {
+    width: 100%;
+    margin-left: 0;
+  }
+  .drop-overlay-inner {
+    width: calc(100vw - 32px);
+    padding: 24px 16px;
+  }
 }
 </style>

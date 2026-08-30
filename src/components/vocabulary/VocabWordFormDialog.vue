@@ -2,10 +2,10 @@
   <el-dialog
     v-model="visible"
     :title="isEdit ? '编辑单词' : '添加单词'"
-    width="480px"
+    width="min(480px, calc(100vw - 32px))"
     :close-on-click-modal="false"
   >
-    <el-form ref="formRef" :model="form" :rules="rules" label-width="70px">
+    <el-form class="responsive-dialog-form" ref="formRef" :model="form" :rules="rules" label-width="70px">
       <el-form-item label="单词" prop="word">
         <el-input v-model="form.word" placeholder="请输入单词" maxlength="200" show-word-limit />
       </el-form-item>
@@ -126,3 +126,16 @@ async function handleSubmit() {
   }
 }
 </script>
+
+<style scoped>
+@media (max-width: 520px) {
+  .responsive-dialog-form :deep(.el-form-item) { display: block; }
+  .responsive-dialog-form :deep(.el-form-item__label) {
+    width: 100% !important;
+    height: auto;
+    justify-content: flex-start;
+    margin-bottom: 6px;
+  }
+  .responsive-dialog-form :deep(.el-form-item__content) { margin-left: 0 !important; }
+}
+</style>

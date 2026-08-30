@@ -50,13 +50,29 @@ const currentPage = computed(() => {
 }
 .topbar-left {
   flex: 1;
+  min-width: 0;
   height: 100%;
   display: flex;
   align-items: center;
+}
+.topbar-left :deep(.el-breadcrumb) {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .topbar-right {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+@media (max-width: 480px) {
+  .topbar {
+    padding-left: 8px;
+  }
+  .topbar-left :deep(.el-breadcrumb__item:first-child) {
+    display: none;
+  }
 }
 </style>

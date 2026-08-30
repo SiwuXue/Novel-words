@@ -3,11 +3,11 @@
     <!-- Toolbar -->
     <div class="editor-toolbar" v-if="editor">
       <el-select
+        class="highlight-select"
         :model-value="highlightBookId"
         placeholder="选择词汇本高亮"
         clearable
         size="small"
-        style="width: 160px; margin-right: 8px;"
         @update:model-value="emit('update:highlightBookId', $event as number | null)"
       >
         <el-option
@@ -411,6 +411,11 @@ defineExpose({ scrollToText, getScrollEl, getScrollPercent, setScrollPercent })
   background: var(--bg-secondary, #fafafa);
   flex-wrap: wrap;
 }
+.highlight-select {
+  width: 180px;
+  max-width: 100%;
+  margin-right: 8px;
+}
 
 .toolbar-group {
   margin-right: 4px;
@@ -481,5 +486,23 @@ defineExpose({ scrollToText, getScrollEl, getScrollPercent, setScrollPercent })
   float: left;
   height: 0;
   pointer-events: none;
+}
+
+@media (max-width: 560px) {
+  .editor-toolbar {
+    gap: 6px;
+    padding: 6px 8px;
+  }
+  .highlight-select {
+    width: 100%;
+    margin-right: 0;
+  }
+  .save-indicator {
+    width: 100%;
+    margin-left: 0;
+  }
+  :deep(.tiptap-editor) {
+    padding: 14px 12px;
+  }
 }
 </style>

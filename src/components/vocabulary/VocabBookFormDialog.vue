@@ -2,10 +2,10 @@
   <el-dialog
     v-model="visible"
     :title="isEdit ? '编辑词汇本' : '新建词汇本'"
-    width="460px"
+    width="min(460px, calc(100vw - 32px))"
     :close-on-click-modal="false"
   >
-    <el-form ref="formRef" :model="form" :rules="rules" label-width="60px">
+    <el-form class="responsive-dialog-form" ref="formRef" :model="form" :rules="rules" label-width="60px">
       <el-form-item label="名称" prop="name">
         <el-input v-model="form.name" placeholder="请输入词汇本名称" maxlength="100" show-word-limit />
       </el-form-item>
@@ -90,3 +90,16 @@ async function handleSubmit() {
   }
 }
 </script>
+
+<style scoped>
+@media (max-width: 520px) {
+  .responsive-dialog-form :deep(.el-form-item) { display: block; }
+  .responsive-dialog-form :deep(.el-form-item__label) {
+    width: 100% !important;
+    height: auto;
+    justify-content: flex-start;
+    margin-bottom: 6px;
+  }
+  .responsive-dialog-form :deep(.el-form-item__content) { margin-left: 0 !important; }
+}
+</style>

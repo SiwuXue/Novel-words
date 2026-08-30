@@ -15,5 +15,17 @@
   align-items: center;
   justify-content: center;
   height: 100%;
+  width: 100%;
+  min-width: 0;
+  padding: clamp(8px, 3vw, 28px);
+}
+.not-found-page :deep(.el-result__extra) {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.not-found-page :deep(.el-result__extra .el-button) {
+  margin-left: 0;
 }
 </style>

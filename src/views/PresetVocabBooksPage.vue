@@ -74,9 +74,9 @@ function onImported(bookId: number) {
 <style scoped>
 .preset-page {
   width: 100%;
-  max-width: 1120px;
-  margin: 0 auto;
-  padding: 24px;
+  min-width: 0;
+  min-height: 100%;
+  padding: clamp(8px, 1.5vw, 24px);
 }
 .page-header h2 {
   margin: 0 0 6px;
@@ -95,8 +95,8 @@ function onImported(bookId: number) {
 }
 .preset-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
+  gap: clamp(10px, 1.5vw, 18px);
 }
 .preset-card {
   background: var(--bg-secondary, #f5f7fa);
@@ -137,5 +137,20 @@ function onImported(bookId: number) {
 .preset-card .el-button {
   align-self: flex-start;
   margin-top: 4px;
+}
+
+@media (max-width: 560px) {
+  .preset-page {
+    padding: 4px;
+  }
+  .subtitle {
+    margin-bottom: 14px;
+  }
+  .preset-card {
+    padding: 14px;
+  }
+  .preset-card .el-button {
+    width: 100%;
+  }
 }
 </style>

@@ -4,10 +4,10 @@
       <h2>{{ t('vocabList.title') }}</h2>
       <div class="header-actions">
         <el-input
+          class="header-search"
           v-model="searchQuery"
           :placeholder="t('vocabList.search')"
           clearable
-          style="width: 240px"
         >
           <template #prefix>
             <el-icon><Search /></el-icon>
@@ -196,9 +196,9 @@ function formatDate(raw: string): string {
 <style scoped>
 .vocab-book-list-page {
   width: 100%;
-  max-width: 1440px;
-  margin: 0 auto;
-  padding: 24px;
+  min-width: 0;
+  min-height: 100%;
+  padding: clamp(4px, 1.5vw, 20px);
 }
 
 .page-header {
@@ -220,5 +220,34 @@ function formatDate(raw: string): string {
   gap: 12px;
   flex-wrap: wrap;
   row-gap: 8px;
+}
+.header-search {
+  width: min(100%, 280px);
+}
+
+@media (max-width: 640px) {
+  .page-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .header-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .header-search {
+    width: 100%;
+  }
+  .header-actions .el-button {
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 420px) {
+  .header-actions {
+    grid-template-columns: 1fr;
+  }
+  .header-actions .el-button {
+    width: 100%;
+  }
 }
 </style>
