@@ -11,3 +11,4 @@ pub mod app_info;
 pub mod export;
 pub mod review;
 pub mod preset_vocab;
+pub mod ai_enhancer;

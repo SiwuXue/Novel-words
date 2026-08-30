@@ -112,6 +112,127 @@
         </el-form>
       </el-tab-pane>
 
+      <!-- AI enhancer tab -->
+      <el-tab-pane :label="t('settings.aiEnhancer')" name="ai">
+        <el-alert
+          :title="t('settings.aiHelpTitle')"
+          :description="t('settings.aiHelp')"
+          type="info"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 20px;"
+        />
+        <el-form label-width="140px" style="max-width: 760px;">
+          <el-form-item :label="t('settings.aiEnabled')">
+            <el-switch v-model="aiEnabled" />
+          </el-form-item>
+          <el-form-item :label="t('settings.aiProvider')" required>
+            <el-select
+              v-model="aiProvider"
+              filterable
+              style="width: 100%;"
+              @change="onAiProviderChange"
+            >
+              <el-option
+                v-for="provider in AI_PROVIDER_PRESETS"
+                :key="provider.id"
+                :label="provider.name"
+                :value="provider.id"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item :label="t('settings.aiModel')" required>
+            <div class="model-picker">
+              <el-select
+                v-model="aiModel"
+                filterable
+                allow-create
+                default-first-option
+                :reserve-keyword="false"
+                :placeholder="t('settings.aiModelPlaceholder')"
+                style="flex: 1;"
+              >
+                <el-option
+                  v-for="model in aiModelOptions"
+                  :key="model"
+                  :label="model"
+                  :value="model"
+                />
+              </el-select>
+              <el-button :loading="loadingAiModels" @click="onLoadAiModels">
+                {{ t('settings.aiLoadModels') }}
+              </el-button>
+            </div>
+            <div class="field-hint">{{ t('settings.aiModelHint') }}</div>
+          </el-form-item>
+          <el-form-item label="API Key">
+            <el-input
+              v-model="aiApiKey"
+              type="password"
+              show-password
+              :placeholder="aiKeyConfigured ? t('settings.aiKeySaved') : t('settings.aiKeyPlaceholder')"
+              autocomplete="new-password"
+            />
+            <div class="field-hint">{{ t('settings.aiKeyHint') }}</div>
+          </el-form-item>
+          <el-collapse class="ai-advanced">
+            <el-collapse-item :title="t('settings.aiAdvanced')" name="advanced">
+              <el-form-item :label="t('settings.aiBaseUrl')" required>
+                <el-input
+                  v-model="aiBaseUrl"
+                  placeholder="https://api.openai.com/v1"
+                  autocomplete="off"
+                />
+                <div class="field-hint">{{ t('settings.aiBaseUrlHint') }}</div>
+              </el-form-item>
+              <el-form-item label="Temperature">
+                <el-input
+                  v-model="aiTemperature"
+                  :placeholder="t('settings.aiOptionalDefault')"
+                  inputmode="decimal"
+                />
+                <div class="field-hint">{{ t('settings.aiTemperatureHint') }}</div>
+              </el-form-item>
+              <el-form-item label="Top P">
+                <el-input
+                  v-model="aiTopP"
+                  :placeholder="t('settings.aiOptionalDefault')"
+                  inputmode="decimal"
+                />
+                <div class="field-hint">{{ t('settings.aiTopPHint') }}</div>
+              </el-form-item>
+              <el-form-item :label="t('settings.aiMaxTokens')">
+                <el-input
+                  v-model="aiMaxTokens"
+                  :placeholder="t('settings.aiOptionalDefault')"
+                  inputmode="numeric"
+                />
+                <div class="field-hint">{{ t('settings.aiMaxTokensHint') }}</div>
+              </el-form-item>
+            </el-collapse-item>
+          </el-collapse>
+          <el-form-item>
+            <div class="ai-actions">
+              <el-button type="primary" :loading="savingAi" @click="onSaveAi">
+                {{ t('settings.aiSave') }}
+              </el-button>
+              <el-button :loading="testingAi" @click="onTestAi">
+                {{ t('settings.aiTest') }}
+              </el-button>
+              <el-button
+                v-if="aiKeyConfigured"
+                type="danger"
+                plain
+                :loading="clearingAiKey"
+                @click="onClearAiKey"
+              >
+                {{ t('settings.aiClearKey') }}
+              </el-button>
+            </div>
+          </el-form-item>
+        </el-form>
+      </el-tab-pane>
+
       <!-- Backup / restore tab -->
       <el-tab-pane :label="t('settings.backup')" name="backup">
         <el-form label-width="130px">
@@ -138,7 +259,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
 import { open, save } from '@tauri-apps/plugin-dialog'
@@ -148,6 +269,7 @@ import { useVocabBookStore } from '@/stores/vocabBookStore'
 import { STEP_LABELS, type StepNum } from '@/types/pdfSteps'
 import { speakWord, type SpeechAccent } from '@/utils/speech'
 import { t, getLocale, setLocale, type Locale } from '@/i18n'
+import { AI_PROVIDER_PRESETS, getAiProvider } from '@/config/aiProviders'
 
 const settingsStore = useSettingsStore()
 const vocabBookStore = useVocabBookStore()
@@ -159,6 +281,45 @@ const autoBackupLocal = ref<AutoBackup>(settingsStore.autoBackup)
 const backingUp = ref(false)
 const restoring = ref(false)
 const currentLocale = ref<Locale>(getLocale())
+const aiEnabled = ref(false)
+const aiProvider = ref('openai')
+const aiBaseUrl = ref('https://api.openai.com/v1')
+const aiModel = ref('')
+const aiApiKey = ref('')
+const aiKeyConfigured = ref(false)
+const savedAiKeyConfigured = ref(false)
+const savedAiProvider = ref('openai')
+const savedAiBaseUrl = ref('https://api.openai.com/v1')
+const discoveredAiModels = ref<string[]>([])
+const aiTemperature = ref('')
+const aiTopP = ref('')
+const aiMaxTokens = ref('')
+const savingAi = ref(false)
+const testingAi = ref(false)
+const loadingAiModels = ref(false)
+const clearingAiKey = ref(false)
+
+const aiModelOptions = computed(() => {
+  const presetModels = getAiProvider(aiProvider.value).models
+  return [...new Set([...presetModels, ...discoveredAiModels.value])]
+})
+
+interface AiSettingsView {
+  enabled: boolean
+  provider: string
+  baseUrl: string
+  model: string
+  apiKeyConfigured: boolean
+  temperature: number | null
+  topP: number | null
+  maxTokens: number | null
+}
+
+watch([aiProvider, aiBaseUrl], ([provider, baseUrl]) => {
+  aiKeyConfigured.value = savedAiKeyConfigured.value
+    && provider === savedAiProvider.value
+    && baseUrl.trim().replace(/\/+$/, '') === savedAiBaseUrl.value.trim().replace(/\/+$/, '')
+})
 
 function onLocaleChange(l: Locale) {
   currentLocale.value = l
@@ -232,6 +393,155 @@ function onTestAccent() {
   speakWord('hello', settingsStore.speechAccent)
 }
 
+async function loadAiSettings() {
+  try {
+    const settings = await invoke<AiSettingsView>('get_ai_settings')
+    aiEnabled.value = settings.enabled
+    aiProvider.value = settings.provider || 'openai'
+    aiBaseUrl.value = settings.baseUrl || 'https://api.openai.com/v1'
+    aiModel.value = settings.model
+    aiKeyConfigured.value = settings.apiKeyConfigured
+    savedAiKeyConfigured.value = settings.apiKeyConfigured
+    savedAiProvider.value = aiProvider.value
+    savedAiBaseUrl.value = aiBaseUrl.value
+    aiTemperature.value = settings.temperature == null ? '' : String(settings.temperature)
+    aiTopP.value = settings.topP == null ? '' : String(settings.topP)
+    aiMaxTokens.value = settings.maxTokens == null ? '' : String(settings.maxTokens)
+    aiApiKey.value = ''
+  } catch (e: any) {
+    ElMessage.error(t('settings.aiLoadFailed') + ': ' + String(e?.message || e))
+  }
+}
+
+function parseOptionalNumber(value: string, label: string): number | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  const parsed = Number(trimmed)
+  if (!Number.isFinite(parsed)) throw new Error(`${label}: ${t('settings.aiInvalidNumber')}`)
+  return parsed
+}
+
+function currentAiParameters() {
+  const maxTokens = parseOptionalNumber(aiMaxTokens.value, t('settings.aiMaxTokens'))
+  if (maxTokens != null && !Number.isInteger(maxTokens)) {
+    throw new Error(`${t('settings.aiMaxTokens')}: ${t('settings.aiIntegerRequired')}`)
+  }
+  return {
+    temperature: parseOptionalNumber(aiTemperature.value, 'Temperature'),
+    topP: parseOptionalNumber(aiTopP.value, 'Top P'),
+    maxTokens,
+  }
+}
+
+function onAiProviderChange(providerId: string) {
+  const preset = getAiProvider(providerId)
+  discoveredAiModels.value = []
+  if (preset.baseUrl) aiBaseUrl.value = preset.baseUrl
+  aiModel.value = preset.models[0] || ''
+  const sameSavedConnection = providerId === savedAiProvider.value
+    && aiBaseUrl.value === savedAiBaseUrl.value
+  aiKeyConfigured.value = sameSavedConnection
+  aiApiKey.value = ''
+}
+
+async function onLoadAiModels() {
+  if (loadingAiModels.value) return
+  loadingAiModels.value = true
+  try {
+    const models = await invoke<string[]>('list_ai_models', {
+      provider: aiProvider.value,
+      baseUrl: aiBaseUrl.value,
+      apiKey: aiApiKey.value.trim() || null,
+    })
+    discoveredAiModels.value = models
+    if (!aiModel.value && models.length > 0) aiModel.value = models[0]
+    ElMessage.success(t('settings.aiModelsLoaded', { n: models.length }))
+  } catch (e: any) {
+    ElMessage.warning(String(e?.message || e || t('settings.aiLoadModelsFailed')))
+  } finally {
+    loadingAiModels.value = false
+  }
+}
+
+async function saveAiSettings(clearApiKey = false) {
+  const parameters = currentAiParameters()
+  await invoke('save_ai_settings', {
+    enabled: aiEnabled.value,
+    provider: aiProvider.value,
+    baseUrl: aiBaseUrl.value,
+    apiKey: aiApiKey.value.trim() || null,
+    clearApiKey,
+    model: aiModel.value,
+    ...parameters,
+  })
+  const connectionChanged = savedAiProvider.value !== aiProvider.value
+    || savedAiBaseUrl.value !== aiBaseUrl.value
+  if (clearApiKey || (connectionChanged && !aiApiKey.value.trim())) {
+    aiKeyConfigured.value = false
+  } else if (aiApiKey.value.trim()) {
+    aiKeyConfigured.value = true
+  }
+  savedAiProvider.value = aiProvider.value
+  savedAiBaseUrl.value = aiBaseUrl.value
+  savedAiKeyConfigured.value = aiKeyConfigured.value
+  aiApiKey.value = ''
+}
+
+async function onSaveAi() {
+  if (savingAi.value) return
+  savingAi.value = true
+  try {
+    await saveAiSettings()
+    ElMessage.success(t('settings.aiSaved'))
+  } catch (e: any) {
+    ElMessage.error(String(e?.message || e || t('settings.aiSaveFailed')))
+  } finally {
+    savingAi.value = false
+  }
+}
+
+async function onTestAi() {
+  if (testingAi.value) return
+  testingAi.value = true
+  try {
+    const parameters = currentAiParameters()
+    const message = await invoke<string>('test_ai_connection', {
+      provider: aiProvider.value,
+      baseUrl: aiBaseUrl.value,
+      apiKey: aiApiKey.value.trim() || null,
+      model: aiModel.value,
+      ...parameters,
+    })
+    ElMessage.success(message)
+  } catch (e: any) {
+    ElMessage.error(String(e?.message || e || t('settings.aiTestFailed')))
+  } finally {
+    testingAi.value = false
+  }
+}
+
+async function onClearAiKey() {
+  if (clearingAiKey.value) return
+  try {
+    await ElMessageBox.confirm(
+      t('settings.aiClearKeyConfirm'),
+      t('settings.aiClearKey'),
+      { type: 'warning', confirmButtonText: t('settings.aiClearKey'), cancelButtonText: t('preset.cancel') },
+    )
+  } catch {
+    return
+  }
+  clearingAiKey.value = true
+  try {
+    await saveAiSettings(true)
+    ElMessage.success(t('settings.aiKeyCleared'))
+  } catch (e: any) {
+    ElMessage.error(String(e?.message || e))
+  } finally {
+    clearingAiKey.value = false
+  }
+}
+
 function backupDefaultName(): string {
   const d = new Date()
   const pad = (n: number) => String(n).padStart(2, '0')
@@ -299,6 +609,7 @@ onMounted(() => {
   }
   // In case the store was fully loaded before setup() ran.
   localSteps.value = [...settingsStore.pdfIntensiveSteps]
+  void loadAiSettings()
 })
 </script>
 
@@ -319,5 +630,32 @@ onMounted(() => {
 .backup-hint {
   font-size: 12px;
   color: var(--text-secondary, #909399);
+}
+.field-hint {
+  width: 100%;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary, #909399);
+}
+.ai-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.model-picker {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+.ai-advanced {
+  margin: 0 0 20px 140px;
+  border-top: none;
+}
+.ai-advanced :deep(.el-collapse-item__content) {
+  padding-top: 12px;
+}
+.ai-advanced :deep(.el-form-item) {
+  margin-left: -140px;
 }
 </style>

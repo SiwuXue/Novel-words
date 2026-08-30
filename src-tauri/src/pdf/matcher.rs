@@ -23,10 +23,31 @@ fn is_cjk(c: char) -> bool {
 pub fn extract_cn_terms(definition: &str) -> Vec<String> {
     let mut terms = Vec::new();
     let separators = |c: char| {
-        matches!(c,
-            ';' | '；' | ',' | '，' | '、' | '/' | '|' | '\n' | '.'
-            | '(' | ')' | '（' | '）' | '[' | ']' | '【' | '】'
-            | ' ' | '\t' | '～' | '~' | '"' | '\u{201C}' | '\u{201D}'
+        matches!(
+            c,
+            ';' | '；'
+                | ','
+                | '，'
+                | '、'
+                | '/'
+                | '|'
+                | '\n'
+                | '.'
+                | '('
+                | ')'
+                | '（'
+                | '）'
+                | '['
+                | ']'
+                | '【'
+                | '】'
+                | ' '
+                | '\t'
+                | '～'
+                | '~'
+                | '"'
+                | '\u{201C}'
+                | '\u{201D}'
         )
     };
     for segment in definition.split(separators) {
@@ -212,10 +233,7 @@ fn contains_ascii_ci(haystack: &str, needle: &str) -> bool {
 /// in `line` (English body text). Non-overlapping; longer words win on
 /// overlap. Apostrophes inside the word (e.g. "don't") are tolerated by
 /// treating `'` as a word character when it sits between letters.
-pub fn find_matches_in_line_en<'a>(
-    line: &str,
-    words: &'a [VocabWord],
-) -> Vec<EnMatch<'a>> {
+pub fn find_matches_in_line_en<'a>(line: &str, words: &'a [VocabWord]) -> Vec<EnMatch<'a>> {
     // Pre-build lowercase char array of the line for fast scanning.
     let line_chars: Vec<char> = line.chars().collect();
     let line_lower: String = line_chars.iter().map(|c| c.to_ascii_lowercase()).collect();

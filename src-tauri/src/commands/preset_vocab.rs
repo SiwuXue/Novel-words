@@ -4,14 +4,18 @@
 //!
 //! The tailoring is heuristic: for each preset word we look up its Chinese
 //! translations via the local dictionary, count occurrences in the novel's
-//! cleaned text, and take the top-N by frequency. An optional cloud-LLM
-//! enhancer is not implemented yet; the heuristic baseline already gives a
-//! novel-relevant subset with auto-extracted example sentences.
+//! cleaned text, rank matches by frequency, and optionally ask an
+//! OpenAI-compatible model to validate the contextual sense.
+
+use std::collections::HashMap;
 
 use rusqlite::{params, OptionalExtension};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use crate::commands::ai_enhancer::{
+    enhance_vocab_items, load_ai_config, AiWordDecision, AiWordInput,
+};
 use crate::commands::vocab_word::row_to_vocab_word;
 use crate::db::DbState;
 use crate::dictionary::DictDbState;
@@ -29,7 +33,7 @@ pub struct PresetVocabBook {
 }
 
 /// One tailored word in the preview/commit result.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresetCloneItem {
     pub word: String,
@@ -37,6 +41,8 @@ pub struct PresetCloneItem {
     pub phonetic: String,
     pub example_sentence: String,
     pub hit_count: i64,
+    #[serde(default, skip_serializing)]
+    pub matched_terms: Vec<String>,
 }
 
 /// Result of `preview_preset_clone` (and reused by `commit_preset_clone`).
@@ -47,6 +53,8 @@ pub struct PresetClonePreview {
     pub novel_id: i64,
     pub total_preset_words: i64,
     pub matched_count: i64,
+    pub ai_enhanced: bool,
+    pub ai_message: String,
     pub items: Vec<PresetCloneItem>,
 }
 
@@ -58,6 +66,7 @@ pub struct PresetCloneProgress {
     pub processed: usize,
     pub total: usize,
     pub percent: u32,
+    pub stage: String,
 }
 
 /// List all bundled preset vocab books (read-only references).
@@ -157,8 +166,10 @@ fn tailor(
             // Count occurrences (substring) of each term in the novel text.
             let mut hit_count: i64 = 0;
             let mut first_example = String::new();
+            let mut matched_terms = Vec::new();
             for term in &terms {
                 let t = term.as_str();
+                let hits_before = hit_count;
                 let mut from = 0usize;
                 while let Some(relative_pos) = novel_text[from..].find(t) {
                     let pos = from + relative_pos;
@@ -171,6 +182,9 @@ fn tailor(
                         break;
                     }
                 }
+                if hit_count > hits_before {
+                    matched_terms.push(term.clone());
+                }
             }
 
             if hit_count > 0 {
@@ -180,6 +194,7 @@ fn tailor(
                     phonetic: w.phonetic.clone(),
                     example_sentence: first_example,
                     hit_count,
+                    matched_terms,
                 });
             }
         }
@@ -239,6 +254,59 @@ fn extract_example_sentence(text: &str, pos: usize, term: &str) -> String {
     }
 }
 
+fn build_ai_inputs(items: &[PresetCloneItem]) -> Vec<AiWordInput> {
+    items
+        .iter()
+        .map(|item| AiWordInput {
+            word: item.word.clone(),
+            definition: item
+                .definition
+                .split('【')
+                .next()
+                .unwrap_or(&item.definition)
+                .chars()
+                .take(120)
+                .collect(),
+            example_sentence: item.example_sentence.clone(),
+            matched_terms: item.matched_terms.clone(),
+            hit_count: item.hit_count,
+        })
+        .collect()
+}
+
+fn apply_ai_decisions(items: &mut Vec<PresetCloneItem>, decisions: Vec<AiWordDecision>) {
+    let decisions: HashMap<String, AiWordDecision> = decisions
+        .into_iter()
+        .map(|decision| (decision.word.trim().to_lowercase(), decision))
+        .collect();
+    items.retain_mut(|item| {
+        let Some(decision) = decisions.get(&item.word.to_lowercase()) else {
+            return true;
+        };
+        if !decision.keep {
+            return false;
+        }
+        let definition = decision.context_definition.trim();
+        if !definition.is_empty()
+            && definition.chars().count() <= 40
+            && item
+                .matched_terms
+                .iter()
+                .any(|term| definition.contains(term))
+        {
+            item.definition = definition.to_string();
+        }
+        let example = decision.example_sentence.trim();
+        if !example.is_empty()
+            && example.chars().count() <= 160
+            && item.matched_terms.iter().any(|term| example.contains(term))
+        {
+            item.example_sentence = example.to_string();
+        }
+        true
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -265,12 +333,15 @@ mod tests {
             phonetic: String::new(),
             example_sentence: String::new(),
             hit_count: 2,
+            matched_terms: vec!["小说".into()],
         };
         let preview = PresetClonePreview {
             preset_key: "cet4".into(),
             novel_id: 7,
             total_preset_words: 1162,
             matched_count: 1,
+            ai_enhanced: false,
+            ai_message: String::new(),
             items: vec![item.clone()],
         };
         let progress = PresetCloneProgress {
@@ -278,6 +349,7 @@ mod tests {
             processed: 10,
             total: 100,
             percent: 10,
+            stage: "local".into(),
         };
 
         let book_json = serde_json::to_value(book).unwrap();
@@ -358,40 +430,98 @@ pub async fn preview_preset_clone(
     novel_id: i64,
     request_id: String,
 ) -> Result<PresetClonePreview, String> {
-    tokio::task::spawn_blocking(move || {
-        let state = app.state::<DbState>();
-        let dict_state = app.state::<DictDbState>();
+    let (ai_config, initial_ai_message) = match load_ai_config(&app.state::<DbState>()) {
+        Ok(config) if config.enabled => match config.validate() {
+            Ok(()) => (Some(config), String::new()),
+            Err(error) => (None, format!("AI 增强未运行，已使用本地结果：{}", error)),
+        },
+        Ok(_) => (None, String::new()),
+        Err(error) => (None, format!("AI 设置读取失败，已使用本地结果：{}", error)),
+    };
+    let local_progress_max = if ai_config.is_some() { 70 } else { 100 };
+    let local_app = app.clone();
+    let local_request_id = request_id.clone();
+    let local_preset_key = preset_key.clone();
+
+    let mut preview = tokio::task::spawn_blocking(move || -> Result<PresetClonePreview, String> {
+        let state = local_app.state::<DbState>();
+        let dict_state = local_app.state::<DictDbState>();
         let (_preset_id, preset_words, novel_text) =
-            load_preset_and_novel(&state, &preset_key, novel_id)?;
+            load_preset_and_novel(&state, &local_preset_key, novel_id)?;
         let total = preset_words.len() as i64;
         let progress = |processed: usize, total: usize| {
             let percent = if total == 0 {
-                100
+                local_progress_max
             } else {
-                ((processed * 100) / total) as u32
+                ((processed * local_progress_max as usize) / total) as u32
             };
-            let _ = app.emit(
+            let _ = local_app.emit(
                 "preset-clone-progress",
                 PresetCloneProgress {
-                    request_id: request_id.clone(),
+                    request_id: local_request_id.clone(),
                     processed,
                     total,
                     percent,
+                    stage: "local".into(),
                 },
             );
         };
         let items = tailor(&dict_state, &preset_words, &novel_text, Some(&progress))?;
         let matched = items.len() as i64;
         Ok(PresetClonePreview {
-            preset_key,
+            preset_key: local_preset_key,
             novel_id,
             total_preset_words: total,
             matched_count: matched,
+            ai_enhanced: false,
+            ai_message: initial_ai_message,
             items,
         })
     })
     .await
-    .map_err(|e| format!("后台计算任务失败: {}", e))?
+    .map_err(|e| format!("后台计算任务失败: {}", e))??;
+
+    if let Some(config) = ai_config {
+        let before = preview.items.len();
+        let inputs = build_ai_inputs(&preview.items);
+        let progress_app = app.clone();
+        let progress_request_id = request_id.clone();
+        match enhance_vocab_items(&config, &inputs, move |processed, total| {
+            let percent = if total == 0 {
+                100
+            } else {
+                70 + ((processed * 30) / total) as u32
+            };
+            let _ = progress_app.emit(
+                "preset-clone-progress",
+                PresetCloneProgress {
+                    request_id: progress_request_id.clone(),
+                    processed,
+                    total,
+                    percent,
+                    stage: "ai".into(),
+                },
+            );
+        })
+        .await
+        {
+            Ok(decisions) => {
+                apply_ai_decisions(&mut preview.items, decisions);
+                preview.matched_count = preview.items.len() as i64;
+                preview.ai_enhanced = true;
+                preview.ai_message = format!(
+                    "AI 已复核 {} 个本地匹配，保留 {} 个",
+                    before,
+                    preview.items.len()
+                );
+            }
+            Err(error) => {
+                preview.ai_message = format!("AI 增强失败，已使用本地结果：{}", error);
+            }
+        }
+    }
+
+    Ok(preview)
 }
 
 /// Write the tailored subset into a NEW personal vocab book and return its id.
@@ -401,17 +531,22 @@ pub async fn commit_preset_clone(
     preset_key: String,
     novel_id: i64,
     new_book_name: Option<String>,
+    items: Vec<PresetCloneItem>,
 ) -> Result<i64, String> {
     tokio::task::spawn_blocking(move || {
         let state = app.state::<DbState>();
-        let dict_state = app.state::<DictDbState>();
-        let (preset_id, preset_words, novel_text) =
-            load_preset_and_novel(&state, &preset_key, novel_id)?;
-        let items = tailor(&dict_state, &preset_words, &novel_text, None)?;
         if items.is_empty() {
             return Err("没有匹配的单词，无法导入".into());
         }
-        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let mut db = state.db.lock().map_err(|e| e.to_string())?;
+
+        let preset_id: i64 = db
+            .query_row(
+                "SELECT id FROM vocab_book WHERE is_preset = 1 AND preset_key = ?1 LIMIT 1",
+                params![preset_key],
+                |row| row.get(0),
+            )
+            .map_err(|_| format!("未找到预设词表: {}", preset_key))?;
 
         // Build a sensible default name.
         let novel_title: String = db
@@ -435,7 +570,8 @@ pub async fn commit_preset_clone(
                 format!("{} · {}精选", label, novel_title)
             });
 
-        db.execute(
+        let tx = db.transaction().map_err(|e| format!("开启导入事务失败: {}", e))?;
+        tx.execute(
             "INSERT INTO vocab_book (name, description, is_preset, preset_key, cloned_from_preset_key) \
              VALUES (?1, ?2, 0, '', ?3)",
             params![
@@ -445,27 +581,29 @@ pub async fn commit_preset_clone(
             ],
         )
         .map_err(|e| format!("创建词表失败: {}", e))?;
-        let new_book_id = db.last_insert_rowid();
+        let new_book_id = tx.last_insert_rowid();
 
-        let mut stmt = db
-            .prepare(
-                "INSERT INTO vocab_word \
-                 (vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'unknown', '')",
-            )
-            .map_err(|e| format!("准备插入失败: {}", e))?;
-        for it in &items {
-            stmt.execute(params![
-                new_book_id,
-                &it.word,
-                &it.definition,
-                &it.phonetic,
-                &it.example_sentence,
-                novel_id,
-            ])
-            .map_err(|e| format!("插入单词 {} 失败: {}", it.word, e))?;
+        {
+            let mut stmt = tx
+                .prepare(
+                    "INSERT INTO vocab_word \
+                     (vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'unknown', '')",
+                )
+                .map_err(|e| format!("准备插入失败: {}", e))?;
+            for it in &items {
+                stmt.execute(params![
+                    new_book_id,
+                    &it.word,
+                    &it.definition,
+                    &it.phonetic,
+                    &it.example_sentence,
+                    novel_id,
+                ])
+                .map_err(|e| format!("插入单词 {} 失败: {}", it.word, e))?;
+            }
         }
-        // Touch the source preset so its updated_at bumps (purely cosmetic).
+        tx.commit().map_err(|e| format!("提交导入事务失败: {}", e))?;
         let _ = preset_id;
 
         Ok(new_book_id)

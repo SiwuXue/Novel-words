@@ -38,5 +38,7 @@ export interface PresetClonePreview {
   novelId: number
   totalPresetWords: number
   matchedCount: number
+  aiEnhanced: boolean
+  aiMessage: string
   items: PresetCloneItem[]
 }

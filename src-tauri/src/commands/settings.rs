@@ -2,8 +2,13 @@ use crate::db::DbState;
 use crate::models::AppSetting;
 use tauri::State;
 
+const PROTECTED_SETTING_KEYS: &[&str] = &["ai_api_key"];
+
 #[tauri::command]
 pub fn get_setting(state: State<DbState>, key: String) -> Result<String, String> {
+    if PROTECTED_SETTING_KEYS.contains(&key.as_str()) {
+        return Err("该设置只能由专用安全接口访问".into());
+    }
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let result: Result<String, _> = db.query_row(
         "SELECT value FROM app_settings WHERE key=?1",
@@ -19,6 +24,9 @@ pub fn get_setting(state: State<DbState>, key: String) -> Result<String, String>
 
 #[tauri::command]
 pub fn set_setting(state: State<DbState>, key: String, value: String) -> Result<(), String> {
+    if PROTECTED_SETTING_KEYS.contains(&key.as_str()) {
+        return Err("该设置只能由专用安全接口修改".into());
+    }
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.execute(
         "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?1, ?2)",
@@ -32,7 +40,9 @@ pub fn set_setting(state: State<DbState>, key: String, value: String) -> Result<
 pub fn get_all_settings(state: State<DbState>) -> Result<Vec<AppSetting>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let mut stmt = db
-        .prepare("SELECT key, value FROM app_settings")
+        // API keys are read only by dedicated Rust commands and must never be
+        // included in the general settings payload sent to the webview.
+        .prepare("SELECT key, value FROM app_settings WHERE key != 'ai_api_key'")
         .map_err(|e| e.to_string())?;
 
     let settings = stmt

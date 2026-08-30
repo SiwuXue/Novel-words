@@ -36,6 +36,7 @@ use commands::pdf_export::export_pdf;
 use commands::preset_vocab::{commit_preset_clone, list_preset_vocab_books, preview_preset_clone};
 use commands::review::{get_due_words, get_due_words_count, get_learning_stats, get_review_progress, review_vocab_word};
 use commands::settings::{get_all_settings, get_setting, set_setting};
+use commands::ai_enhancer::{get_ai_settings, list_ai_models, save_ai_settings, test_ai_connection};
 use dictionary::{dict_lookup_chinese, dict_lookup_english, DictDbState};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -188,6 +189,10 @@ pub fn run() {
             get_setting,
             set_setting,
             get_all_settings,
+            get_ai_settings,
+            list_ai_models,
+            save_ai_settings,
+            test_ai_connection,
             dict_lookup_english,
             dict_lookup_chinese,
         ])

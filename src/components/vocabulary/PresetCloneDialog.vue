@@ -34,7 +34,9 @@
         <el-progress :percentage="progressPercent" :stroke-width="8" />
         <div class="progress-label">
           {{ progressTotal > 0
-            ? t('preset.computingProgress', { processed: progressProcessed, total: progressTotal })
+            ? (progressStage === 'ai'
+              ? t('preset.aiProgress', { processed: progressProcessed, total: progressTotal })
+              : t('preset.computingProgress', { processed: progressProcessed, total: progressTotal }))
             : t('preset.preparing') }}
         </div>
       </div>
@@ -46,6 +48,14 @@
         {{ t('preset.matchedSummary', { total: preview.totalPresetWords, matched: preview.matchedCount }) }}
         <span class="hint" v-if="preview.items.length === 0">{{ t('preset.noMatch') }}</span>
       </div>
+      <el-alert
+        v-if="preview.aiMessage"
+        class="ai-result-alert"
+        :title="preview.aiMessage"
+        :type="preview.aiEnhanced ? 'success' : 'warning'"
+        :closable="false"
+        show-icon
+      />
 
       <el-table :data="preview.items" max-height="340" size="small" style="margin-top: 8px">
         <el-table-column :label="t('preset.word')" width="120" prop="word" />
@@ -103,6 +113,7 @@ const newBookName = ref('')
 const progressPercent = ref(0)
 const progressProcessed = ref(0)
 const progressTotal = ref(0)
+const progressStage = ref<'local' | 'ai'>('local')
 const activeRequestId = ref<string | null>(null)
 const busy = computed(() => computing.value || importing.value)
 
@@ -111,6 +122,7 @@ interface PresetCloneProgress {
   processed: number
   total: number
   percent: number
+  stage: 'local' | 'ai'
 }
 
 onMounted(async () => {
@@ -130,6 +142,7 @@ watch(
       progressPercent.value = 0
       progressProcessed.value = 0
       progressTotal.value = 0
+      progressStage.value = 'local'
     }
   },
 )
@@ -160,6 +173,7 @@ async function computePreview() {
   progressPercent.value = 0
   progressProcessed.value = 0
   progressTotal.value = 0
+  progressStage.value = 'local'
 
   try {
     try {
@@ -168,6 +182,7 @@ async function computePreview() {
         progressPercent.value = event.payload.percent
         progressProcessed.value = event.payload.processed
         progressTotal.value = event.payload.total
+        progressStage.value = event.payload.stage
       })
     } catch (e) {
       console.warn('[preset-clone-progress] listen failed:', e)
@@ -201,6 +216,7 @@ async function doImport() {
       presetKey: props.presetKey,
       novelId: novelId.value,
       newBookName: newBookName.value,
+      items: preview.value.items,
     })
     ElMessage.success(t('preset.imported', { n: preview.value.items.length }))
     emit('imported', bookId)
@@ -222,6 +238,9 @@ async function doImport() {
 .summary {
   font-size: 13px;
   color: var(--text-regular, #303133);
+}
+.ai-result-alert {
+  margin-top: 10px;
 }
 .calculation-progress {
   margin: 8px 16px 0 110px;
