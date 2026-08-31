@@ -1,5 +1,6 @@
 use crate::db::DbState;
 use crate::models::VocabBook;
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -7,6 +8,102 @@ use tauri::{Manager, State};
 
 pub const CET4_BOOK_NAME: &str = "四级真题核心词";
 pub const CET4_BOOK_DESC: &str = "1162 条四级考试高频核心词，含真题例句、记忆法和常见搭配。数据来源：四级词汇乱序版。";
+
+#[derive(Clone, Copy)]
+pub struct BundledPreset {
+    pub file_name: &'static str,
+    pub preset_key: &'static str,
+    pub name: &'static str,
+    pub description: &'static str,
+    pub word_count: u32,
+}
+
+pub const BUNDLED_PRESETS: &[BundledPreset] = &[
+    BundledPreset {
+        file_name: "CET4luan_1.json",
+        preset_key: "cet4",
+        name: CET4_BOOK_NAME,
+        description: CET4_BOOK_DESC,
+        word_count: 1162,
+    },
+    BundledPreset {
+        file_name: "CET6luan_1.json",
+        preset_key: "CET6luan_1",
+        name: "六级真题核心词（图片记忆）",
+        description: "1228 条六级真题核心词，包含释义、例句、记忆法和常见搭配。",
+        word_count: 1228,
+    },
+    BundledPreset {
+        file_name: "KaoYanluan_1.json",
+        preset_key: "KaoYanluan_1",
+        name: "考研必考词汇",
+        description: "1341 条考研高频必考词汇，包含释义、例句、记忆法和常见搭配。",
+        word_count: 1341,
+    },
+    BundledPreset {
+        file_name: "Level4luan_1.json",
+        preset_key: "Level4luan_1",
+        name: "专四真题高频词",
+        description: "595 条英语专业四级真题高频词，适合重点记忆和阅读匹配。",
+        word_count: 595,
+    },
+    BundledPreset {
+        file_name: "Level8_1.json",
+        preset_key: "Level8_1",
+        name: "专八真题高频词",
+        description: "684 条英语专业八级真题高频词，适合重点记忆和阅读匹配。",
+        word_count: 684,
+    },
+    BundledPreset {
+        file_name: "CET4luan_2.json",
+        preset_key: "CET4luan_2",
+        name: "四级英语词汇",
+        description: "3739 条大学英语四级词汇，适合系统学习和阅读匹配。",
+        word_count: 3739,
+    },
+    BundledPreset {
+        file_name: "CET6_2.json",
+        preset_key: "CET6_2",
+        name: "六级英语词汇",
+        description: "2078 条大学英语六级词汇，适合系统学习和阅读匹配。",
+        word_count: 2078,
+    },
+    BundledPreset {
+        file_name: "KaoYan_2.json",
+        preset_key: "KaoYan_2",
+        name: "考研英语词汇",
+        description: "4533 条考研英语词汇，覆盖核心与扩展学习范围。",
+        word_count: 4533,
+    },
+    BundledPreset {
+        file_name: "Level4luan_2.json",
+        preset_key: "Level4luan_2",
+        name: "专四核心词汇",
+        description: "4025 条英语专业四级核心词汇，覆盖系统学习范围。",
+        word_count: 4025,
+    },
+    BundledPreset {
+        file_name: "Level8luan_2.json",
+        preset_key: "Level8luan_2",
+        name: "专八核心词汇",
+        description: "12197 条英语专业八级核心词汇，覆盖系统与扩展学习范围。",
+        word_count: 12197,
+    },
+    BundledPreset {
+        file_name: "ChuZhongluan_2.json",
+        preset_key: "ChuZhongluan_2",
+        name: "中考必备词汇",
+        description: "1420 条初中及中考必备英语词汇，适合基础学习和复习。",
+        word_count: 1420,
+    },
+    BundledPreset {
+        file_name: "GaoZhongluan_2.json",
+        preset_key: "GaoZhongluan_2",
+        name: "高考必备词汇（图片记忆）",
+        description: "3668 条高中及高考必备英语词汇，包含图片记忆相关内容。",
+        word_count: 3668,
+    },
+];
 
 #[derive(Serialize, Clone, Copy)]
 #[serde(rename_all = "camelCase")]
@@ -295,25 +392,56 @@ fn build_memory_tag(entry: &Cet4Entry) -> String {
     String::new()
 }
 
-/// 从资源目录解析 JSON 并写入库。
+/// 从资源目录解析逐行 JSON 并写入内置预设词表。
 ///
 /// 从 lib.rs 的 setup 阶段调用：
-/// - json_path: `resource_dir/resources/CET4luan_1.json` 已解析好的路径
+/// - json_path: `resource_dir/resources/{preset.file_name}` 已解析好的路径
 /// - conn: 主库（novel_words.db）的可变引用，调用方负责持有 MutexGuard
-/// - 幂等：已存在相同 book.name / 相同 word 的全部跳过
-pub fn ensure_cet4_book_populated(
+/// - 幂等：完整预设直接跳过解析；缺失的单词通过唯一索引自动补齐
+pub fn ensure_preset_book_populated(
     json_path: &std::path::Path,
+    preset: &BundledPreset,
     conn: &mut rusqlite::Connection,
 ) -> Result<Cet4ImportResult, String> {
     if !json_path.exists() {
-        return Err(format!("找不到四级词汇文件：{}", json_path.display()));
+        return Err(format!("找不到预设词汇文件：{}", json_path.display()));
+    }
+
+    // Fast path for normal subsequent launches: avoid reparsing all bundled
+    // resources once this preset already contains its expected number of words.
+    let complete_book = conn
+        .query_row(
+            "SELECT b.id, COUNT(w.id)
+             FROM vocab_book b LEFT JOIN vocab_word w ON w.vocab_book_id = b.id
+             WHERE b.is_preset = 1 AND b.preset_key = ?1
+             GROUP BY b.id
+             LIMIT 1",
+            rusqlite::params![preset.preset_key],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, u32>(1)?)),
+        )
+        .optional()
+        .map_err(|e| format!("查询预设词表完整性失败: {}", e))?;
+    if let Some((book_id, count)) = complete_book {
+        if count >= preset.word_count {
+            conn.execute(
+                "UPDATE vocab_book SET name = ?1, description = ?2 WHERE id = ?3",
+                rusqlite::params![preset.name, preset.description, book_id],
+            )
+            .map_err(|e| format!("更新预设词表元数据失败: {}", e))?;
+            return Ok(Cet4ImportResult {
+                book_id,
+                imported: 0,
+                skipped: preset.word_count,
+                total_in_file: preset.word_count,
+            });
+        }
     }
 
     // 读取并解析 NDJSON
     let file = std::fs::File::open(json_path)
-        .map_err(|e| format!("打开四级词汇文件失败: {}", e))?;
+        .map_err(|e| format!("打开预设词汇文件失败: {}", e))?;
     let reader = BufReader::new(file);
-    let mut entries: Vec<Cet4Entry> = Vec::with_capacity(1200);
+    let mut entries: Vec<Cet4Entry> = Vec::with_capacity(5000);
     for (idx, line) in reader.lines().enumerate() {
         let line = line.map_err(|e| format!("第 {} 行读取失败: {}", idx + 1, e))?;
         let trimmed = line.trim();
@@ -328,28 +456,45 @@ pub fn ensure_cet4_book_populated(
 
     let tx = conn.transaction().map_err(|e| format!("开启事务失败: {}", e))?;
 
-    // 复用或创建词汇本
-    let book_id: i64 = tx
+    // 优先按稳定的预设 ID 复用；仅 CET4 兼容旧版本按名称创建的记录。
+    let existing_id = tx
         .query_row(
-            "SELECT id FROM vocab_book WHERE name = ?1 LIMIT 1",
-            rusqlite::params![CET4_BOOK_NAME],
+            "SELECT id FROM vocab_book WHERE is_preset = 1 AND preset_key = ?1 LIMIT 1",
+            rusqlite::params![preset.preset_key],
             |r| r.get::<_, i64>(0),
         )
-        .unwrap_or_else(|_| {
-            tx.execute(
-                "INSERT INTO vocab_book (name, description) VALUES (?1, ?2)",
-                rusqlite::params![CET4_BOOK_NAME, CET4_BOOK_DESC],
+        .optional()
+        .map_err(|e| format!("查询预设词表失败: {}", e))?
+        .or_else(|| {
+            if preset.preset_key != "cet4" {
+                return None;
+            }
+            tx.query_row(
+                "SELECT id FROM vocab_book WHERE name = ?1 LIMIT 1",
+                rusqlite::params![preset.name],
+                |r| r.get::<_, i64>(0),
             )
-            .expect("创建四级词汇本失败");
-            tx.last_insert_rowid()
+            .optional()
+            .ok()
+            .flatten()
         });
+    let book_id = if let Some(id) = existing_id {
+        id
+    } else {
+        tx.execute(
+            "INSERT INTO vocab_book (name, description, is_preset, preset_key) VALUES (?1, ?2, 1, ?3)",
+            rusqlite::params![preset.name, preset.description, preset.preset_key],
+        )
+        .map_err(|e| format!("创建预设词表失败: {}", e))?;
+        tx.last_insert_rowid()
+    };
 
-    // 确保 CET4 作为"预设词表"存在（幂等，每次启动都会自愈）。
+    // 每次启动同步内置元数据，并自愈旧版本的预设标记。
     tx.execute(
-        "UPDATE vocab_book SET is_preset = 1, preset_key = 'cet4' WHERE id = ?1",
-        rusqlite::params![book_id],
+        "UPDATE vocab_book SET name = ?1, description = ?2, is_preset = 1, preset_key = ?3 WHERE id = ?4",
+        rusqlite::params![preset.name, preset.description, preset.preset_key, book_id],
     )
-    .map_err(|e| format!("标记 CET4 为预设失败: {}", e))?;
+    .map_err(|e| format!("更新预设词表元数据失败: {}", e))?;
 
     // 逐词写入
     let mut imported: u32 = 0;
@@ -396,6 +541,13 @@ pub fn ensure_cet4_book_populated(
     })
 }
 
+pub fn ensure_cet4_book_populated(
+    json_path: &std::path::Path,
+    conn: &mut rusqlite::Connection,
+) -> Result<Cet4ImportResult, String> {
+    ensure_preset_book_populated(json_path, &BUNDLED_PRESETS[0], conn)
+}
+
 /// 保留 Tauri 命令，方便后续前端从设置里重新预装。
 #[tauri::command]
 pub fn import_cet4_core_words(
@@ -410,4 +562,70 @@ pub fn import_cet4_core_words(
         .join("CET4luan_1.json");
     let mut db = state.db.lock().map_err(|e| e.to_string())?;
     ensure_cet4_book_populated(&json_path, &mut *db)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ensure_preset_book_populated, BUNDLED_PRESETS};
+    use rusqlite::Connection;
+
+    #[test]
+    fn imports_every_bundled_preset_idempotently() {
+        let expected = [
+            (1162_u32, 1162_u32),
+            (1228, 1228),
+            (1341, 1341),
+            (595, 595),
+            (684, 684),
+            (3739, 3739),
+            (2078, 2078),
+            (4533, 4533),
+            (4025, 4025),
+            (12197, 12197),
+            (1420, 1420),
+            (3668, 3668),
+        ];
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE vocab_book (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               name TEXT NOT NULL,
+               description TEXT NOT NULL DEFAULT '',
+               is_preset INTEGER NOT NULL DEFAULT 0,
+               preset_key TEXT NOT NULL DEFAULT ''
+             );
+             CREATE TABLE vocab_word (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               vocab_book_id INTEGER NOT NULL,
+               word TEXT NOT NULL,
+               definition TEXT NOT NULL DEFAULT '',
+               phonetic TEXT NOT NULL DEFAULT '',
+               example_sentence TEXT NOT NULL DEFAULT '',
+               proficiency TEXT NOT NULL DEFAULT 'unknown',
+               memory_tag TEXT NOT NULL DEFAULT ''
+             );
+             CREATE UNIQUE INDEX idx_vocab_word_unique
+               ON vocab_word (vocab_book_id, word);",
+        )
+        .unwrap();
+        let resources = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources");
+
+        for (preset, (source_count, unique_count)) in BUNDLED_PRESETS.iter().zip(expected) {
+            let path = resources.join(preset.file_name);
+            let first = ensure_preset_book_populated(&path, preset, &mut conn).unwrap();
+            assert_eq!(first.total_in_file, source_count, "{}", preset.preset_key);
+            assert_eq!(first.imported, unique_count, "{}", preset.preset_key);
+
+            let second = ensure_preset_book_populated(&path, preset, &mut conn).unwrap();
+            assert_eq!(second.imported, 0, "{}", preset.preset_key);
+            assert_eq!(second.skipped, source_count, "{}", preset.preset_key);
+        }
+
+        let preset_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM vocab_book WHERE is_preset = 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(preset_count, BUNDLED_PRESETS.len() as i64);
+    }
 }

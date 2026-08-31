@@ -79,7 +79,20 @@ pub fn list_preset_vocab_books(state: State<DbState>) -> Result<Vec<PresetVocabB
              FROM vocab_book b LEFT JOIN vocab_word w ON w.vocab_book_id = b.id
              WHERE b.is_preset = 1
              GROUP BY b.id, b.name, b.description, b.preset_key
-             ORDER BY b.preset_key, b.id",
+             ORDER BY CASE b.preset_key
+               WHEN 'cet4' THEN 1
+               WHEN 'CET6luan_1' THEN 2
+               WHEN 'KaoYanluan_1' THEN 3
+               WHEN 'Level4luan_1' THEN 4
+               WHEN 'Level8_1' THEN 5
+               WHEN 'CET4luan_2' THEN 6
+               WHEN 'CET6_2' THEN 7
+               WHEN 'KaoYan_2' THEN 8
+               WHEN 'Level4luan_2' THEN 9
+               WHEN 'Level8luan_2' THEN 10
+               WHEN 'ChuZhongluan_2' THEN 11
+               WHEN 'GaoZhongluan_2' THEN 12
+               ELSE 999 END, b.id",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
@@ -540,11 +553,11 @@ pub async fn commit_preset_clone(
         }
         let mut db = state.db.lock().map_err(|e| e.to_string())?;
 
-        let preset_id: i64 = db
+        let (preset_id, preset_name): (i64, String) = db
             .query_row(
-                "SELECT id FROM vocab_book WHERE is_preset = 1 AND preset_key = ?1 LIMIT 1",
-                params![preset_key],
-                |row| row.get(0),
+                "SELECT id, name FROM vocab_book WHERE is_preset = 1 AND preset_key = ?1 LIMIT 1",
+                params![&preset_key],
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .map_err(|_| format!("未找到预设词表: {}", preset_key))?;
 
@@ -558,17 +571,7 @@ pub async fn commit_preset_clone(
             .unwrap_or_else(|_| "未知小说".to_string());
         let name = new_book_name
             .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(|| {
-                // Translate preset_key into a friendly label.
-                let label = match preset_key.as_str() {
-                    "cet4" => "CET4",
-                    "gaokao3500" => "高考3500",
-                    "ielts" => "雅思",
-                    "toefl" => "托福",
-                    other => other,
-                };
-                format!("{} · {}精选", label, novel_title)
-            });
+            .unwrap_or_else(|| format!("{} · {}精选", preset_name, novel_title));
 
         let tx = db.transaction().map_err(|e| format!("开启导入事务失败: {}", e))?;
         tx.execute(
@@ -576,7 +579,7 @@ pub async fn commit_preset_clone(
              VALUES (?1, ?2, 0, '', ?3)",
             params![
                 &name,
-                format!("从「{}」按当前小说裁剪", preset_key),
+                format!("从「{}」按当前小说裁剪", preset_name),
                 &preset_key,
             ],
         )

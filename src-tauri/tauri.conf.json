@@ -37,7 +37,18 @@
     ],
     "resources": [
       "resources/dictionary.db",
-      "resources/CET4luan_1.json"
+      "resources/CET4luan_1.json",
+      "resources/CET4luan_2.json",
+      "resources/CET6_2.json",
+      "resources/CET6luan_1.json",
+      "resources/ChuZhongluan_2.json",
+      "resources/GaoZhongluan_2.json",
+      "resources/KaoYan_2.json",
+      "resources/KaoYanluan_1.json",
+      "resources/Level4luan_1.json",
+      "resources/Level4luan_2.json",
+      "resources/Level8_1.json",
+      "resources/Level8luan_2.json"
     ]
   }
 }

@@ -12,8 +12,8 @@ use commands::novel::{
     create_novel, delete_novel, get_all_novels, get_novel, search_novels, update_novel,
 };
 use commands::vocab_book::{
-    create_vocab_book, delete_vocab_book, ensure_cet4_book_populated, get_all_vocab_books,
-    import_cet4_core_words, update_vocab_book,
+    create_vocab_book, delete_vocab_book, ensure_preset_book_populated, get_all_vocab_books,
+    import_cet4_core_words, update_vocab_book, BUNDLED_PRESETS,
 };
 use commands::vocab_word::{
     create_vocab_word, delete_vocab_word, delete_vocab_words, export_vocab_words_csv,
@@ -60,30 +60,28 @@ pub fn run() {
             let mut db_state = db::init_db(&app_data_dir)
                 .map_err(|e| format!("数据库初始化失败: {}", e))?;
 
-            // ---- Auto-seed "四级真题核心词" vocab book on first launch ----
+            // ---- Auto-seed bundled preset vocab books on first launch ----
             // IMPORTANT: must happen before `app.manage(db_state)` which moves
             // db_state, otherwise we can't get a mutable ref again without
             // re-locking. Locking is avoided here since this is the single
             // setup thread.
-            let cet4_path = resource_dir.join("resources").join("CET4luan_1.json");
             {
                 let conn = db_state.db.get_mut().map_err(|e| e.to_string())?;
-                match ensure_cet4_book_populated(&cet4_path, conn) {
-                    Ok(res) => {
-                        if res.imported > 0 {
+                for preset in BUNDLED_PRESETS {
+                    let path = resource_dir.join("resources").join(preset.file_name);
+                    match ensure_preset_book_populated(&path, preset, conn) {
+                        Ok(res) => {
                             println!(
-                                "[CET4] 预装四级词汇本完成：新增 {} / 跳过 {} / 总数 {}",
-                                res.imported, res.skipped, res.total_in_file
-                            );
-                        } else {
-                            println!(
-                                "[CET4] 四级词汇本已存在（跳过 {} 词）",
-                                res.skipped
+                                "[preset:{}] 导入完成：新增 {} / 跳过 {} / 总数 {}",
+                                preset.preset_key, res.imported, res.skipped, res.total_in_file
                             );
                         }
-                    }
-                    Err(e) => {
-                        eprintln!("[CET4] 预装四级词汇本失败（不阻断启动）: {}", e);
+                        Err(e) => {
+                            eprintln!(
+                                "[preset:{}] 预装失败（不阻断启动）: {}",
+                                preset.preset_key, e
+                            );
+                        }
                     }
                 }
             }
