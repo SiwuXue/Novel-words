@@ -27,13 +27,13 @@
           <el-icon><Files /></el-icon>
           <span>{{ t('nav.presets') }}</span>
         </el-menu-item>
-        <el-menu-item index="/settings">
-          <el-icon><Setting /></el-icon>
-          <span>{{ t('nav.settings') }}</span>
-        </el-menu-item>
         <el-menu-item index="/stats">
           <el-icon><DataLine /></el-icon>
           <span>{{ t('nav.stats') }}</span>
+        </el-menu-item>
+        <el-menu-item index="/settings">
+          <el-icon><Setting /></el-icon>
+          <span>{{ t('nav.settings') }}</span>
         </el-menu-item>
       </el-menu>
 

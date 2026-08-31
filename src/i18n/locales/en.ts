@@ -10,6 +10,28 @@ export default {
   'nav.pin': 'Pin sidebar',
   'nav.unpin': 'Collapse sidebar',
 
+  // ---- About ----
+  'about.title': 'About',
+  'about.appName': 'WordRead',
+  'about.description': 'Local novel reading and vocabulary management, connecting reading, collection, and review.',
+  'about.features': 'Core features',
+  'about.readingTitle': 'Multi-format reading',
+  'about.readingDesc': 'Read TXT, Markdown, EPUB, and FB2 novels',
+  'about.vocabularyTitle': 'Vocabulary learning',
+  'about.vocabularyDesc': 'Highlights, definitions, spaced review, and statistics',
+  'about.exportTitle': 'Smart organization',
+  'about.exportDesc': 'Reliable matching, AI review, and annotated PDF export',
+  'about.localData': 'Local data',
+  'about.localDataHint': 'Novels, vocabulary, and settings are stored here',
+  'about.loading': 'Loading data folder…',
+  'about.copy': 'Copy',
+  'about.open': 'Open',
+  'about.copied': 'Data folder copied',
+  'about.copyFailed': 'Copy failed; select and copy the path manually',
+  'about.openFailed': 'Failed to open folder',
+  'about.localFirst': 'Your data stays on this device',
+  'about.close': 'Done',
+
   // ---- Home ----
   'home.subtitle': 'Local novel reading & vocabulary management for language learners',
   'home.statNovels': 'Novels',

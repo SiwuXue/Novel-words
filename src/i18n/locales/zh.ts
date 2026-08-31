@@ -10,6 +10,28 @@ export default {
   'nav.pin': '固定侧边栏',
   'nav.unpin': '收起侧边栏',
 
+  // ---- About ----
+  'about.title': '关于',
+  'about.appName': '词阅',
+  'about.description': '本地小说阅读与词汇管理，让阅读、积累和复习自然衔接。',
+  'about.features': '核心功能',
+  'about.readingTitle': '多格式阅读',
+  'about.readingDesc': '支持 TXT、Markdown、EPUB 与 FB2 小说',
+  'about.vocabularyTitle': '词汇学习',
+  'about.vocabularyDesc': '生词高亮、释义管理、记忆复习与统计',
+  'about.exportTitle': '智能整理',
+  'about.exportDesc': '可靠匹配、AI 复核并导出带注释 PDF',
+  'about.localData': '本地数据',
+  'about.localDataHint': '小说、词汇和设置均保存在此目录',
+  'about.loading': '正在读取数据目录…',
+  'about.copy': '复制',
+  'about.open': '打开',
+  'about.copied': '数据目录已复制',
+  'about.copyFailed': '复制失败，请手动选择路径复制',
+  'about.openFailed': '打开目录失败',
+  'about.localFirst': '数据优先保存在本机',
+  'about.close': '完成',
+
   // ---- Home ----
   'home.subtitle': '本地小说阅读与词汇管理，助力外语学习',
   'home.statNovels': '小说',
