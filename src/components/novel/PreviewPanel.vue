@@ -2,18 +2,49 @@
   <div class="preview-panel" :class="{ fullscreen }">
     <div class="panel-header">
       <h4>实时预览</h4>
-      <button
-        class="fullscreen-btn"
-        :title="fullscreen ? '退出全屏' : '全屏预览'"
-        @click="$emit('toggle-fullscreen')"
-      >
-        <el-icon>
-          <FullScreen v-if="!fullscreen" />
-          <Aim v-else />
-        </el-icon>
-      </button>
+      <div class="panel-actions">
+        <el-radio-group
+          :model-value="previewScope"
+          size="small"
+          @change="$emit('update:previewScope', $event as 'current' | 'all')"
+        >
+          <el-radio-button value="current">当前章</el-radio-button>
+          <el-radio-button value="all">全部</el-radio-button>
+        </el-radio-group>
+        <span v-if="previewScope === 'all' && totalChapters" class="chapter-progress">
+          {{ loadedChapters }}/{{ totalChapters }}章
+        </span>
+        <button
+          class="fullscreen-btn"
+          :title="fullscreen ? '退出全屏' : '全屏预览'"
+          @click="$emit('toggle-fullscreen')"
+        >
+          <el-icon>
+            <FullScreen v-if="!fullscreen" />
+            <Aim v-else />
+          </el-icon>
+        </button>
+      </div>
     </div>
-    <div class="preview-content" v-html="displayHtml" ref="contentRef" @click="onContentClick"></div>
+    <div class="preview-content" ref="contentRef" @click="onContentClick" @scroll="onScroll">
+      <template v-if="previewScope === 'all'">
+        <div
+          v-for="(chunk, index) in displayChunks"
+          :key="index"
+          class="preview-chapter-chunk"
+          v-html="chunk"
+        ></div>
+        <button
+          v-if="(loadedChapters || 0) < (totalChapters || 0)"
+          class="load-more-btn"
+          @click="$emit('load-more')"
+        >
+          继续加载后续章节
+        </button>
+        <p v-else-if="totalChapters" class="all-loaded">已加载全部 {{ totalChapters }} 章</p>
+      </template>
+      <div v-else v-html="displayHtml"></div>
+    </div>
   </div>
 </template>
 
@@ -29,11 +60,17 @@ const contentRef = ref<HTMLElement | null>(null)
 
 const props = defineProps<{
   html: string
+  htmlChunks?: string[]
+  previewScope?: 'current' | 'all'
+  loadedChapters?: number
+  totalChapters?: number
   fullscreen?: boolean
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'toggle-fullscreen'): void
+  (e: 'update:previewScope', scope: 'current' | 'all'): void
+  (e: 'load-more'): void
 }>()
 
 const displayHtml = computed(() => {
@@ -41,6 +78,26 @@ const displayHtml = computed(() => {
   if (looksLikeHtml(props.html)) return props.html
   return sanitizeAndWrap(props.html)
 })
+
+const displayChunks = computed(() =>
+  (props.htmlChunks || []).map((html) =>
+    looksLikeHtml(html) ? html : sanitizeAndWrap(html),
+  ),
+)
+
+let loadMorePending = false
+function onScroll() {
+  if (props.previewScope !== 'all' || loadMorePending || !contentRef.value) return
+  if ((props.loadedChapters || 0) >= (props.totalChapters || 0)) return
+  const el = contentRef.value
+  if (el.scrollHeight - el.scrollTop - el.clientHeight < 800) {
+    loadMorePending = true
+    emit('load-more')
+    requestAnimationFrame(() => {
+      loadMorePending = false
+    })
+  }
+}
 
 function sanitizeAndWrap(raw: string): string {
   return raw
@@ -130,6 +187,18 @@ defineExpose({ scrollToText })
   font-weight: 600;
 }
 
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chapter-progress {
+  color: var(--text-secondary, #909399);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .fullscreen-btn {
   display: inline-flex;
   align-items: center;
@@ -155,6 +224,30 @@ defineExpose({ scrollToText })
   font-size: 15px;
   line-height: 1.8;
   color: var(--text-regular, #303133);
+}
+
+.preview-chapter-chunk + .preview-chapter-chunk {
+  border-top: 1px dashed var(--border-color, #dcdfe6);
+  margin-top: 18px;
+  padding-top: 8px;
+}
+
+.load-more-btn {
+  display: block;
+  margin: 20px auto;
+  padding: 8px 18px;
+  border: 1px solid var(--accent-color, #409eff);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent-color, #409eff);
+  cursor: pointer;
+}
+
+.all-loaded {
+  color: var(--text-secondary, #909399);
+  text-align: center;
+  font-size: 12px;
+  margin: 20px 0;
 }
 
 .preview-panel.fullscreen .preview-content {

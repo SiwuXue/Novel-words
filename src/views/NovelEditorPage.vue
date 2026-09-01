@@ -191,9 +191,15 @@
         </el-alert>
         <PreviewPanel
           ref="previewRef"
-          :html="previewHtml"
+          :html="previewScope === 'current' ? previewHtml : ''"
+          :html-chunks="allPreviewHtmlChunks"
+          :preview-scope="previewScope"
+          :loaded-chapters="Math.min(allPreviewLimit, editorStore.chapterList.length)"
+          :total-chapters="editorStore.chapterList.length"
           :fullscreen="previewFullscreen"
           @toggle-fullscreen="togglePreviewFullscreen"
+          @update:preview-scope="previewScope = $event"
+          @load-more="loadMorePreviewChapters"
         />
       </div>
     </div>
@@ -281,6 +287,10 @@ const exportingPdf = ref(false)
 const pdfPercent = ref(0)
 const pdfMessage = ref('正在准备导出…')
 const previewFullscreen = ref(false)
+const previewScope = ref<'current' | 'all'>('all')
+const allPreviewLimit = ref(4)
+const chapterPreviewCache = new Map<string, string>()
+let previewWordsVersion = 0
 const stepNums: StepNum[] = [1, 2, 3]
 const pdfSteps = ref<StepNum[]>([...settingsStore.pdfIntensiveSteps])
 
@@ -379,25 +389,68 @@ const topbarTitle = computed(() => {
   return '加载中...'
 })
 
-const previewHtml = computed(() => {
-  const content = editorContent.value || store.currentNovel?.cleanedText || ''
-  if (!content) return '<p>无内容</p>'
+function buildChapterPreview(chapter: any, chapterIndex: number): string {
   const chapterList = editorStore.chapterList
-  const activeChapter = chapterList[editorStore.activeChapterIndex]
-  const chapters =
-    activeChapter
-      ? [activeChapter]
-      : [{ id: 0, novelId: 0, title: '', content, sortOrder: 0, startIndex: 0, createdAt: '' }]
-  return buildPreviewHtml({
-    chapters,
+  const cacheKey = [
+    currentNovelId.value,
+    chapter.id,
+    chapter.content?.length || 0,
+    chapterIndex,
+    previewWordsVersion,
+    highlightBookId.value || 0,
+    pdfSteps.value.join(','),
+    store.currentNovel?.language || '',
+    pdfTemplateType.value,
+    settingsStore.pdfBackground,
+    coverEnabled.value ? 1 : 0,
+  ].join('|')
+  const cached = chapterPreviewCache.get(cacheKey)
+  if (cached) return cached
+  const html = buildPreviewHtml({
+    chapters: [chapter],
     words: highlightWords.value as any,
     novelTitle: store.currentNovel?.title,
     steps: normalizeSteps(pdfSteps.value),
     language: store.currentNovel?.language,
     templateType: pdfTemplateType.value,
     background: settingsStore.pdfBackground,
-    cover: coverEnabled.value,
+    cover: coverEnabled.value && chapterIndex === 0,
+    coverChapters: chapterList,
   })
+  chapterPreviewCache.set(cacheKey, html)
+  return html
+}
+
+const previewHtml = computed(() => {
+  const content = editorContent.value || store.currentNovel?.cleanedText || ''
+  if (!content) return '<p>无内容</p>'
+  const chapterList = editorStore.chapterList
+  const activeChapter = chapterList[editorStore.activeChapterIndex]
+  if (activeChapter) return buildChapterPreview(activeChapter, editorStore.activeChapterIndex)
+  return buildChapterPreview(
+    { id: 0, novelId: 0, title: '', content, sortOrder: 0, startIndex: 0, createdAt: '' },
+    0,
+  )
+})
+
+const allPreviewHtmlChunks = computed(() => {
+  if (previewScope.value !== 'all') return []
+  return editorStore.chapterList
+    .slice(0, allPreviewLimit.value)
+    .map((chapter, index) => buildChapterPreview(chapter, index))
+})
+
+function loadMorePreviewChapters() {
+  allPreviewLimit.value = Math.min(
+    allPreviewLimit.value + 4,
+    editorStore.chapterList.length,
+  )
+}
+
+watch(highlightWords, () => {
+  previewWordsVersion++
+  chapterPreviewCache.clear()
+  allPreviewLimit.value = 4
 })
 
 /** Remove characters that are invalid in Windows file names. */

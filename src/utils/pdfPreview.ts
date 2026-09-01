@@ -474,6 +474,8 @@ export interface BuildPreviewInput {
   background?: string
   /** Whether to render a cover page at the top. */
   cover?: boolean
+  /** Full chapter list used only for whole-book cover statistics. */
+  coverChapters?: Chapter[]
 }
 
 function baseCss(fontSize: number, lineHeight: number): string {
@@ -501,7 +503,7 @@ function baseCss(fontSize: number, lineHeight: number): string {
     .pdf-preview-body .step3-tables td.word { width: 34%; font-weight: 500; }
     .pdf-preview-body .step3-tables td.def { width: 46%; color: #222; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pdf-preview-body p { margin: 0 0 8px; text-indent: 2em; }
-    .pdf-preview-body .cover-page { text-align: center; padding: 90px 24px 40px; }
+    .pdf-preview-body .cover-page { text-align: center; padding: 90px 24px 40px; min-height: 720px; box-sizing: border-box; page-break-after: always; break-after: page; }
     .pdf-preview-body .cover-bar { width: 60px; height: 3px; background: #1A56DB; margin: 0 auto 18px; }
     .pdf-preview-body .cover-title { font-size: 26px; font-weight: 700; color: #222; margin-bottom: 8px; }
     .pdf-preview-body .cover-sub { font-size: 15px; color: #666; margin-bottom: 22px; }
@@ -518,6 +520,7 @@ function buildIntensive(
   stepsInput?: StepNum[],
   language?: string,
   cover?: boolean,
+  coverChapters: Chapter[] = chapters,
 ): string {
   const steps = normalizeSteps(stepsInput)
   const includeStep1 = steps.includes(1)
@@ -532,7 +535,7 @@ function buildIntensive(
   const parts: string[] = []
   if (cover) {
     const allMatched: VocabWord[] = []
-    for (const ch of chapters) {
+    for (const ch of coverChapters) {
       const body = looksLikeHtml(ch.content) ? stripHtml(ch.content) : ch.content
       for (const w of findWords(body, words)) {
         if (!allMatched.some((x) => x.word.toLowerCase() === w.word.toLowerCase())) {
@@ -593,17 +596,17 @@ function buildIntensive(
 }
 
 export function buildHtml(input: BuildPreviewInput): string {
-  const { chapters, words, template, novelTitle, steps, language, templateType, background, cover } = input
+  const { chapters, words, template, novelTitle, steps, language, templateType, background, cover, coverChapters } = input
   const lineHeight = template?.lineSpacing ?? 1.5
   const fontSize = template?.fontSize ?? 14
   const isCard = templateType === 'card' || template?.templateType === 'card'
   if (isCard) {
     const css = cardCss(fontSize, lineHeight, background)
-    const body = buildCard(chapters, words, novelTitle, cover)
+    const body = buildCard(chapters, words, novelTitle, cover, coverChapters)
     return `<style>${css}</style><div class="pdf-preview-body card-preview">${body}</div>`
   }
   const css = baseCss(fontSize, lineHeight)
-  const bodyContent = buildIntensive(chapters, words, novelTitle, steps, language, cover)
+  const bodyContent = buildIntensive(chapters, words, novelTitle, steps, language, cover, coverChapters)
   return `<style>${css}</style><div class="pdf-preview-body">${bodyContent}</div>`
 }
 
@@ -718,9 +721,15 @@ function buildCoverHtml(
   </div>`
 }
 
-function buildCard(chapters: Chapter[], words: VocabWord[], novelTitle?: string, cover?: boolean): string {
+function buildCard(
+  chapters: Chapter[],
+  words: VocabWord[],
+  novelTitle?: string,
+  cover?: boolean,
+  coverChapters: Chapter[] = chapters,
+): string {
   const matched: VocabWord[] = []
-  for (const ch of chapters) {
+  for (const ch of coverChapters) {
     const body = looksLikeHtml(ch.content) ? stripHtml(ch.content) : ch.content
     for (const w of wordsFoundInTextEn(body, words)) {
       if (!matched.some((x) => x.word.toLowerCase() === w.word.toLowerCase())) {
@@ -808,7 +817,7 @@ function cardCss(fontSize: number, lineHeight: number, background?: string): str
     .card-preview .wc-word { font-size: ${fontSize + 2}px; font-weight: 700; }
     .card-preview .wc-phon { font-size: ${fontSize - 2}px; color: #555; }
     .card-preview .wc-def { font-size: ${fontSize - 2}px; color: #222; margin-top: 2px; }
-    .card-preview .cover-page { text-align: center; padding: 90px 24px 40px; }
+    .card-preview .cover-page { text-align: center; padding: 90px 24px 40px; min-height: 720px; box-sizing: border-box; page-break-after: always; break-after: page; }
     .card-preview .cover-bar { width: 60px; height: 3px; background: #1A56DB; margin: 0 auto 18px; }
     .card-preview .cover-title { font-size: 26px; font-weight: 700; color: #222; margin-bottom: 8px; }
     .card-preview .cover-sub { font-size: 15px; color: #666; margin-bottom: 22px; }
