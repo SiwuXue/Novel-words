@@ -15,7 +15,7 @@ pub fn init_db(app_data_dir: &PathBuf) -> Result<DbState, String> {
     fs::create_dir_all(app_data_dir).map_err(|e| format!("无法创建数据目录: {}", e))?;
 
     let db_path = app_data_dir.join("novel_words.db");
-    let conn = Connection::open(&db_path).map_err(|e| format!("无法打开数据库: {}", e))?;
+    let mut conn = Connection::open(&db_path).map_err(|e| format!("无法打开数据库: {}", e))?;
 
     // Enable WAL mode for concurrent reads during writes
     conn.execute_batch("PRAGMA journal_mode=WAL;").map_err(|e| e.to_string())?;
@@ -54,6 +54,78 @@ pub fn init_db(app_data_dir: &PathBuf) -> Result<DbState, String> {
             )
             .map_err(|e| format!("迁移 vocab_word.chapter_id 失败: {}", e))?;
         }
+    }
+
+    // Persist the exact Chinese terms confirmed during preset tailoring.  Older
+    // tailored books only kept an example sentence, so reconstruct their
+    // reliable terms once from the primary definition + captured excerpt.
+    {
+        let has_col: bool = conn
+            .prepare("SELECT COUNT(*) > 0 FROM pragma_table_info('vocab_word') WHERE name = 'match_terms'")
+            .and_then(|mut s| s.query_row([], |r| r.get(0)))
+            .unwrap_or(false);
+        if !has_col {
+            conn.execute_batch(
+                "ALTER TABLE vocab_word ADD COLUMN match_terms TEXT NOT NULL DEFAULT '';",
+            )
+            .map_err(|e| format!("迁移 vocab_word.match_terms 失败: {}", e))?;
+        }
+
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("开启旧裁剪词汇迁移失败: {}", e))?;
+        let legacy_rows: Vec<(i64, String, String)> = {
+            let mut stmt = tx
+                .prepare(
+                    "SELECT id, definition, example_sentence FROM vocab_word \
+                     WHERE match_terms = '' AND novel_id IS NOT NULL AND trim(example_sentence) <> ''",
+                )
+                .map_err(|e| format!("读取旧裁剪词汇失败: {}", e))?;
+            let rows = stmt
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .map_err(|e| format!("读取旧裁剪词汇失败: {}", e))?
+                .filter_map(Result::ok)
+                .collect();
+            rows
+        };
+        {
+            let mut update = tx
+                .prepare("UPDATE vocab_word SET match_terms = ?1 WHERE id = ?2")
+                .map_err(|e| format!("准备回填旧裁剪词汇失败: {}", e))?;
+            for (id, definition, example) in legacy_rows {
+                let primary = definition.split('【').next().unwrap_or(&definition);
+                let mut terms = Vec::new();
+                let mut current = String::new();
+                let flush = |current: &mut String, terms: &mut Vec<String>| {
+                    if current.chars().count() >= 2
+                        && example.contains(current.as_str())
+                        && !terms.contains(current)
+                    {
+                        terms.push(current.clone());
+                    }
+                    current.clear();
+                };
+                for ch in primary.chars() {
+                    if ('\u{3400}'..='\u{4dbf}').contains(&ch)
+                        || ('\u{4e00}'..='\u{9fff}').contains(&ch)
+                        || ('\u{f900}'..='\u{faff}').contains(&ch)
+                    {
+                        current.push(ch);
+                    } else {
+                        flush(&mut current, &mut terms);
+                    }
+                }
+                flush(&mut current, &mut terms);
+                if !terms.is_empty() {
+                    let encoded = serde_json::to_string(&terms).unwrap_or_default();
+                    update
+                        .execute(rusqlite::params![encoded, id])
+                        .map_err(|e| format!("回填旧裁剪词汇匹配词失败: {}", e))?;
+                }
+            }
+        }
+        tx.commit()
+            .map_err(|e| format!("提交旧裁剪词汇迁移失败: {}", e))?;
     }
 
     // Migration: add template_type + is_builtin to pdf_template
@@ -183,6 +255,7 @@ CREATE TABLE IF NOT EXISTS vocab_word (
     proficiency      TEXT    NOT NULL DEFAULT 'unknown'
                              CHECK(proficiency IN ('unknown', 'familiar', 'mastered')),
     memory_tag       TEXT    NOT NULL DEFAULT '',
+    match_terms      TEXT    NOT NULL DEFAULT '',
     created_at       TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
     FOREIGN KEY (vocab_book_id) REFERENCES vocab_book(id) ON DELETE CASCADE,
     FOREIGN KEY (novel_id) REFERENCES novel(id) ON DELETE SET NULL
@@ -226,3 +299,51 @@ INSERT OR IGNORE INTO app_settings (key, value) VALUES ('default_export_folder',
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('default_vocab_book_id', '');
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('pdf_intensive_steps', '[1,2,3]');
 ";
+
+#[cfg(test)]
+mod tests {
+    use super::init_db;
+
+    #[test]
+    fn backfills_reliable_terms_for_existing_tailored_words() {
+        let unique = format!(
+            "novel-words-db-migration-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let dir = std::env::temp_dir().join(unique);
+
+        {
+            let state = init_db(&dir).unwrap();
+            let db = state.db.lock().unwrap();
+            db.execute("INSERT INTO novel (title) VALUES ('测试小说')", [])
+                .unwrap();
+            db.execute("INSERT INTO vocab_book (name) VALUES ('测试精选')", [])
+                .unwrap();
+            db.execute(
+                "INSERT INTO vocab_word \
+                 (vocab_book_id, word, definition, example_sentence, novel_id, match_terms) \
+                 VALUES (1, 'gift', 'n. 天赋；礼物', '他的修炼天赋十分出众。', 1, '')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let state = init_db(&dir).unwrap();
+        let encoded: String = state
+            .db
+            .lock()
+            .unwrap()
+            .query_row("SELECT match_terms FROM vocab_word WHERE word='gift'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(serde_json::from_str::<Vec<String>>(&encoded).unwrap(), vec!["天赋"]);
+
+        drop(state);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}

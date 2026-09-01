@@ -68,7 +68,7 @@ pub async fn export_pdf(
         let vocabs: Vec<VocabWord> = if let Some(book_id) = vocab_book_id {
             let mut stmt = db
                 .prepare(
-                    "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, created_at
+                    "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, created_at, match_terms
                      FROM vocab_word WHERE vocab_book_id = ?1",
                 )
                 .map_err(|e| format!("查询生词失败: {}", e))?;
@@ -86,6 +86,7 @@ pub async fn export_pdf(
                         proficiency: row.get(7)?,
                         memory_tag: row.get(8)?,
                         created_at: row.get(9)?,
+                        match_terms: row.get(10)?,
                     })
                 })
                 .map_err(|e| format!("查询生词失败: {}", e))?;

@@ -58,33 +58,21 @@ export function refreshVocabHighlight(view: EditorView): void {
 
 // ---- Position search ----
 
-/**
- * Iterate every text node in the document, find all occurrences of `word`,
- * and return document positions for each match.
- */
-function findWordPositions(
-  doc: { descendants: (fn: (node: { isText: boolean; text?: string }, pos: number) => boolean | void) => void },
-  word: string,
-): Array<{ from: number; to: number }> {
-  const results: Array<{ from: number; to: number }> = []
-  if (!word) return results
-
-  doc.descendants((node, pos) => {
-    if (!node.isText) return
-    const text: string = node.text || ''
-    let idx = 0
-    while (true) {
-      const found = text.indexOf(word, idx)
-      if (found === -1) break
-      results.push({ from: pos + found, to: pos + found + word.length })
-      idx = found + 1
-    }
-  })
-  return results
-}
-
 function trustedCnTerms(word: HighlightWord): string[] {
   if (word.novelId == null || !word.exampleSentence?.trim()) return []
+  if (word.matchTerms) {
+    try {
+      const saved = JSON.parse(word.matchTerms)
+      if (Array.isArray(saved)) {
+        const terms = saved.filter(
+          (term): term is string => typeof term === 'string' && Array.from(term).length >= 2,
+        )
+        if (terms.length > 0) return terms
+      }
+    } catch {
+      // Legacy/manual rows fall back to the definition + example intersection.
+    }
+  }
   const primaryDefinition = (word.definition || '').split('【', 1)[0]
   const terms: string[] = []
   for (const match of primaryDefinition.matchAll(/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+/g)) {
@@ -100,34 +88,59 @@ function trustedCnTerms(word: HighlightWord): string[] {
   return terms
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function buildTargetIndex(words: HighlightWord[]): {
+  byTerm: Map<string, HighlightWord>
+  pattern: RegExp | null
+} {
+  const byTerm = new Map<string, HighlightWord>()
+  for (const word of words) {
+    const cnTerms = trustedCnTerms(word)
+    const targets = cnTerms.length > 0 ? cnTerms : [word.word]
+    for (const target of targets) {
+      if (target && !byTerm.has(target)) byTerm.set(target, word)
+    }
+  }
+  const alternatives = [...byTerm.keys()].sort(
+    (a, b) => Array.from(b).length - Array.from(a).length,
+  )
+  return {
+    byTerm,
+    pattern: alternatives.length > 0
+      ? new RegExp(alternatives.map(escapeRegExp).join('|'), 'g')
+      : null,
+  }
+}
+
 function buildDecorations(
   doc: { descendants: (fn: (node: { isText: boolean; text?: string }, pos: number) => boolean | void) => void },
   words: HighlightWord[],
 ): DecorationSet {
   const decorations: Decoration[] = []
-  const decoratedRanges = new Set<string>()
+  const { byTerm, pattern } = buildTargetIndex(words)
+  if (!pattern) return DecorationSet.empty
 
-  for (const hw of words) {
-    const color = PROFICIENCY_COLORS[hw.proficiency] || PROFICIENCY_COLORS.unknown
-    const bg = PROFICIENCY_BG[hw.proficiency] || PROFICIENCY_BG.unknown
-    const cnTerms = trustedCnTerms(hw)
-    const targets = cnTerms.length > 0 ? cnTerms : [hw.word]
-
-    for (const target of targets) {
-      for (const { from, to } of findWordPositions(doc, target)) {
-        const rangeKey = `${from}:${to}`
-        if (decoratedRanges.has(rangeKey)) continue
-        decoratedRanges.add(rangeKey)
-        decorations.push(
-          Decoration.inline(from, to, {
-            class: 'vocab-highlight',
-            style: `color: ${color}; background-color: ${bg}; border-radius: 2px; cursor: pointer; font-weight: 500;`,
-            nodeName: 'span',
-          }),
-        )
-      }
+  doc.descendants((node, pos) => {
+    if (!node.isText) return
+    const text = node.text || ''
+    pattern.lastIndex = 0
+    for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
+      const hw = byTerm.get(match[0])
+      if (!hw) continue
+      const color = PROFICIENCY_COLORS[hw.proficiency] || PROFICIENCY_COLORS.unknown
+      const bg = PROFICIENCY_BG[hw.proficiency] || PROFICIENCY_BG.unknown
+      decorations.push(
+        Decoration.inline(pos + match.index, pos + match.index + match[0].length, {
+          class: 'vocab-highlight',
+          style: `color: ${color}; background-color: ${bg}; border-radius: 2px; cursor: pointer; font-weight: 500;`,
+          nodeName: 'span',
+        }),
+      )
     }
-  }
+  })
 
   return DecorationSet.create(doc as any, decorations)
 }
@@ -237,17 +250,68 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
     // Captured in `view()` so we can schedule debounced rebuilds.
     let editorView: EditorView | null = null
     let rebuildTimer: ReturnType<typeof setTimeout> | null = null
+    let rebuildGeneration = 0
 
-    function scheduleRebuild() {
-      if (rebuildTimer != null) clearTimeout(rebuildTimer)
-      rebuildTimer = setTimeout(() => {
-        rebuildTimer = null
-        if (editorView) {
-          editorView.dispatch(
-            editorView.state.tr.setMeta('vocabHighlightRebuild', true),
+    function isLargeDocument(view: EditorView): boolean {
+      return view.state.doc.content.size > 200_000 && currentWords.length > 200
+    }
+
+    function startAsyncRebuild(generation: number) {
+      const view = editorView
+      if (!view || generation !== rebuildGeneration) return
+      const doc = view.state.doc
+      const { byTerm, pattern } = buildTargetIndex(currentWords)
+      view.dispatch(view.state.tr.setMeta('vocabHighlightClear', true))
+      if (!pattern) return
+
+      const textNodes: Array<{ text: string; pos: number }> = []
+      doc.descendants((node, pos) => {
+        if (node.isText && node.text) textNodes.push({ text: node.text, pos })
+      })
+      let nodeIndex = 0
+
+      const processChunk = () => {
+        const currentView = editorView
+        if (!currentView || generation !== rebuildGeneration || currentView.state.doc !== doc) return
+        const decorations: Decoration[] = []
+        const startedAt = performance.now()
+        while (nodeIndex < textNodes.length && performance.now() - startedAt < 8) {
+          const node = textNodes[nodeIndex++]
+          pattern.lastIndex = 0
+          for (let match = pattern.exec(node.text); match; match = pattern.exec(node.text)) {
+            const hw = byTerm.get(match[0])
+            if (!hw) continue
+            const color = PROFICIENCY_COLORS[hw.proficiency] || PROFICIENCY_COLORS.unknown
+            const bg = PROFICIENCY_BG[hw.proficiency] || PROFICIENCY_BG.unknown
+            decorations.push(
+              Decoration.inline(node.pos + match.index, node.pos + match.index + match[0].length, {
+                class: 'vocab-highlight',
+                style: `color: ${color}; background-color: ${bg}; border-radius: 2px; cursor: pointer; font-weight: 500;`,
+                nodeName: 'span',
+              }),
+            )
+          }
+        }
+        if (decorations.length > 0) {
+          currentView.dispatch(
+            currentView.state.tr.setMeta('vocabHighlightPartial', decorations),
           )
         }
-      }, REBUILD_DEBOUNCE_MS)
+        if (nodeIndex < textNodes.length) setTimeout(processChunk, 0)
+      }
+      setTimeout(processChunk, 0)
+    }
+
+    function scheduleRebuild(delay = REBUILD_DEBOUNCE_MS) {
+      if (rebuildTimer != null) clearTimeout(rebuildTimer)
+      const generation = ++rebuildGeneration
+      rebuildTimer = setTimeout(() => {
+        rebuildTimer = null
+        const view = editorView
+        if (!view || generation !== rebuildGeneration) return
+        if (isLargeDocument(view)) startAsyncRebuild(generation)
+        else view.dispatch(view.state.tr.setMeta('vocabHighlightSync', true))
+      }, delay)
     }
 
     return [
@@ -265,15 +329,33 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
           },
 
           apply(tr, oldState, _oldEditorState, newEditorState) {
+            if (tr.getMeta('vocabHighlightClear')) {
+              return { ...oldState, decorations: DecorationSet.empty, dirty: true }
+            }
+            const partial = tr.getMeta('vocabHighlightPartial') as Decoration[] | undefined
+            if (partial) {
+              return {
+                ...oldState,
+                decorations: oldState.decorations.add(newEditorState.doc, partial),
+                dirty: true,
+              }
+            }
+
             const wordsMap = buildWordsMap(currentWords)
             const wordsChanged = !mapsEqual(oldState.wordsMap, wordsMap)
 
-            // Vocabulary list changed: rebuild immediately so newly imported
-            // words show up without waiting.
             if (wordsChanged) {
               if (rebuildTimer != null) {
                 clearTimeout(rebuildTimer)
                 rebuildTimer = null
+              }
+              if (newEditorState.doc.content.size > 200_000 && currentWords.length > 200) {
+                scheduleRebuild(0)
+                return {
+                  wordsMap,
+                  decorations: DecorationSet.empty,
+                  dirty: true,
+                }
               }
               return {
                 wordsMap,
@@ -291,9 +373,7 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
               }
             }
 
-            // Doc change: if the debounced rebuild timer is firing, do the
-            // heavy rebuild now.
-            if (tr.getMeta('vocabHighlightRebuild')) {
+            if (tr.getMeta('vocabHighlightSync')) {
               return {
                 wordsMap,
                 decorations: buildDecorations(newEditorState.doc, currentWords),
@@ -359,6 +439,7 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
                 clearTimeout(rebuildTimer)
                 rebuildTimer = null
               }
+              rebuildGeneration++
               editorView = null
               if (tooltipEl?.parentElement) {
                 tooltipEl.parentElement.removeChild(tooltipEl)

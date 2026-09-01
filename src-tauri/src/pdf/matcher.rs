@@ -84,6 +84,15 @@ fn trusted_cn_terms(word: &VocabWord) -> Vec<String> {
     if word.novel_id.is_none() || word.example_sentence.trim().is_empty() {
         return Vec::new();
     }
+    if let Ok(terms) = serde_json::from_str::<Vec<String>>(&word.match_terms) {
+        let terms: Vec<String> = terms
+            .into_iter()
+            .filter(|term| term.chars().count() >= 2 && !term.trim().is_empty())
+            .collect();
+        if !terms.is_empty() {
+            return terms;
+        }
+    }
     let primary_definition = word
         .definition
         .split('【')
@@ -354,6 +363,7 @@ mod tests {
             proficiency: "unknown".into(),
             memory_tag: String::new(),
             created_at: String::new(),
+            match_terms: String::new(),
         }
     }
 
@@ -371,6 +381,17 @@ mod tests {
             words_found_in_text("罕见天赋令人惊叹", &words, "zh").len(),
             1
         );
+    }
+
+    #[test]
+    fn chinese_matching_prefers_saved_tailoring_terms() {
+        let mut vocab = word("n. 已被 AI 改写的释义", "改写后的例句", Some(7));
+        vocab.match_terms = r#"["天赋"]"#.into();
+        let words = vec![vocab];
+
+        let matches = find_matches_in_line("他的修炼天赋十分出众。", &words, "zh");
+        assert_eq!(matches.len(), 1);
+        assert_eq!(&"他的修炼天赋十分出众。"[matches[0].start..matches[0].end], "天赋");
     }
 
     #[test]

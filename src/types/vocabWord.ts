@@ -9,6 +9,7 @@ export interface VocabWord {
   proficiency: 'unknown' | 'familiar' | 'mastered'
   memoryTag: string
   createdAt: string
+  matchTerms: string
 }
 
 export interface VocabWordFormData {
@@ -27,4 +28,5 @@ export interface HighlightWord {
   exampleSentence: string
   novelId: number | null
   proficiency: 'unknown' | 'familiar' | 'mastered'
+  matchTerms: string
 }

@@ -44,7 +44,7 @@ pub fn get_due_words(state: State<DbState>, vocab_book_id: i64) -> Result<Vec<Vo
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let mut stmt = db
         .prepare(
-            "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, created_at \
+            "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, created_at, match_terms \
              FROM vocab_word WHERE vocab_book_id=?1 ORDER BY created_at DESC",
         )
         .map_err(|e| e.to_string())?;
@@ -105,7 +105,7 @@ pub fn review_vocab_word(
 
     let word = db
         .query_row(
-            "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, created_at \
+            "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, created_at, match_terms \
              FROM vocab_word WHERE id=?1",
             rusqlite::params![id],
             row_to_vocab_word,
@@ -124,7 +124,7 @@ pub fn review_vocab_word(
 
     let updated = db
         .query_row(
-            "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, created_at \
+            "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, created_at, match_terms \
              FROM vocab_word WHERE id=?1",
             rusqlite::params![id],
             row_to_vocab_word,
@@ -163,7 +163,7 @@ pub fn get_review_progress(
                 Some(id) => {
                     let mut stmt = db
                         .prepare(
-                            "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, created_at \
+                            "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, created_at, match_terms \
                              FROM vocab_word WHERE vocab_book_id=?1",
                         )
                         .map_err(|e| e.to_string())?;
@@ -176,7 +176,7 @@ pub fn get_review_progress(
                     // All user books (exclude presets — no personal SRS state).
                     let mut stmt = db
                         .prepare(
-                            "SELECT w.id, w.vocab_book_id, w.word, w.definition, w.phonetic, w.example_sentence, w.novel_id, w.proficiency, w.memory_tag, w.created_at \
+                            "SELECT w.id, w.vocab_book_id, w.word, w.definition, w.phonetic, w.example_sentence, w.novel_id, w.proficiency, w.memory_tag, w.created_at, w.match_terms \
                              FROM vocab_word w JOIN vocab_book b ON b.id = w.vocab_book_id \
                              WHERE b.is_preset = 0",
                         )

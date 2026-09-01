@@ -414,6 +414,7 @@ mod tests {
             proficiency: "unknown".into(),
             memory_tag: String::new(),
             created_at: String::new(),
+            match_terms: String::new(),
         }];
         let updates = Mutex::new(Vec::new());
         let report = |processed, total| updates.lock().unwrap().push((processed, total));
@@ -590,8 +591,8 @@ pub async fn commit_preset_clone(
             let mut stmt = tx
                 .prepare(
                     "INSERT INTO vocab_word \
-                     (vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'unknown', '')",
+                     (vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, match_terms) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'unknown', '', ?7)",
                 )
                 .map_err(|e| format!("准备插入失败: {}", e))?;
             for it in &items {
@@ -602,6 +603,7 @@ pub async fn commit_preset_clone(
                     &it.phonetic,
                     &it.example_sentence,
                     novel_id,
+                    serde_json::to_string(&it.matched_terms).unwrap_or_default(),
                 ])
                 .map_err(|e| format!("插入单词 {} 失败: {}", it.word, e))?;
             }
@@ -631,7 +633,7 @@ fn load_preset_and_novel(
         )
         .map_err(|_| format!("未找到预设词表: {}", preset_key))?;
     let mut stmt = db
-        .prepare("SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, created_at FROM vocab_word WHERE vocab_book_id = ?1")
+        .prepare("SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, created_at, match_terms FROM vocab_word WHERE vocab_book_id = ?1")
         .map_err(|e| e.to_string())?;
     let preset_words: Vec<VocabWord> = stmt
         .query_map(params![preset_id], row_to_vocab_word)

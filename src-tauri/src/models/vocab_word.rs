@@ -14,6 +14,7 @@ pub struct VocabWord {
     pub proficiency: String,
     pub memory_tag: String,
     pub created_at: String,
+    pub match_terms: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,6 +26,7 @@ pub struct HighlightWord {
     pub example_sentence: String,
     pub novel_id: Option<i64>,
     pub proficiency: String,
+    pub match_terms: String,
 }
 
 /// A page of vocab words plus the total count matching the current filter.

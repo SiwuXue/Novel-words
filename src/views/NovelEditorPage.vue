@@ -160,14 +160,33 @@
         v-show="split.state.rightWidth > 0"
       >
         <el-alert
-          v-if="loadState === 'loaded' && highlightBookId && highlightWords.length === 0"
+          v-if="highlightLoadState === 'loading'"
+          type="info"
+          :closable="false"
+          show-icon
+          style="margin: 8px;"
+          title="正在加载词汇本…"
+        />
+        <el-alert
+          v-else-if="highlightLoadState === 'error'"
+          type="error"
+          :closable="false"
+          show-icon
+          style="margin: 8px;"
+        >
+          <template #title>
+            词汇本加载失败：{{ highlightLoadError }}
+          </template>
+        </el-alert>
+        <el-alert
+          v-else-if="loadState === 'loaded' && highlightBookId && highlightLoadState === 'loaded' && highlightWords.length === 0"
           type="warning"
           :closable="false"
           show-icon
           style="margin: 8px;"
         >
           <template #title>
-            本章未匹配到词汇本中的单词，请检查词汇本中的中文释义是否与小说正文一致。
+            该词汇本没有可用词条，请返回词汇本检查数据。
           </template>
         </el-alert>
         <PreviewPanel
@@ -255,6 +274,9 @@ const previewRef = ref<InstanceType<typeof PreviewPanel> | null>(null)
 
 const highlightBookId = ref<number | null>(null)
 const highlightWords = ref<HighlightWord[]>([])
+const highlightLoadState = ref<'idle' | 'loading' | 'loaded' | 'error'>('idle')
+const highlightLoadError = ref('')
+let highlightRequestId = 0
 const exportingPdf = ref(false)
 const pdfPercent = ref(0)
 const pdfMessage = ref('正在准备导出…')
@@ -361,9 +383,10 @@ const previewHtml = computed(() => {
   const content = editorContent.value || store.currentNovel?.cleanedText || ''
   if (!content) return '<p>无内容</p>'
   const chapterList = editorStore.chapterList
+  const activeChapter = chapterList[editorStore.activeChapterIndex]
   const chapters =
-    chapterList.length > 0
-      ? chapterList
+    activeChapter
+      ? [activeChapter]
       : [{ id: 0, novelId: 0, title: '', content, sortOrder: 0, startIndex: 0, createdAt: '' }]
   return buildPreviewHtml({
     chapters,
@@ -551,17 +574,32 @@ onMounted(async () => {
 })
 
 watch(highlightBookId, async (bookId) => {
+  const requestId = ++highlightRequestId
   if (!bookId) {
     highlightWords.value = []
+    highlightLoadState.value = 'idle'
+    highlightLoadError.value = ''
     return
   }
+  highlightLoadState.value = 'loading'
+  highlightLoadError.value = ''
   try {
-    highlightWords.value = await invoke<HighlightWord[]>('get_highlight_words', {
-      vocabBookId: bookId,
+    const normalizedBookId = Number(bookId)
+    if (!Number.isSafeInteger(normalizedBookId) || normalizedBookId <= 0) {
+      throw new Error(`无效的词汇本 ID：${String(bookId)}`)
+    }
+    const words = await invoke<HighlightWord[]>('get_highlight_words', {
+      vocabBookId: normalizedBookId,
     })
+    if (requestId !== highlightRequestId) return
+    highlightWords.value = words
+    highlightLoadState.value = 'loaded'
   } catch (e) {
+    if (requestId !== highlightRequestId) return
     console.error('[NovelEditorPage] get_highlight_words failed:', e)
     highlightWords.value = []
+    highlightLoadState.value = 'error'
+    highlightLoadError.value = e instanceof Error ? e.message : String(e)
   }
 })
 

@@ -38,35 +38,79 @@ function extractCnTerms(text: string): string[] {
 
 function trustedCnTerms(word: VocabWord): string[] {
   if (word.novelId == null || !word.exampleSentence?.trim()) return []
+  if (word.matchTerms) {
+    try {
+      const saved = JSON.parse(word.matchTerms)
+      if (Array.isArray(saved)) {
+        const terms = saved.filter(
+          (term): term is string => typeof term === 'string' && Array.from(term).length >= 2,
+        )
+        if (terms.length > 0) return terms
+      }
+    } catch {
+      // Legacy/manual rows fall back to the definition + example intersection.
+    }
+  }
   const primaryDefinition = (word.definition || '').split('【', 1)[0]
   return extractCnTerms(primaryDefinition).filter((term) => word.exampleSentence.includes(term))
 }
 
-function findMatchesInLine(line: string, words: VocabWord[]): Match[] {
-  const raw: Match[] = []
+interface ChineseMatchIndex {
+  byTerm: Map<string, VocabWord>
+  pattern: RegExp | null
+}
+
+const chineseIndexCache = new WeakMap<VocabWord[], ChineseMatchIndex>()
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function getChineseMatchIndex(words: VocabWord[]): ChineseMatchIndex {
+  const cached = chineseIndexCache.get(words)
+  if (cached) return cached
+
+  const byTerm = new Map<string, VocabWord>()
   for (const word of words) {
     for (const term of trustedCnTerms(word)) {
-      let from = 0
-      while (from <= line.length - term.length) {
-        const start = line.indexOf(term, from)
-        if (start < 0) break
-        raw.push({ start, end: start + term.length, word })
-        from = start + term.length
-      }
+      if (!byTerm.has(term)) byTerm.set(term, word)
     }
   }
-  raw.sort((a, b) => a.start - b.start || b.end - b.start - (a.end - a.start))
-  const filtered: Match[] = []
-  for (const match of raw) {
-    if (!filtered.some((item) => match.start < item.end && item.start < match.end)) {
-      filtered.push(match)
-    }
+  const alternatives = [...byTerm.keys()].sort(
+    (a, b) => Array.from(b).length - Array.from(a).length,
+  )
+  const index = {
+    byTerm,
+    pattern: alternatives.length > 0
+      ? new RegExp(alternatives.map(escapeRegExp).join('|'), 'g')
+      : null,
   }
-  return filtered
+  chineseIndexCache.set(words, index)
+  return index
+}
+
+function findMatchesInLine(line: string, words: VocabWord[]): Match[] {
+  const { byTerm, pattern } = getChineseMatchIndex(words)
+  if (!pattern) return []
+  const matches: Match[] = []
+  pattern.lastIndex = 0
+  for (let match = pattern.exec(line); match; match = pattern.exec(line)) {
+    const word = byTerm.get(match[0])
+    if (word) matches.push({ start: match.index, end: match.index + match[0].length, word })
+  }
+  return matches
 }
 
 function wordsFoundInText(text: string, words: VocabWord[]): VocabWord[] {
-  return words.filter((word) => trustedCnTerms(word).some((term) => text.includes(term)))
+  const { byTerm, pattern } = getChineseMatchIndex(words)
+  if (!pattern) return []
+  const found = new Set<VocabWord>()
+  pattern.lastIndex = 0
+  for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
+    const word = byTerm.get(match[0])
+    if (word) found.add(word)
+  }
+  return words.filter((word) => found.has(word))
 }
 
 /* ------------------------------------------------------------------ *
@@ -507,7 +551,7 @@ function buildIntensive(
   }
   for (let ci = 0; ci < chapters.length; ci++) {
     const ch = chapters[ci]
-    const num = ci + 1
+    const num = Number.isFinite(ch.sortOrder) ? ch.sortOrder + 1 : ci + 1
     const body = looksLikeHtml(ch.content) ? stripHtml(ch.content) : ch.content
     const chWords = findWords(body, words)
 
@@ -701,7 +745,7 @@ function buildCard(chapters: Chapter[], words: VocabWord[], novelTitle?: string,
 
   for (let ci = 0; ci < chapters.length; ci++) {
     const ch = chapters[ci]
-    const num = ci + 1
+    const num = Number.isFinite(ch.sortOrder) ? ch.sortOrder + 1 : ci + 1
     const body = looksLikeHtml(ch.content) ? stripHtml(ch.content) : ch.content
     const chWords = wordsFoundInTextEn(body, words)
     parts.push(`<div class="card-chapter">`)
