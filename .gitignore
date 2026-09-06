@@ -25,3 +25,6 @@ dist-ssr
 /docs
 test-data
 .superpowers
+
+# Android build assets are regenerated from src-tauri/resources.
+/src-tauri/gen/android/app/src/main/assets/
