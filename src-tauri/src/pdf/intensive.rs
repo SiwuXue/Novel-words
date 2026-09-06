@@ -505,7 +505,7 @@ fn draw_column_header(ctx: &mut PdfContext, col: &ColLayout, top_y: f32, header_
 
     let border_thick = 0.4;
     let label_size = ctx.small_font_size;
-    let text_y = top_y - header_h * 0.35; // baseline, approximate within the band
+    let text_y = ctx.centered_text_baseline(top_y, header_h, label_size, false);
 
     let x_idx = col.x_left;
     let x_word = col.x_left + col.idx_w;
@@ -553,7 +553,9 @@ fn draw_data_row(
 ) {
     let font_size = ctx.small_font_size;
     let idx_font = font_size * 0.9;
-    let text_y = row_top_y - row_h * 0.32;
+    let word_text_y = ctx.centered_text_baseline(row_top_y, row_h, font_size, true);
+    let def_text_y = ctx.centered_text_baseline(row_top_y, row_h, font_size, false);
+    let idx_text_y = ctx.centered_text_baseline(row_top_y, row_h, idx_font, true);
 
     let x_idx = col.x_left;
     let x_word = col.x_left + col.idx_w;
@@ -565,19 +567,44 @@ fn draw_data_row(
     // 序号 (two digits, gray, centered)
     let idx_str = format!("{:02}", idx_num);
     let w = ctx.measure_text_width(&idx_str, idx_font);
-    ctx.draw_text_colored(&idx_str, x_idx + (col.idx_w - w) / 2.0, text_y, idx_font, text_light_gray());
+    ctx.draw_text_colored(
+        &idx_str,
+        x_idx + (col.idx_w - w) / 2.0,
+        idx_text_y,
+        idx_font,
+        text_light_gray(),
+    );
 
-    // 单词 (by proficiency color, left-aligned with small padding)
+    // 单词 (by proficiency color, horizontally centered)
     let pad = 0.6;
     let en_max_w = col.word_w - pad * 2.0;
     let en = ctx.truncate_text(&word.word, en_max_w, font_size);
-    ctx.draw_text_colored(&en, x_word + pad, text_y, font_size, text_color_for_proficiency(&word.proficiency));
+    let en_w = ctx.measure_text_width(&en, font_size);
+    ctx.draw_text_colored(
+        &en,
+        x_word + (col.word_w - en_w) / 2.0,
+        word_text_y,
+        font_size,
+        text_color_for_proficiency(&word.proficiency),
+    );
 
-    // 释义 (black, left-aligned with small padding, truncated)
+    // 释义 (black, horizontally centered, truncated)
     let def = if word.definition.is_empty() { "—" } else { &word.definition };
     let def_max_w = col.def_w - pad * 2.0;
     let def_short = ctx.truncate_text(def, def_max_w, font_size);
-    ctx.draw_text_colored(&def_short, x_def + pad, text_y, font_size, text_black());
+    let def_w = ctx.measure_text_width(&def_short, font_size);
+    let def_x = if def_short != def || def.contains('\n') {
+        x_def + pad
+    } else {
+        x_def + (col.def_w - def_w) / 2.0
+    };
+    ctx.draw_text_colored(
+        &def_short,
+        def_x,
+        def_text_y,
+        font_size,
+        text_black(),
+    );
 
     // Row bottom border
     ctx.draw_hline(col.x_left, right_x, bottom_y, table_border(), border_thick);

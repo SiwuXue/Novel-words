@@ -409,9 +409,11 @@ function buildStep3ColumnTable(list: VocabWord[], startIdx: number): string {
     .map((w, i) => {
       const idx = String(startIdx + i + 1).padStart(2, '0')
       const en = escapeHtml(w.word)
-      const def = escapeHtml(w.definition || '—')
+      const rawDef = w.definition || '—'
+      const def = escapeHtml(rawDef)
+      const defClass = rawDef.includes('\n') || Array.from(rawDef).length > 10 ? 'def long' : 'def'
       const enColor = textColorFor(w.proficiency)
-      return `<tr><td class="idx">${idx}</td><td class="word" style="color:${enColor}">${en}</td><td class="def" title="${def}">${def}</td></tr>`
+      return `<tr><td class="idx">${idx}</td><td class="word" style="color:${enColor}">${en}</td><td class="${defClass}" title="${def}">${def}</td></tr>`
     })
     .join('')
   return `<table><thead><tr><th>序号</th><th>单词</th><th>释义</th></tr></thead><tbody>${rows}</tbody></table>`
@@ -497,14 +499,14 @@ function baseCss(fontSize: number, lineHeight: number): string {
     .pdf-preview-body .step3-tables { display: flex; justify-content: space-between; gap: 2%; margin-top: 10px; }
     .pdf-preview-body .step3-tables table { border-collapse: collapse; width: 49%; table-layout: fixed; }
     .pdf-preview-body .step3-tables th,
-    .pdf-preview-body .step3-tables td { border: 1px solid #C8D1D9; padding: 4px 6px; font-size: ${fontSize - 1}px; }
-    .pdf-preview-body .step3-tables thead th { background: #E0E8EF; color: #333; font-weight: 600; text-align: center; }
+    .pdf-preview-body .step3-tables td { border: 1px solid #C8D1D9; padding: 4px 6px; font-size: ${fontSize - 1}px; text-align: center; vertical-align: middle; }
+    .pdf-preview-body .step3-tables thead th { background: #E0E8EF; color: #333; font-weight: 600; text-align: center; vertical-align: middle; }
     .pdf-preview-body .step3-tables td.idx { text-align: center; color: #888; width: 20%; font-size: ${fontSize - 2}px; }
-    .pdf-preview-body .step3-tables td.word { width: 34%; font-weight: 500; }
-    .pdf-preview-body .step3-tables td.def { width: 46%; color: #222; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pdf-preview-body .step3-tables td.word { width: 34%; font-weight: 500; text-align: center; }
+    .pdf-preview-body .step3-tables td.def { width: 46%; color: #222; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+    .pdf-preview-body .step3-tables td.def.long { text-align: left; }
     .pdf-preview-body p { margin: 0 0 8px; text-indent: 2em; }
     .pdf-preview-body .cover-page { text-align: center; padding: 90px 24px 40px; min-height: 720px; box-sizing: border-box; page-break-after: always; break-after: page; }
-    .pdf-preview-body .cover-bar { width: 60px; height: 3px; background: #1A56DB; margin: 0 auto 18px; }
     .pdf-preview-body .cover-title { font-size: 26px; font-weight: 700; color: #222; margin-bottom: 8px; }
     .pdf-preview-body .cover-sub { font-size: 15px; color: #666; margin-bottom: 22px; }
     .pdf-preview-body .cover-date { font-size: 12px; color: #999; margin-bottom: 26px; }
@@ -713,7 +715,6 @@ function buildCoverHtml(
   const pad = (n: number) => String(n).padStart(2, '0')
   const date = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`
   return `<div class="cover-page">
-    <div class="cover-bar"></div>
     <div class="cover-title">${escapeHtml(novelTitle || '未命名')}</div>
     <div class="cover-sub">词阅 · 外语学习</div>
     <div class="cover-date">导出日期：${date}</div>
@@ -818,7 +819,6 @@ function cardCss(fontSize: number, lineHeight: number, background?: string): str
     .card-preview .wc-phon { font-size: ${fontSize - 2}px; color: #555; }
     .card-preview .wc-def { font-size: ${fontSize - 2}px; color: #222; margin-top: 2px; }
     .card-preview .cover-page { text-align: center; padding: 90px 24px 40px; min-height: 720px; box-sizing: border-box; page-break-after: always; break-after: page; }
-    .card-preview .cover-bar { width: 60px; height: 3px; background: #1A56DB; margin: 0 auto 18px; }
     .card-preview .cover-title { font-size: 26px; font-weight: 700; color: #222; margin-bottom: 8px; }
     .card-preview .cover-sub { font-size: 15px; color: #666; margin-bottom: 22px; }
     .card-preview .cover-date { font-size: 12px; color: #999; margin-bottom: 26px; }

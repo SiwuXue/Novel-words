@@ -287,6 +287,46 @@ fn build_ai_inputs(items: &[PresetCloneItem]) -> Vec<AiWordInput> {
         .collect()
 }
 
+fn part_of_speech_prefix(line: &str) -> Option<String> {
+    let trimmed = line.trim_start();
+    let dot = trimmed.find('.')?;
+    let prefix = &trimmed[..=dot];
+    if prefix.len() <= 24
+        && prefix
+            .chars()
+            .all(|ch| ch.is_ascii_alphabetic() || matches!(ch, ' ' | '/' | '-' | '.'))
+    {
+        Some(prefix.trim().to_string())
+    } else {
+        None
+    }
+}
+
+fn contextual_part_of_speech(definition: &str, matched_terms: &[String]) -> Option<String> {
+    let primary = definition.split('【').next().unwrap_or(definition);
+    for line in primary.lines() {
+        if matched_terms.iter().any(|term| line.contains(term)) {
+            if let Some(prefix) = part_of_speech_prefix(line) {
+                return Some(prefix);
+            }
+        }
+    }
+    primary.lines().find_map(part_of_speech_prefix)
+}
+
+fn definition_with_part_of_speech(
+    original: &str,
+    enhanced: &str,
+    matched_terms: &[String],
+) -> String {
+    if part_of_speech_prefix(enhanced).is_some() {
+        return enhanced.trim().to_string();
+    }
+    contextual_part_of_speech(original, matched_terms)
+        .map(|pos| format!("{} {}", pos, enhanced.trim()))
+        .unwrap_or_else(|| enhanced.trim().to_string())
+}
+
 fn apply_ai_decisions(items: &mut Vec<PresetCloneItem>, decisions: Vec<AiWordDecision>) {
     let decisions: HashMap<String, AiWordDecision> = decisions
         .into_iter()
@@ -307,7 +347,11 @@ fn apply_ai_decisions(items: &mut Vec<PresetCloneItem>, decisions: Vec<AiWordDec
                 .iter()
                 .any(|term| definition.contains(term))
         {
-            item.definition = definition.to_string();
+            item.definition = definition_with_part_of_speech(
+                &item.definition,
+                definition,
+                &item.matched_terms,
+            );
         }
         let example = decision.example_sentence.trim();
         if !example.is_empty()
@@ -320,11 +364,73 @@ fn apply_ai_decisions(items: &mut Vec<PresetCloneItem>, decisions: Vec<AiWordDec
     });
 }
 
+/// Repair AI-enhanced clones created by older versions that replaced the
+/// source definition with a bare Chinese meaning. Preset books are available
+/// by this point, so the correct contextual POS can be recovered by word.
+pub fn repair_cloned_parts_of_speech(
+    conn: &mut rusqlite::Connection,
+) -> Result<usize, String> {
+    let rows: Vec<(i64, String, String, String)> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT cw.id, cw.definition, sw.definition, cw.match_terms \
+                 FROM vocab_word cw \
+                 JOIN vocab_book cb ON cb.id = cw.vocab_book_id AND cb.is_preset = 0 \
+                 JOIN vocab_book pb ON pb.is_preset = 1 \
+                   AND pb.preset_key = cb.cloned_from_preset_key \
+                 JOIN vocab_word sw ON sw.vocab_book_id = pb.id \
+                   AND lower(sw.word) = lower(cw.word) \
+                 WHERE cb.cloned_from_preset_key <> ''",
+            )
+            .map_err(|e| format!("准备修复 AI 词性失败: {}", e))?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .map_err(|e| format!("读取待修复 AI 词性失败: {}", e))?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|e| format!("读取待修复 AI 词性失败: {}", e))?;
+        rows
+    };
+
+    let repairs: Vec<(i64, String)> = rows
+        .into_iter()
+        .filter_map(|(id, current, source, encoded_terms)| {
+            if part_of_speech_prefix(&current).is_some() {
+                return None;
+            }
+            let terms = serde_json::from_str::<Vec<String>>(&encoded_terms).unwrap_or_default();
+            let repaired = definition_with_part_of_speech(&source, &current, &terms);
+            (repaired != current).then_some((id, repaired))
+        })
+        .collect();
+    if repairs.is_empty() {
+        return Ok(0);
+    }
+
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("开启 AI 词性修复事务失败: {}", e))?;
+    {
+        let mut update = tx
+            .prepare("UPDATE vocab_word SET definition = ?1 WHERE id = ?2")
+            .map_err(|e| format!("准备写入 AI 词性失败: {}", e))?;
+        for (id, definition) in &repairs {
+            update
+                .execute(params![definition, id])
+                .map_err(|e| format!("写入 AI 词性失败: {}", e))?;
+        }
+    }
+    tx.commit()
+        .map_err(|e| format!("提交 AI 词性修复失败: {}", e))?;
+    Ok(repairs.len())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        extract_cjk_terms, extract_example_sentence, tailor, PresetCloneItem, PresetClonePreview,
-        PresetCloneProgress, PresetVocabBook,
+        definition_with_part_of_speech, extract_cjk_terms, extract_example_sentence, tailor,
+        PresetCloneItem, PresetClonePreview, PresetCloneProgress, PresetVocabBook,
     };
     use crate::dictionary::DictDbState;
     use crate::models::VocabWord;
@@ -388,6 +494,23 @@ mod tests {
         assert_eq!(
             extract_example_sentence(text, pos, term),
             "神通者在雨夜中前行！"
+        );
+    }
+
+    #[test]
+    fn ai_definition_keeps_contextual_part_of_speech() {
+        let terms = vec!["没有".to_string()];
+        assert_eq!(
+            definition_with_part_of_speech(
+                "adv. 不；并不\nadj. 没有",
+                "没有",
+                &terms,
+            ),
+            "adj. 没有"
+        );
+        assert_eq!(
+            definition_with_part_of_speech("n. 天赋；礼物", "n. 天赋", &["天赋".into()]),
+            "n. 天赋"
         );
     }
 

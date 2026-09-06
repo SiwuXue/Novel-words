@@ -33,7 +33,10 @@ use commands::export::{
     export_vocab_book_json, export_vocab_words_apkg, export_vocab_words_xlsx, import_vocab_book_json,
 };
 use commands::pdf_export::export_pdf;
-use commands::preset_vocab::{commit_preset_clone, list_preset_vocab_books, preview_preset_clone};
+use commands::preset_vocab::{
+    commit_preset_clone, list_preset_vocab_books, preview_preset_clone,
+    repair_cloned_parts_of_speech,
+};
 use commands::review::{get_due_words, get_due_words_count, get_learning_stats, get_review_progress, review_vocab_word};
 use commands::settings::{get_all_settings, get_setting, set_setting};
 use commands::ai_enhancer::{get_ai_settings, list_ai_models, save_ai_settings, test_ai_connection};
@@ -83,6 +86,13 @@ pub fn run() {
                             );
                         }
                     }
+                }
+                match repair_cloned_parts_of_speech(conn) {
+                    Ok(count) if count > 0 => {
+                        println!("[preset] 已为 {} 条旧 AI 词汇补回词性", count);
+                    }
+                    Ok(_) => {}
+                    Err(e) => eprintln!("[preset] 修复旧 AI 词性失败（不阻断启动）: {}", e),
                 }
             }
             // ---- Database integrity check (run before `app.manage` moves db_state) ----

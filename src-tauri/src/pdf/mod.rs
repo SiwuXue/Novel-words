@@ -57,17 +57,6 @@ pub fn table_header_bg() -> Color {
     Color::Rgb(Rgb::new(0xE0 as f32 / 255.0, 0xE8 as f32 / 255.0, 0xEF as f32 / 255.0, None))
 }
 
-/// Accent blue used for titles / chapter labels / cover decorations.
-#[inline]
-pub fn accent_color() -> Color {
-    Color::Rgb(Rgb::new(
-        0x1A as f32 / 255.0,
-        0x56 as f32 / 255.0,
-        0xDB as f32 / 255.0,
-        None,
-    ))
-}
-
 /// Return the text color for a given proficiency level (intensive reading).
 /// - unknown → red (needs study)
 /// - familiar → orange (familiar but needs reinforcement)
@@ -179,6 +168,8 @@ pub struct PdfContext {
     pub latin_font_id: FontId,
     /// Parsed CJK font, used to test glyph coverage per character.
     pub cjk_parsed: ParsedFont,
+    /// Parsed Latin font, used for accurate English/digit vertical metrics.
+    pub latin_parsed: ParsedFont,
     pub font_size: f32,
     pub small_font_size: f32,
     pub line_height: f32,
@@ -353,6 +344,28 @@ impl PdfContext {
             w += if ch.is_ascii() { font_size * 0.55 } else { font_size };
         }
         w * 0.3528
+    }
+
+    /// Return the PDF baseline that visually centers the font's ascender/
+    /// descender box inside a cell. PDF positions text by its baseline, not by
+    /// the glyph bounding box, so using a fixed percentage always looks high.
+    pub fn centered_text_baseline(
+        &self,
+        cell_top_y: f32,
+        cell_height: f32,
+        font_size: f32,
+        use_latin_metrics: bool,
+    ) -> f32 {
+        let metrics = if use_latin_metrics {
+            &self.latin_parsed.pdf_font_metrics
+        } else {
+            &self.cjk_parsed.pdf_font_metrics
+        };
+        let units_per_em = metrics.units_per_em.max(1) as f32;
+        let scale_mm = font_size * 0.3528 / units_per_em;
+        let font_visual_mid = (metrics.ascender as f32 + metrics.descender as f32) / 2.0;
+        let cell_center_y = cell_top_y - cell_height / 2.0;
+        cell_center_y - font_visual_mid * scale_mm
     }
 
     /// Wrap text within `max_width` mm, drawing each line at `x_mm` from the left,
@@ -551,10 +564,6 @@ pub(crate) fn draw_cover_page(
     let small = ctx.small_font_size;
     let mut y = ctx.paper_height * 0.72;
 
-    // Decorative accent bar above the title.
-    let bar_w = 46.0;
-    ctx.fill_rect(cx - bar_w / 2.0, y + 7.0, bar_w, 1.4, accent_color());
-
     // Title.
     let title = if ctx.novel_title.is_empty() {
         "未命名".to_string()
@@ -662,6 +671,7 @@ pub fn generate_pdf(
         Some(pf) => doc.add_font(pf),
         None => font_id.clone(),
     };
+    let latin_metrics_font = parsed_latin.unwrap_or_else(|| parsed_font.clone());
 
     let margins = Margins::from_json(&template.margins);
     let (paper_w, paper_h) = paper_dims(&template.paper_size);
@@ -675,6 +685,7 @@ pub fn generate_pdf(
         font_id,
         latin_font_id,
         cjk_parsed: parsed_font,
+        latin_parsed: latin_metrics_font,
         font_size,
         small_font_size: font_size * 0.65,
         line_height,

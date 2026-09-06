@@ -550,7 +550,7 @@ where
         return Ok(Vec::new());
     }
     let total_batches = items.len().div_ceil(BATCH_SIZE);
-    let system = "You validate English vocabulary selected from a Chinese novel. Return one JSON object only. You may shorten an example, but must preserve its facts and an exact matched Chinese term. Never invent story facts.";
+    let system = "You validate English vocabulary selected from a Chinese novel. Return one JSON object only. Every contextDefinition must start with the correct English part-of-speech abbreviation copied from the input definition (for example: n., v., adj., adv., pron., conj., prep., modal verb.). You may shorten an example, but must preserve its facts and an exact matched Chinese term. Never invent story facts.";
     let mut decisions = Vec::with_capacity(items.len());
 
     // Report the AI stage before the first network request. Otherwise the UI
@@ -570,7 +570,7 @@ where
             })
             .collect();
         let user = format!(
-            "Review every item below. `keep` is false only when the matched Chinese term does not express a valid sense of the English word in that sentence. `contextDefinition` must be a concise Chinese meaning (max 20 Chinese characters) and contain one exact string from matchedTerms. `exampleSentence` must be a natural, concise Chinese rewrite (max 80 Chinese characters) grounded only in the original exampleSentence and contain one exact string from matchedTerms. Return one item per input in the same order as a JSON object shaped exactly like {{\"items\":[{{\"word\":\"...\",\"keep\":true,\"contextDefinition\":\"...\",\"exampleSentence\":\"...\"}}]}}.\n\n{}",
+            "Review every item below. `keep` is false only when the matched Chinese term does not express a valid sense of the English word in that sentence. `contextDefinition` must use the format `<part-of-speech> <concise Chinese meaning>` (for example `n. 天赋`), retain the contextually correct part of speech from the input definition, be concise (max 30 characters total), and contain one exact string from matchedTerms. `exampleSentence` must be a natural, concise Chinese rewrite (max 80 Chinese characters) grounded only in the original exampleSentence and contain one exact string from matchedTerms. Return one item per input in the same order as a JSON object shaped exactly like {{\"items\":[{{\"word\":\"...\",\"keep\":true,\"contextDefinition\":\"n. ...\",\"exampleSentence\":\"...\"}}]}}.\n\n{}",
             serde_json::to_string(&compact).map_err(|e| e.to_string())?
         );
         let answer = chat_completion(config, system, &user).await?;
