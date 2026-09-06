@@ -40,6 +40,12 @@ jobs:
             rust-target: x86_64-unknown-linux-gnu
             tauri-args: '--target x86_64-unknown-linux-gnu'
 
+          - name: Android arm64
+            os: ubuntu-22.04
+            rust-target: aarch64-linux-android
+            tauri-args: '--target aarch64 --apk --aab'
+            mobile: android
+
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -60,6 +66,32 @@ jobs:
         with:
           node-version: lts/*
           cache: npm
+
+      - name: Set up Java
+        if: matrix.mobile == 'android'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        if: matrix.mobile == 'android'
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK components
+        if: matrix.mobile == 'android'
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;29.0.14206865"
+          echo "ANDROID_HOME=${ANDROID_HOME}" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-$ANDROID_HOME}" >> "$GITHUB_ENV"
+          echo "NDK_HOME=${ANDROID_HOME}/ndk/29.0.14206865" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/29.0.14206865" >> "$GITHUB_ENV"
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -97,8 +129,10 @@ jobs:
             Automated release for Novel Words ${{ steps.release.outputs.version }}.
 
             Download the installer for your operating system and CPU architecture.
+            Android users can download the arm64 APK or AAB package.
           releaseDraft: true
           prerelease: false
+          mobile: ${{ matrix.mobile }}
           args: ${{ matrix.tauri-args }}
 
   publish:
