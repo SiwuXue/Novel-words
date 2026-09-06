@@ -1,6 +1,6 @@
 <template>
-  <header class="topbar" data-tauri-drag-region>
-    <div class="topbar-left" data-tauri-drag-region>
+  <header class="topbar" :data-tauri-drag-region="isMobile ? undefined : ''">
+    <div class="topbar-left" :data-tauri-drag-region="isMobile ? undefined : ''">
       <el-breadcrumb separator="/">
         <el-breadcrumb-item :to="{ path: '/' }">{{ t('nav.home') }}</el-breadcrumb-item>
         <el-breadcrumb-item v-if="currentPage">{{ currentPage }}</el-breadcrumb-item>
@@ -20,6 +20,7 @@ import { useRoute } from 'vue-router'
 import ThemeToggle from '@/components/common/ThemeToggle.vue'
 import LanguageToggle from '@/components/common/LanguageToggle.vue'
 import { t } from '@/i18n'
+import { isMobile } from '@/utils/platform'
 import WindowControls from './WindowControls.vue'
 
 const route = useRoute()

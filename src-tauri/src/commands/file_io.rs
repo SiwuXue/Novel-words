@@ -3,6 +3,7 @@ use std::path::Path;
 use crate::models::novel::{Chapter, ImportResult};
 use crate::utils::{chapter_detector, ebook, text_cleaner};
 use tauri::{AppHandle, Emitter};
+use tauri_plugin_fs::FsExt;
 
 /// Progress payload emitted to the frontend during file import.
 #[derive(Clone, serde::Serialize)]
@@ -73,10 +74,12 @@ fn filename_title(path: &str) -> String {
         .to_string()
 }
 
-fn import_text_file_sync(path: &str, progress: &dyn Fn(u32, &str)) -> Result<ImportResult, String> {
+fn import_text_file_sync(
+    path: &str,
+    bytes: Vec<u8>,
+    progress: &dyn Fn(u32, &str),
+) -> Result<ImportResult, String> {
     progress(20, "正在读取文件…");
-    let bytes =
-        std::fs::read(path).map_err(|e| format!("无法读取文件: {}", e))?;
 
     if bytes.is_empty() {
         return Err("文件为空".into());
@@ -112,7 +115,11 @@ fn import_text_file_sync(path: &str, progress: &dyn Fn(u32, &str)) -> Result<Imp
 }
 
 /// Parse an EPUB / FB2 file into the standard ImportResult shape.
-fn import_ebook_sync(path: &str, progress: &dyn Fn(u32, &str)) -> Result<ImportResult, String> {
+fn import_ebook_sync(
+    path: &str,
+    bytes: Vec<u8>,
+    progress: &dyn Fn(u32, &str),
+) -> Result<ImportResult, String> {
     let ext = Path::new(path)
         .extension()
         .and_then(|s| s.to_str())
@@ -121,9 +128,9 @@ fn import_ebook_sync(path: &str, progress: &dyn Fn(u32, &str)) -> Result<ImportR
 
     progress(30, "正在解析电子书（解压与 HTML 解析）…");
     let ebook::EbookResult { title, chapters } = if ext == "fb2" {
-        ebook::parse_fb2(path)?
+        ebook::parse_fb2(path, bytes)?
     } else {
-        ebook::parse_epub(path)?
+        ebook::parse_epub(path, bytes)?
     };
 
     progress(80, "正在整理全文…");
@@ -182,15 +189,19 @@ pub async fn import_file(app: AppHandle, path: String) -> Result<ImportResult, S
         }
     };
     emit(5, "正在读取文件…");
+    let bytes = app
+        .fs()
+        .read(path.parse::<tauri_plugin_fs::FilePath>().unwrap())
+        .map_err(|e| format!("无法读取文件: {}", e))?;
 
     let result = if ext == "epub" || ext == "fb2" {
         let inner = emit.clone();
-        tokio::task::spawn_blocking(move || import_ebook_sync(&path, &inner))
+        tokio::task::spawn_blocking(move || import_ebook_sync(&path, bytes, &inner))
             .await
             .map_err(|e| format!("任务执行失败: {}", e))?
     } else {
         let inner = emit.clone();
-        tokio::task::spawn_blocking(move || import_text_file_sync(&path, &inner))
+        tokio::task::spawn_blocking(move || import_text_file_sync(&path, bytes, &inner))
             .await
             .map_err(|e| format!("任务执行失败: {}", e))?
     };
@@ -201,12 +212,21 @@ pub async fn import_file(app: AppHandle, path: String) -> Result<ImportResult, S
 
 /// Write a UTF-8 text file (used for lightweight JSON export).
 #[tauri::command]
-pub fn write_text_file(path: String, contents: String) -> Result<(), String> {
-    std::fs::write(&path, contents).map_err(|e| format!("写入文件失败: {}", e))
+pub fn write_text_file(app: AppHandle, path: String, contents: String) -> Result<(), String> {
+    let mut options = tauri_plugin_fs::OpenOptions::new();
+    options.read(false).write(true).create(true).truncate(true);
+    let mut file = app
+        .fs()
+        .open(path.parse::<tauri_plugin_fs::FilePath>().unwrap(), options)
+        .map_err(|e| format!("打开文件失败: {}", e))?;
+    std::io::Write::write_all(&mut file, contents.as_bytes())
+        .map_err(|e| format!("写入文件失败: {}", e))
 }
 
 /// Read a UTF-8 text file (used for lightweight JSON import).
 #[tauri::command]
-pub fn read_text_file(path: String) -> Result<String, String> {
-    std::fs::read_to_string(&path).map_err(|e| format!("读取文件失败: {}", e))
+pub fn read_text_file(app: AppHandle, path: String) -> Result<String, String> {
+    app.fs()
+        .read_to_string(path.parse::<tauri_plugin_fs::FilePath>().unwrap())
+        .map_err(|e| format!("读取文件失败: {}", e))
 }

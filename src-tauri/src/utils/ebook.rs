@@ -37,10 +37,9 @@ struct ManItem {
 /// zip + roxmltree (no external epub crate behavior). Navigation docs (nav /
 /// NCX) and cover images are skipped so the reading order contains only body
 /// content. Falls back to scanning every XHTML resource if the spine is broken.
-pub fn parse_epub(path: &str) -> Result<EbookResult, String> {
-    let file = std::fs::File::open(path).map_err(|e| format!("无法打开 EPUB: {}", e))?;
-    let mut archive =
-        zip::ZipArchive::new(file).map_err(|e| format!("无法解压 EPUB: {}", e))?;
+pub fn parse_epub(path: &str, bytes: Vec<u8>) -> Result<EbookResult, String> {
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
+        .map_err(|e| format!("无法解压 EPUB: {}", e))?;
 
     // 1. container.xml → OPF path
     let container_bytes = zip_read(&mut archive, "META-INF/container.xml")
@@ -178,7 +177,10 @@ pub fn parse_epub(path: &str) -> Result<EbookResult, String> {
 }
 
 /// Read a zip entry to bytes.
-fn zip_read(archive: &mut zip::ZipArchive<std::fs::File>, path: &str) -> Option<Vec<u8>> {
+fn zip_read<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    path: &str,
+) -> Option<Vec<u8>> {
     use std::io::Read;
     let mut entry = archive.by_name(path).ok()?;
     let mut buf = Vec::new();
@@ -357,8 +359,7 @@ fn normalize_paragraphs(text: &str) -> String {
 // FB2 (FictionBook XML)
 // ---------------------------------------------------------------------------
 
-pub fn parse_fb2(path: &str) -> Result<EbookResult, String> {
-    let bytes = std::fs::read(path).map_err(|e| format!("无法读取 FB2: {}", e))?;
+pub fn parse_fb2(_path: &str, bytes: Vec<u8>) -> Result<EbookResult, String> {
     let text = std::str::from_utf8(&bytes)
         .map_err(|_| "FB2 文件不是有效的 UTF-8 编码".to_string())?;
     let doc = roxmltree::Document::parse(text).map_err(|e| format!("FB2 XML 解析失败: {}", e))?;

@@ -23,7 +23,7 @@
             </el-radio-group>
           </el-form-item>
 
-          <el-form-item :label="t('settings.exportFolder')">
+          <el-form-item v-if="!isAndroid" :label="t('settings.exportFolder')">
             <div class="inline-field">
               <el-input
                 :model-value="settingsStore.defaultExportFolder"
@@ -268,6 +268,7 @@ import type { PdfBackground, AutoBackup } from '@/stores/settingsStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
 import { STEP_LABELS, type StepNum } from '@/types/pdfSteps'
 import { speakWord, type SpeechAccent } from '@/utils/speech'
+import { isAndroid } from '@/utils/platform'
 import { currentLocale, t, setLocale, type Locale } from '@/i18n'
 import { AI_PROVIDER_PRESETS, getAiProvider } from '@/config/aiProviders'
 

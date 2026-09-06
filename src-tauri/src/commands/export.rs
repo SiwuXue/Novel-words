@@ -1,6 +1,7 @@
 use crate::db::DbState;
 use std::io::Write;
-use tauri::State;
+use tauri::{AppHandle, State};
+use tauri_plugin_fs::FsExt;
 
 fn proficiency_label(p: &str) -> &str {
     match p {
@@ -43,6 +44,7 @@ fn load_word_rows(
 /// Export a vocab book as an Excel (.xlsx) spreadsheet.
 #[tauri::command]
 pub fn export_vocab_words_xlsx(
+    app: AppHandle,
     state: State<DbState>,
     vocab_book_id: i64,
     file_path: String,
@@ -72,7 +74,17 @@ pub fn export_vocab_words_xlsx(
             .map_err(|e| format!("写入数据失败: {}", e))?;
     }
 
-    workbook.save(&file_path).map_err(|e| format!("保存 Excel 失败: {}", e))?;
+    let bytes = workbook
+        .save_to_buffer()
+        .map_err(|e| format!("生成 Excel 失败: {}", e))?;
+    let mut options = tauri_plugin_fs::OpenOptions::new();
+    options.read(false).write(true).create(true).truncate(true);
+    let mut file = app
+        .fs()
+        .open(file_path.parse::<tauri_plugin_fs::FilePath>().unwrap(), options)
+        .map_err(|e| format!("创建 Excel 文件失败: {}", e))?;
+    file.write_all(&bytes)
+        .map_err(|e| format!("保存 Excel 失败: {}", e))?;
     Ok(rows.len())
 }
 
@@ -217,6 +229,7 @@ fn anki_decks_json(deck_name: &str) -> String {
 /// Export a vocab book as an Anki `.apkg` package (word → definition basic card).
 #[tauri::command]
 pub fn export_vocab_words_apkg(
+    app: AppHandle,
     state: State<DbState>,
     vocab_book_id: i64,
     deck_name: String,
@@ -288,7 +301,12 @@ pub fn export_vocab_words_apkg(
     let _ = std::fs::remove_file(&tmp_db);
 
     // Zip the collection into the .apkg file.
-    let file = std::fs::File::create(&file_path).map_err(|e| format!("创建 apkg 文件失败: {}", e))?;
+    let mut options = tauri_plugin_fs::OpenOptions::new();
+    options.read(false).write(true).create(true).truncate(true);
+    let file = app
+        .fs()
+        .open(file_path.parse::<tauri_plugin_fs::FilePath>().unwrap(), options)
+        .map_err(|e| format!("创建 apkg 文件失败: {}", e))?;
     let mut zip = zip::ZipWriter::new(file);
     let options = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated);

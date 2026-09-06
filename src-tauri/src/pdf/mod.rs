@@ -6,8 +6,6 @@ mod card;
 pub use intensive::{parse_steps_from_db, IntensiveSteps};
 
 use printpdf::*;
-use std::fs::File;
-use std::io::Write;
 
 /// Measure the width (mm) of a single character at the given font size.
 pub(crate) fn measure_char_width(ch: char, font_size: f32) -> f32 {
@@ -626,9 +624,8 @@ pub fn generate_pdf(
     background: &str,
     cover: bool,
     page_numbers: bool,
-    output_path: &str,
     progress: Option<&dyn Fn(PdfProgress)>,
-) -> Result<(), String> {
+) -> Result<Vec<u8>, String> {
     if let Some(p) = progress {
         p(PdfProgress {
             percent: 0,
@@ -749,10 +746,5 @@ pub fn generate_pdf(
     let opts = PdfSaveOptions::default();
     let mut save_warnings = Vec::new();
     let bytes = ctx.doc.save(&opts, &mut save_warnings);
-    let mut file = File::create(output_path)
-        .map_err(|e| format!("创建文件失败: {}", e))?;
-    file.write_all(&bytes)
-        .map_err(|e| format!("写入 PDF 失败: {}", e))?;
-
-    Ok(())
+    Ok(bytes)
 }

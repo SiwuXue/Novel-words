@@ -5,7 +5,13 @@ mod models;
 mod pdf;
 mod utils;
 
+#[cfg(target_os = "android")]
+use std::path::{Path, PathBuf};
 use tauri::Manager;
+#[cfg(target_os = "android")]
+use tauri::AppHandle;
+#[cfg(target_os = "android")]
+use tauri_plugin_fs::FsExt;
 
 use commands::file_io::{import_file, read_text_file, write_text_file};
 use commands::novel::{
@@ -42,6 +48,30 @@ use commands::settings::{get_all_settings, get_setting, set_setting};
 use commands::ai_enhancer::{get_ai_settings, list_ai_models, save_ai_settings, test_ai_connection};
 use dictionary::{dict_lookup_chinese, dict_lookup_english, DictDbState};
 
+/// Android packages resources as APK assets, represented by an `asset://` URI.
+/// The SQLite and import code works with normal filesystem paths, so materialize
+/// those bundled files into app data once before handing them to that code.
+#[cfg(target_os = "android")]
+fn materialize_resource(
+    app: &AppHandle,
+    resource_path: &Path,
+    cache_dir: &Path,
+    file_name: &str,
+) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(cache_dir)
+        .map_err(|e| format!("无法创建资源缓存目录: {}", e))?;
+    let cached_path = cache_dir.join(file_name);
+    if !cached_path.exists() {
+        let bytes = app
+            .fs()
+            .read(resource_path)
+            .map_err(|e| format!("读取内置资源失败: {}", e))?;
+        std::fs::write(&cached_path, bytes)
+            .map_err(|e| format!("写入资源缓存失败: {}", e))?;
+    }
+    Ok(cached_path)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -71,7 +101,16 @@ pub fn run() {
             {
                 let conn = db_state.db.get_mut().map_err(|e| e.to_string())?;
                 for preset in BUNDLED_PRESETS {
-                    let path = resource_dir.join("resources").join(preset.file_name);
+                    let bundled_path = resource_dir.join("resources").join(preset.file_name);
+                    #[cfg(target_os = "android")]
+                    let path = materialize_resource(
+                        &app.handle(),
+                        &bundled_path,
+                        &app_data_dir.join("resources"),
+                        preset.file_name,
+                    )?;
+                    #[cfg(not(target_os = "android"))]
+                    let path = bundled_path;
                     match ensure_preset_book_populated(&path, preset, conn) {
                         Ok(res) => {
                             println!(
@@ -130,9 +169,18 @@ pub fn run() {
             // Initialize embedded dictionary (read-only). Failure here is
             // non-fatal: dict_lookup_* commands will return errors and the
             // app continues without lookup feature.
-            let dict_db_path = resource_dir
+            let bundled_dict_path = resource_dir
                 .join("resources")
                 .join("dictionary.db");
+            #[cfg(target_os = "android")]
+            let dict_db_path = materialize_resource(
+                &app.handle(),
+                &bundled_dict_path,
+                &app_data_dir.join("resources"),
+                "dictionary.db",
+            )?;
+            #[cfg(not(target_os = "android"))]
+            let dict_db_path = bundled_dict_path;
             match DictDbState::open(dict_db_path) {
                 Ok(state) => {
                     app.manage(state);

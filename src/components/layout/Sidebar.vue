@@ -220,9 +220,62 @@ function togglePin() {
 }
 
 @media (max-width: 760px) {
+  .sidebar-wrapper {
+    width: 52px;
+  }
   .sidebar-wrapper:hover,
   .sidebar-wrapper.pinned {
-    width: 0;
+    width: 52px;
+  }
+  .sidebar {
+    width: 52px;
+    transform: translateX(0);
+    pointer-events: auto;
+    box-shadow: none;
+  }
+  .sidebar-header {
+    padding: 14px 0;
+    text-align: center;
+  }
+  .app-title {
+    font-size: 0;
+  }
+  .app-title::after {
+    content: '词';
+    font-size: 16px;
+  }
+  .sidebar-menu .el-menu-item {
+    justify-content: center;
+    padding: 0 !important;
+  }
+  .sidebar-menu .el-menu-item > span:not(.due-badge) {
+    display: none;
+  }
+  .sidebar-menu .el-icon {
+    margin-right: 0;
+  }
+  .due-badge {
+    position: absolute;
+    top: 8px;
+    right: 5px;
+    min-width: 14px;
+    height: 14px;
+    padding: 0 3px;
+    border-radius: 7px;
+    font-size: 9px;
+    line-height: 14px;
+  }
+  .sidebar-footer {
+    padding: 8px 4px;
+  }
+  .about-link,
+  .pin-btn {
+    justify-content: center;
+    padding: 8px 0;
+  }
+  .about-link > span,
+  .pin-btn > span {
+    display: none;
   }
   .sidebar-wrapper:hover .sidebar,
   .sidebar-wrapper.pinned .sidebar {

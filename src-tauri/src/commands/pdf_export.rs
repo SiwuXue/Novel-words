@@ -7,6 +7,7 @@ use crate::pdf;
 use crate::pdf::matcher::{words_found_in_text, words_found_in_text_en};
 use crate::pdf::{parse_steps_from_db, IntensiveSteps};
 use tauri::{AppHandle, Emitter, State};
+use tauri_plugin_fs::FsExt;
 
 fn steps_label(steps: IntensiveSteps) -> String {
     let mut parts = Vec::new();
@@ -223,7 +224,7 @@ pub async fn export_pdf(
         let progress = |p: crate::pdf::PdfProgress| {
             let _ = app.emit("pdf-export-progress", p);
         };
-        pdf::generate_pdf(
+        let pdf_bytes = pdf::generate_pdf(
             &novel,
             &template,
             &vocabs,
@@ -232,9 +233,16 @@ pub async fn export_pdf(
             &background,
             cover,
             page_numbers,
-            &output_path,
             Some(&progress),
         )?;
+        let mut options = tauri_plugin_fs::OpenOptions::new();
+        options.read(false).write(true).create(true).truncate(true);
+        let mut file = app
+            .fs()
+            .open(output_path.parse::<tauri_plugin_fs::FilePath>().unwrap(), options)
+            .map_err(|e| format!("创建 PDF 文件失败: {}", e))?;
+        std::io::Write::write_all(&mut file, &pdf_bytes)
+            .map_err(|e| format!("写入 PDF 失败: {}", e))?;
 
         Ok(PdfExportResponse {
             path: output_path,

@@ -25,6 +25,12 @@ pub fn find_chinese_font() -> Option<String> {
         "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
     ];
+    #[cfg(target_os = "android")]
+    let candidates = [
+        "/system/fonts/NotoSansCJK-Regular.ttc",
+        "/system/fonts/NotoSansSC-Regular.otf",
+        "/system/fonts/NotoSansCJK-VF.ttf",
+    ];
 
     for path in &candidates {
         if Path::new(path).exists() {
@@ -56,6 +62,11 @@ pub fn find_latin_font() -> Option<String> {
     let candidates = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    ];
+    #[cfg(target_os = "android")]
+    let candidates = [
+        "/system/fonts/Roboto-Regular.ttf",
+        "/system/fonts/NotoSans-Regular.ttf",
     ];
 
     for path in &candidates {

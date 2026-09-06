@@ -1,7 +1,8 @@
 use crate::db::DbState;
 use crate::models::{HighlightWord, VocabWord, VocabWordPage};
 use std::collections::HashMap;
-use tauri::State;
+use tauri::{AppHandle, State};
+use tauri_plugin_fs::FsExt;
 
 #[tauri::command]
 pub fn create_vocab_word(
@@ -272,6 +273,7 @@ pub fn get_highlight_words(
 
 #[tauri::command]
 pub fn export_vocab_words_csv(
+    app: AppHandle,
     state: State<DbState>,
     vocab_book_id: i64,
     file_path: String,
@@ -283,8 +285,13 @@ pub fn export_vocab_words_csv(
         )
         .map_err(|e| e.to_string())?;
 
-    let mut wtr = csv::Writer::from_path(&file_path)
+    let mut options = tauri_plugin_fs::OpenOptions::new();
+    options.read(false).write(true).create(true).truncate(true);
+    let file = app
+        .fs()
+        .open(file_path.parse::<tauri_plugin_fs::FilePath>().unwrap(), options)
         .map_err(|e| format!("无法创建文件: {}", e))?;
+    let mut wtr = csv::Writer::from_writer(file);
 
     wtr.write_record(&["word", "definition", "phonetic", "example_sentence", "proficiency", "memory_tag"])
         .map_err(|e| format!("写入 CSV 失败: {}", e))?;
@@ -321,13 +328,17 @@ pub struct ImportResult {
 
 #[tauri::command]
 pub fn import_vocab_words_csv(
+    app: AppHandle,
     state: State<DbState>,
     vocab_book_id: i64,
     file_path: String,
 ) -> Result<ImportResult, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    let mut rdr =
-        csv::Reader::from_path(&file_path).map_err(|e| format!("无法打开文件: {}", e))?;
+    let bytes = app
+        .fs()
+        .read(file_path.parse::<tauri_plugin_fs::FilePath>().unwrap())
+        .map_err(|e| format!("无法打开文件: {}", e))?;
+    let mut rdr = csv::Reader::from_reader(bytes.as_slice());
 
     let mut imported: u32 = 0;
     let mut skipped: u32 = 0;

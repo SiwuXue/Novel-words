@@ -1,33 +1,48 @@
 use crate::db::DbState;
 use rusqlite::{Connection, DatabaseName};
 use std::path::Path;
-use tauri::State;
+use tauri::{AppHandle, State};
+use tauri_plugin_fs::FsExt;
 
 /// Back up the entire SQLite database into a single self-contained file.
 /// Uses SQLite's online backup API so the snapshot is consistent even while
 /// WAL mode is enabled, and produces one portable `.db` file (no -wal/-shm).
 #[tauri::command]
-pub fn backup_database(state: State<DbState>, dest_path: String) -> Result<String, String> {
-    // Ensure the destination directory exists (defensive; the save dialog
-    // normally guarantees this already).
-    if let Some(parent) = std::path::Path::new(&dest_path).parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("无法创建目标目录: {}", e))?;
-        }
-    }
-    // Remove any existing file so the backup starts from a clean destination.
-    if std::path::Path::new(&dest_path).exists() {
-        std::fs::remove_file(&dest_path).map_err(|e| format!("无法覆盖已有文件: {}", e))?;
-    }
+pub fn backup_database(
+    app: AppHandle,
+    state: State<DbState>,
+    dest_path: String,
+) -> Result<String, String> {
+    // SQLite's backup API takes a filesystem path, while Android's save dialog
+    // returns a content:// URI. Create the snapshot in the app temp directory,
+    // then copy it through the fs plugin to support both URI kinds.
+    let tmp_path = std::env::temp_dir().join(format!(
+        "nw_backup_{}_{}.db",
+        std::process::id(),
+        chrono::Utc::now().timestamp_millis()
+    ));
+    let _ = std::fs::remove_file(&tmp_path);
 
     let guard = state.db.lock().map_err(|e| e.to_string())?;
     guard
         .backup(
             DatabaseName::Main,
-            &dest_path,
+            &tmp_path,
             None::<fn(rusqlite::backup::Progress)>,
         )
         .map_err(|e| format!("备份数据库失败: {}", e))?;
+    drop(guard);
+
+    let bytes = std::fs::read(&tmp_path).map_err(|e| format!("读取备份文件失败: {}", e))?;
+    let _ = std::fs::remove_file(&tmp_path);
+    let mut options = tauri_plugin_fs::OpenOptions::new();
+    options.read(false).write(true).create(true).truncate(true);
+    let mut dest = app
+        .fs()
+        .open(dest_path.parse::<tauri_plugin_fs::FilePath>().unwrap(), options)
+        .map_err(|e| format!("无法创建备份文件: {}", e))?;
+    std::io::Write::write_all(&mut dest, &bytes)
+        .map_err(|e| format!("写入备份文件失败: {}", e))?;
     Ok(dest_path)
 }
 
@@ -35,10 +50,25 @@ pub fn backup_database(state: State<DbState>, dest_path: String) -> Result<Strin
 /// The live connection is overwritten in place; the frontend should reload the
 /// window afterwards so every store re-reads the restored data.
 #[tauri::command]
-pub fn restore_database(state: State<DbState>, src_path: String) -> Result<(), String> {
+pub fn restore_database(
+    app: AppHandle,
+    state: State<DbState>,
+    src_path: String,
+) -> Result<(), String> {
+    let tmp_path = std::env::temp_dir().join(format!(
+        "nw_restore_{}_{}.db",
+        std::process::id(),
+        chrono::Utc::now().timestamp_millis()
+    ));
+    let bytes = app
+        .fs()
+        .read(src_path.parse::<tauri_plugin_fs::FilePath>().unwrap())
+        .map_err(|e| format!("无法读取备份文件: {}", e))?;
+    std::fs::write(&tmp_path, bytes).map_err(|e| format!("无法准备恢复文件: {}", e))?;
+
     // Validate the source before touching the live database.
     {
-        let src = Connection::open(&src_path).map_err(|e| format!("无法打开备份文件: {}", e))?;
+        let src = Connection::open(&tmp_path).map_err(|e| format!("无法打开备份文件: {}", e))?;
         let is_novel_words: bool = src
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='novel'",
@@ -48,6 +78,7 @@ pub fn restore_database(state: State<DbState>, src_path: String) -> Result<(), S
             .map(|c| c > 0)
             .unwrap_or(false);
         if !is_novel_words {
+            let _ = std::fs::remove_file(&tmp_path);
             return Err("所选文件不是有效的词阅数据库备份（缺少 novel 表）".into());
         }
     }
@@ -56,10 +87,11 @@ pub fn restore_database(state: State<DbState>, src_path: String) -> Result<(), S
     guard
         .restore(
             DatabaseName::Main,
-            &src_path,
+            &tmp_path,
             None::<fn(rusqlite::backup::Progress)>,
         )
         .map_err(|e| format!("恢复数据库失败: {}", e))?;
+    let _ = std::fs::remove_file(&tmp_path);
     Ok(())
 }
 

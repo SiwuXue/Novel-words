@@ -55,7 +55,7 @@
               <el-icon><CopyDocument /></el-icon>
               {{ t('about.copy') }}
             </el-button>
-            <el-button size="small" :disabled="!dataDir" @click="openDataDir">
+            <el-button v-if="!isAndroid" size="small" :disabled="!dataDir" @click="openDataDir">
               <el-icon><FolderOpened /></el-icon>
               {{ t('about.open') }}
             </el-button>
@@ -93,6 +93,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { openPath } from '@tauri-apps/plugin-opener'
 import { ElMessage } from 'element-plus'
 import { t } from '@/i18n'
+import { isAndroid } from '@/utils/platform'
 
 const props = defineProps<{
   modelValue: boolean

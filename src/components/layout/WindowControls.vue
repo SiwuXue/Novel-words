@@ -1,5 +1,5 @@
 <template>
-  <div class="window-controls">
+  <div v-if="!isMobile" class="window-controls">
     <button class="ctrl-btn" @click="minimize" title="最小化">
       <svg width="12" height="12" viewBox="0 0 12 12"><rect y="5" width="12" height="1.5" fill="currentColor"/></svg>
     </button>
@@ -17,12 +17,13 @@
 
 <script setup lang="ts">
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { isMobile } from '@/utils/platform'
 
-const appWindow = getCurrentWindow()
+const appWindow = isMobile ? null : getCurrentWindow()
 
-function minimize() { appWindow.minimize() }
-function toggleMaximize() { appWindow.toggleMaximize() }
-function closeWindow() { appWindow.close() }
+function minimize() { void appWindow?.minimize() }
+function toggleMaximize() { void appWindow?.toggleMaximize() }
+function closeWindow() { void appWindow?.close() }
 </script>
 
 <style scoped>
