@@ -1,0 +1,113 @@
+name: Build and publish release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+            rust-target: x86_64-pc-windows-msvc
+            tauri-args: '--target x86_64-pc-windows-msvc'
+
+          - name: macOS Intel
+            os: macos-13
+            rust-target: x86_64-apple-darwin
+            tauri-args: '--target x86_64-apple-darwin'
+
+          - name: macOS Apple Silicon
+            os: macos-latest
+            rust-target: aarch64-apple-darwin
+            tauri-args: '--target aarch64-apple-darwin'
+
+          - name: Linux x64
+            os: ubuntu-22.04
+            rust-target: x86_64-unknown-linux-gnu
+            tauri-args: '--target x86_64-unknown-linux-gnu'
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            xdg-utils
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
+
+      - name: Cache Rust dependencies
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Read version from tag
+        id: release
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Sync application version
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: node .github/scripts/sync-version.cjs
+
+      - name: Build and upload bundles
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Novel Words ${{ steps.release.outputs.version }}
+          releaseBody: |
+            Automated release for Novel Words ${{ steps.release.outputs.version }}.
+
+            Download the installer for your operating system and CPU architecture.
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.tauri-args }}
+
+  publish:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ needs.build.result == 'success' }}
+    steps:
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${{ github.ref_name }}" --draft=false --repo "${{ github.repository }}"
