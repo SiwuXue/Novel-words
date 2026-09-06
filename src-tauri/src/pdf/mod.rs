@@ -344,9 +344,10 @@ impl PdfContext {
         w * 0.3528
     }
 
-    /// Return the PDF baseline that visually centers the font's ascender/
-    /// descender box inside a cell. PDF positions text by its baseline, not by
-    /// the glyph bounding box, so using a fixed percentage always looks high.
+    /// Return the PDF baseline that visually centers the font's bounding box
+    /// inside a cell. `printpdf` exposes typographic ascender/descender values
+    /// only with its optional text-layout feature; the bounding-box fields are
+    /// available in both the full and Android-compatible stub types.
     pub fn centered_text_baseline(
         &self,
         cell_top_y: f32,
@@ -361,7 +362,7 @@ impl PdfContext {
         };
         let units_per_em = metrics.units_per_em.max(1) as f32;
         let scale_mm = font_size * 0.3528 / units_per_em;
-        let font_visual_mid = (metrics.ascender as f32 + metrics.descender as f32) / 2.0;
+        let font_visual_mid = (metrics.y_max as f32 + metrics.y_min as f32) / 2.0;
         let cell_center_y = cell_top_y - cell_height / 2.0;
         cell_center_y - font_visual_mid * scale_mm
     }

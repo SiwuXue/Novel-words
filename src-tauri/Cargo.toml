@@ -28,7 +28,10 @@ rusqlite = { version = "0.31", features = ["bundled", "backup"] }
 chrono = { version = "0.4", features = ["serde"] }
 csv = "1.3"
 encoding_rs = "0.8"
-printpdf = "0.9"
+# This app builds PDF operations directly and does not use printpdf's optional
+# HTML layout engine. Disabling its default `html` feature avoids pulling the
+# desktop-only azul/fontconfig stack into Android builds.
+printpdf = { version = "0.9", default-features = false }
 tokio = { version = "1", features = ["full"] }
 epub = "2.1"
 roxmltree = "0.21"
