@@ -276,7 +276,7 @@ const editor = useEditor({
     try {
       const html = editor.getHTML()
       emit('update:content', html)
-      store.scheduleAutosave(props.novelId, html)
+      store.scheduleAutosave(props.novelId, html, props.chapterId)
     } catch (e) {
       console.warn('[NovelEditor] onUpdate failed:', e)
     }
@@ -415,7 +415,7 @@ onBeforeUnmount(() => {
     try {
       const html = editor.value.getHTML()
       if (html) {
-        store.flushSave(props.novelId, html)
+        store.flushSave(props.novelId, html, props.chapterId)
       }
     } catch (e) {
       console.warn('[NovelEditor] flushSave failed (non-fatal):', e)

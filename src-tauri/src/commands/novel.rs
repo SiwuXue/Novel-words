@@ -46,6 +46,91 @@ pub fn get_novel(state: State<DbState>, id: i64) -> Result<Novel, String> {
     get_novel_by_id(&db, id)
 }
 
+/// Load novel metadata without transferring the full text columns.
+#[tauri::command]
+pub fn get_novel_meta(state: State<DbState>, id: i64) -> Result<Novel, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.query_row(
+        "SELECT id, title, author, category, is_favorite, language, created_at, updated_at FROM novel WHERE id=?1",
+        rusqlite::params![id],
+        |row| {
+            Ok(Novel {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                author: row.get(2)?,
+                category: row.get(3)?,
+                raw_text: String::new(),
+                cleaned_text: String::new(),
+                is_favorite: row.get(4)?,
+                language: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+            })
+        },
+    )
+    .map_err(|e| format!("未找到该小说: {}", e))
+}
+
+/// Load the legacy full text only for novels that do not have saved chapters.
+#[tauri::command]
+pub fn get_novel_content(
+    state: State<DbState>,
+    id: i64,
+) -> Result<String, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.query_row(
+        "SELECT CASE WHEN cleaned_text != '' THEN cleaned_text ELSE raw_text END FROM novel WHERE id=?1",
+        rusqlite::params![id],
+        |row| row.get(0),
+    )
+    .map_err(|e| format!("读取小说正文失败: {}", e))
+}
+
+/// Update only the legacy full-text fallback column.
+#[tauri::command]
+pub fn update_novel_content(
+    state: State<DbState>,
+    id: i64,
+    cleaned_text: String,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let affected = db
+        .execute(
+            "UPDATE novel SET cleaned_text=?1, updated_at=datetime('now','localtime') WHERE id=?2",
+            rusqlite::params![cleaned_text, id],
+        )
+        .map_err(|e| format!("保存小说正文失败: {}", e))?;
+    if affected == 0 {
+        return Err("小说不存在".into());
+    }
+    Ok(())
+}
+
+/// Update metadata without requiring the caller to send the full novel body.
+#[tauri::command]
+pub fn update_novel_metadata(
+    state: State<DbState>,
+    id: i64,
+    title: String,
+    author: String,
+    category: String,
+    is_favorite: bool,
+    language: Option<String>,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let lang = language.unwrap_or_else(|| "zh".to_string());
+    let affected = db
+        .execute(
+            "UPDATE novel SET title=?1, author=?2, category=?3, is_favorite=?4, language=?5, updated_at=datetime('now','localtime') WHERE id=?6",
+            rusqlite::params![title, author, category, is_favorite as i32, lang, id],
+        )
+        .map_err(|e| format!("更新小说信息失败: {}", e))?;
+    if affected == 0 {
+        return Err("小说不存在".into());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn update_novel(
     state: State<DbState>,

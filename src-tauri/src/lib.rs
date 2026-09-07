@@ -15,7 +15,8 @@ use tauri_plugin_fs::FsExt;
 
 use commands::file_io::{import_file, read_text_file, write_text_file};
 use commands::novel::{
-    create_novel, delete_novel, get_all_novels, get_novel, search_novels, update_novel,
+    create_novel, delete_novel, get_all_novels, get_novel, get_novel_content, get_novel_meta,
+    search_novels, update_novel, update_novel_content, update_novel_metadata,
 };
 use commands::vocab_book::{
     create_vocab_book, delete_vocab_book, ensure_preset_book_populated, get_all_vocab_books,
@@ -31,7 +32,8 @@ use commands::pdf_template::{
     update_pdf_template,
 };
 use commands::chapter::{
-    delete_chapters_by_novel, get_chapters, save_chapters, update_chapter_title,
+    delete_chapters_by_novel, get_chapter_content, get_chapter_list, get_chapters,
+    save_chapters, update_chapter_content, update_chapter_title,
 };
 use commands::app_info::get_app_info;
 use commands::backup::{backup_database, restore_database};
@@ -196,7 +198,11 @@ pub fn run() {
             create_novel,
             get_all_novels,
             get_novel,
+            get_novel_meta,
+            get_novel_content,
             update_novel,
+            update_novel_content,
+            update_novel_metadata,
             delete_novel,
             search_novels,
             import_file,
@@ -237,6 +243,9 @@ pub fn run() {
             get_builtin_templates,
             save_chapters,
             get_chapters,
+            get_chapter_list,
+            get_chapter_content,
+            update_chapter_content,
             update_chapter_title,
             delete_chapters_by_novel,
             export_pdf,

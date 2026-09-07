@@ -1,5 +1,5 @@
 use crate::db::DbState;
-use crate::models::Chapter;
+use crate::models::{Chapter, ChapterSummary};
 use tauri::State;
 
 /// Save chapters for a novel while reusing IDs by position. Reusing IDs keeps
@@ -83,6 +83,81 @@ pub fn get_chapters(
         .collect();
 
     Ok(chapters)
+}
+
+/// Load chapter metadata without transferring every chapter body.
+#[tauri::command]
+pub fn get_chapter_list(
+    state: State<DbState>,
+    novel_id: i64,
+) -> Result<Vec<ChapterSummary>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let mut stmt = db
+        .prepare(
+            "SELECT id, novel_id, title, sort_order, created_at, length(content) FROM chapter WHERE novel_id = ?1 ORDER BY sort_order",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map(rusqlite::params![novel_id], |row| {
+            Ok(ChapterSummary {
+                id: row.get(0)?,
+                novel_id: row.get(1)?,
+                title: row.get(2)?,
+                sort_order: row.get(3)?,
+                start_index: 0,
+                created_at: row.get(4)?,
+                content_length: row.get::<_, i64>(5)?.max(0) as usize,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
+/// Load one chapter body on demand.
+#[tauri::command]
+pub fn get_chapter_content(
+    state: State<DbState>,
+    chapter_id: i64,
+) -> Result<Chapter, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.query_row(
+        "SELECT id, novel_id, title, content, sort_order, created_at FROM chapter WHERE id=?1",
+        rusqlite::params![chapter_id],
+        |row| {
+            Ok(Chapter {
+                id: row.get(0)?,
+                novel_id: row.get(1)?,
+                title: row.get(2)?,
+                content: row.get(3)?,
+                sort_order: row.get(4)?,
+                start_index: 0,
+                created_at: row.get(5)?,
+            })
+        },
+    )
+    .map_err(|e| format!("读取章节正文失败: {}", e))
+}
+
+/// Update one chapter body without rewriting the whole novel or all chapters.
+#[tauri::command]
+pub fn update_chapter_content(
+    state: State<DbState>,
+    chapter_id: i64,
+    content: String,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let affected = db
+        .execute(
+            "UPDATE chapter SET content=?1 WHERE id=?2",
+            rusqlite::params![content, chapter_id],
+        )
+        .map_err(|e| format!("保存章节正文失败: {}", e))?;
+    if affected == 0 {
+        return Err("章节不存在".into());
+    }
+    Ok(())
 }
 
 /// Update a single chapter's title.

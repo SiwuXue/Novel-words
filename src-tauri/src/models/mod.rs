@@ -6,7 +6,7 @@ pub mod vocab_word;
 pub mod pdf_export_response;
 pub mod dict_word;
 
-pub use novel::{Chapter, Novel};
+pub use novel::{Chapter, ChapterSummary, Novel};
 pub use pdf_template::PdfTemplate;
 pub use settings::AppSetting;
 pub use vocab_book::VocabBook;

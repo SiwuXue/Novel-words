@@ -29,6 +29,19 @@ pub struct Chapter {
     pub created_at: String,
 }
 
+/// Lightweight chapter row used by the editor before a chapter is opened.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterSummary {
+    pub id: i64,
+    pub novel_id: i64,
+    pub title: String,
+    pub sort_order: i32,
+    pub start_index: usize,
+    pub created_at: String,
+    pub content_length: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportResult {

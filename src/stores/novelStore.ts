@@ -40,6 +40,23 @@ export const useNovelStore = defineStore('novel', () => {
     }
   }
 
+  async function fetchMeta(id: number) {
+    loading.value = true
+    try {
+      currentNovel.value = await invoke<Novel>('get_novel_meta', { id })
+    } catch (e) {
+      console.error('[novelStore] fetchMeta failed:', e)
+      currentNovel.value = null
+      throw e
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function fetchContent(id: number): Promise<string> {
+    return invoke<string>('get_novel_content', { id })
+  }
+
   async function create(data: NovelFormData) {
     const novel = await invoke<Novel>('create_novel', {
       title: data.title,
@@ -77,6 +94,25 @@ export const useNovelStore = defineStore('novel', () => {
     await fetchAll()
   }
 
+  async function updateMetadata(id: number, data: Partial<Pick<Novel, 'title' | 'author' | 'category' | 'isFavorite' | 'language'>>) {
+    const n = currentNovel.value?.id === id
+      ? currentNovel.value
+      : novels.value.find((novel) => novel.id === id)
+    if (!n) return
+    await invoke('update_novel_metadata', {
+      id,
+      title: data.title ?? n.title,
+      author: data.author ?? n.author,
+      category: data.category ?? n.category,
+      isFavorite: data.isFavorite ?? n.isFavorite,
+      language: data.language ?? n.language,
+    })
+    const merged = { ...n, ...data }
+    if (currentNovel.value?.id === id) currentNovel.value = { ...currentNovel.value, ...merged }
+    const listItem = novels.value.find((novel) => novel.id === id)
+    if (listItem) Object.assign(listItem, merged)
+  }
+
   async function remove(id: number) {
     await invoke('delete_novel', { id })
     novels.value = novels.value.filter((n) => n.id !== id)
@@ -99,5 +135,5 @@ export const useNovelStore = defineStore('novel', () => {
     }
   }
 
-  return { novels, currentNovel, loading, fetchAll, fetchOne, create, update, remove, search }
+  return { novels, currentNovel, loading, fetchAll, fetchOne, fetchMeta, fetchContent, create, update, updateMetadata, remove, search }
 })

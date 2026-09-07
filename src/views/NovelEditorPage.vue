@@ -192,6 +192,7 @@
       </div>
       <div class="editor-pane center-pane">
         <NovelEditor
+          :key="`${editorStore.chapterList[editorStore.activeChapterIndex]?.id || 'draft'}-${editorStore.activeChapterIndex}`"
           ref="editorRef"
           :novel-id="currentNovelId"
           :chapter-id="editorStore.chapterList[editorStore.activeChapterIndex]?.id ?? null"
@@ -445,7 +446,7 @@ const hasNextChapter = computed(
 const readingPercent = computed(() => Math.round(readingProgress.value * 100))
 const readingRemainingMinutes = computed(() => {
   const totalUnits = editorStore.chapterList.reduce(
-    (sum, chapter) => sum + Math.max(0, chapter.content?.length || 0),
+    (sum, chapter) => sum + Math.max(0, chapter.content?.length || chapter.contentLength || 0),
     0,
   )
   if (!totalUnits || readingProgress.value >= 0.999) return 0
@@ -462,21 +463,22 @@ const previewOverallProgress = computed(() => {
   const chapters = editorStore.chapterList
   if (!chapters.length) return previewChapterProgress.value
   const total = chapters.reduce(
-    (sum, chapter) => sum + Math.max(1, chapter.content?.length || 0),
+    (sum, chapter) => sum + Math.max(1, chapter.content?.length || chapter.contentLength || 0),
     0,
   )
   const before = chapters
     .slice(0, editorStore.activeChapterIndex)
-    .reduce((sum, chapter) => sum + Math.max(1, chapter.content?.length || 0), 0)
+    .reduce((sum, chapter) => sum + Math.max(1, chapter.content?.length || chapter.contentLength || 0), 0)
   const currentLength = Math.max(
     1,
-    chapters[editorStore.activeChapterIndex]?.content?.length || 0,
+    chapters[editorStore.activeChapterIndex]?.content?.length ||
+      chapters[editorStore.activeChapterIndex]?.contentLength || 0,
   )
   return Math.min(1, Math.max(0, (before + currentLength * previewChapterProgress.value) / total))
 })
 const previewRemainingMinutes = computed(() => {
   const total = editorStore.chapterList.reduce(
-    (sum, chapter) => sum + Math.max(0, chapter.content?.length || 0),
+    (sum, chapter) => sum + Math.max(0, chapter.content?.length || chapter.contentLength || 0),
     0,
   )
   if (!total || previewOverallProgress.value >= 0.999) return 0
@@ -620,7 +622,7 @@ async function onLanguageChange(lang: string) {
   if (!novel || (lang !== 'zh' && lang !== 'en')) return
   if (novel.language === lang) return
   try {
-    await store.update(novel.id, { language: lang })
+    await store.updateMetadata(novel.id, { language: lang })
     // 中文小说没有英文正文，单词卡片版不可用：自动切回精读版并提示。
     if (lang === 'zh' && pdfTemplateType.value === 'card') {
       pdfTemplateType.value = 'intensive'
@@ -669,14 +671,14 @@ const currentNovelId = computed(() => {
 const editorContentOverride = ref<string | null>(null)
 const editorContent = computed<string>({
   get: () =>
-    editorContentOverride.value ?? store.currentNovel?.cleanedText ?? '',
+    editorContentOverride.value ?? currentChapter.value?.content ?? store.currentNovel?.cleanedText ?? '',
   set: (v) => {
     editorContentOverride.value = v
   },
 })
 function onEditorContentChange(html: string) {
   editorContentOverride.value = html
-  editorStore.scheduleChapterRefresh(currentNovelId.value, html)
+  editorStore.setChapterContent(currentChapter.value?.id || null, html)
 }
 
 const topbarTitle = computed(() => {
@@ -686,11 +688,12 @@ const topbarTitle = computed(() => {
 })
 
 function buildChapterPreview(chapter: any, chapterIndex: number): string {
+  if (chapter.id && !chapter.content) return '<p>正在加载章节…</p>'
   const chapterList = editorStore.chapterList
   const cacheKey = [
     currentNovelId.value,
     chapter.id,
-    chapter.content?.length || 0,
+    chapter.content?.length || chapter.contentLength || 0,
     chapterIndex,
     previewWordsVersion,
     highlightBookId.value || 0,
@@ -737,9 +740,21 @@ const allPreviewHtmlChunks = computed(() => {
 })
 
 function loadMorePreviewChapters() {
-  allPreviewLimit.value = Math.min(
+  const nextLimit = Math.min(
     allPreviewLimit.value + 4,
     editorStore.chapterList.length,
+  )
+  void ensurePreviewChapters(allPreviewLimit.value, nextLimit).then(() => {
+    allPreviewLimit.value = nextLimit
+  })
+}
+
+async function ensurePreviewChapters(start: number, end: number) {
+  const chapters = editorStore.chapterList.slice(start, end)
+  await Promise.all(
+    chapters
+      .filter((chapter) => chapter.id > 0 && !chapter.content)
+      .map((chapter) => editorStore.loadChapterContent(chapter.id)),
   )
 }
 
@@ -795,7 +810,7 @@ async function handleExportPdf() {
   // debounce has not fired yet.
   if (editorStore.isDirty) {
     try {
-      await editorStore.flushSave(novel.id, editorContent.value)
+      await editorStore.flushSave(novel.id, editorContent.value, currentChapter.value?.id || null)
     } catch (e: any) {
       ElMessage.error('导出前保存失败：' + String(e?.message || e || '未知错误'))
       return
@@ -871,6 +886,7 @@ async function handleExportPdf() {
 async function loadNovel() {
   loadStartedAt = Date.now()
   elapsedSeconds.value = 0
+  readingPosRestored = false
   loadStage.value = 'reading'
   loadStageProgressOverride.value = null
   errorMessage.value = ''
@@ -900,7 +916,7 @@ async function loadNovel() {
     // These requests do not depend on each other. Start them together so the
     // database read for the novel, persisted chapters, and settings overlap.
     const [, storedChapters] = await Promise.all([
-      store.fetchOne(id),
+      store.fetchMeta(id),
       editorStore.loadStoredChapters(id),
       settingsStore.load(),
     ])
@@ -910,25 +926,32 @@ async function loadNovel() {
       loadState.value = 'error'
       return
     }
-    const text = store.currentNovel.cleanedText || store.currentNovel.rawText || ''
-    editorContentOverride.value = text
-    if (text) {
-      loadStage.value = storedChapters.length > 0 ? 'preparing' : 'parsing'
-      await editorStore.loadChapters(
-        id,
-        text,
-        storedChapters,
-        (progress) => {
+    if (storedChapters.length > 0) {
+      loadStage.value = 'preparing'
+      await editorStore.loadChapters(id, '', storedChapters)
+      prepareSourceChapterFromQuery()
+      const initialChapter = editorStore.chapterList[editorStore.activeChapterIndex]
+      if (initialChapter?.id) {
+        await editorStore.loadChapterContent(initialChapter.id)
+        editorContentOverride.value = editorStore.chapterList[editorStore.activeChapterIndex]?.content || ''
+      }
+    } else {
+      loadStage.value = 'parsing'
+      const text = await store.fetchContent(id)
+      editorContentOverride.value = text
+      if (text) {
+        await editorStore.loadChapters(id, text, storedChapters, (progress) => {
           loadStageProgressOverride.value = 35 + Math.round(progress * 30)
-        },
-      )
+        })
+        prepareSourceChapterFromQuery()
+        editorContentOverride.value = editorStore.chapterList[editorStore.activeChapterIndex]?.content || text
+      }
     }
     loadStage.value = 'preparing'
     loadStageProgressOverride.value = null
-    prepareSourceChapterFromQuery()
     loadState.value = 'loaded'
+    void ensurePreviewChapters(0, allPreviewLimit.value)
     await nextTick()
-    await restoreReadingPos()
     attachScrollListener()
   } catch (e: any) {
     if (loadState.value === 'error') return
@@ -953,6 +976,7 @@ function cleanupTimers() {
 
 function retry() {
   loadState.value = 'loading'
+  readingPosRestored = false
   loadNovel()
 }
 
@@ -1006,7 +1030,7 @@ onBeforeUnmount(() => {
   if (loadState.value === 'loaded') {
     const id = currentNovelId.value
     if (id && editorStore.isDirty) {
-      void editorStore.flushSave(id, editorContent.value)
+      void editorStore.flushSave(id, editorContent.value, currentChapter.value?.id || null)
     }
   }
   window.removeEventListener('keydown', onKeyDown)
@@ -1019,7 +1043,7 @@ async function handleManualSave() {
   if (loadState.value !== 'loaded') return
   const id = currentNovelId.value
   if (!id) return
-  await editorStore.flushSave(id, editorContent.value)
+  await editorStore.flushSave(id, editorContent.value, currentChapter.value?.id || null)
   if (!editorStore.isDirty) {
     ElMessage.success('已保存')
   }
@@ -1057,6 +1081,11 @@ async function focusSourceWordFromQuery() {
 }
 
 function handleEditorReady() {
+  attachScrollListener()
+  if (!readingPosRestored && loadState.value === 'loaded') {
+    readingPosRestored = true
+    void restoreReadingPos()
+  }
   void focusSourceWordFromQuery()
 }
 
@@ -1108,7 +1137,9 @@ function onVisibilityChange() {
   if (document.hidden && loadState.value === 'loaded') {
     const id = currentNovelId.value
     if (id) {
-      if (editorStore.isDirty) void editorStore.flushSave(id, editorContent.value)
+      if (editorStore.isDirty) {
+        void editorStore.flushSave(id, editorContent.value, currentChapter.value?.id || null)
+      }
       void saveReadingPos()
     }
   }
@@ -1130,7 +1161,7 @@ onBeforeRouteLeave(async (_to, _from, next) => {
     const id = currentNovelId.value
     if (id) {
       try {
-        await editorStore.flushSave(id, editorContent.value)
+        await editorStore.flushSave(id, editorContent.value, currentChapter.value?.id || null)
       } catch {
         // If flush fails we still ask for confirmation
       }
@@ -1154,13 +1185,21 @@ onBeforeRouteLeave(async (_to, _from, next) => {
 })
 
 async function scrollToChapter(index: number) {
-  editorStore.activeChapterIndex = index
+  const previousChapter = currentChapter.value
+  if (editorStore.isDirty) {
+    await editorStore.flushSave(
+      currentNovelId.value,
+      editorContent.value,
+      previousChapter?.id || null,
+    )
+  }
   const ch = editorStore.chapterList[index]
   if (!ch) return
-  await new Promise<void>((r) =>
-    requestAnimationFrame(() => requestAnimationFrame(() => r())),
-  )
-  editorRef.value?.scrollToText(ch.title)
+  if (ch.id) await editorStore.loadChapterContent(ch.id)
+  editorStore.activeChapterIndex = index
+  editorContentOverride.value = editorStore.chapterList[index]?.content || ch.content || ''
+  await nextTick()
+  editorRef.value?.setScrollPercent(0)
   previewRef.value?.scrollToText(ch.title)
   updateReadingState()
   scheduleSaveReadingPos()
@@ -1185,14 +1224,14 @@ function updateActiveChapterFromProgress(percent: number) {
     return
   }
   const total = chapters.reduce(
-    (sum, chapter) => sum + Math.max(1, chapter.content?.length || 0),
+    (sum, chapter) => sum + Math.max(1, chapter.content?.length || chapter.contentLength || 0),
     0,
   )
   const target = Math.min(total - 1, Math.max(0, percent * total))
   let cursor = 0
   let nextIndex = chapters.length - 1
   for (let i = 0; i < chapters.length; i += 1) {
-    cursor += Math.max(1, chapters[i].content?.length || 0)
+    cursor += Math.max(1, chapters[i].content?.length || chapters[i].contentLength || 0)
     if (target < cursor) {
       nextIndex = i
       break
@@ -1216,6 +1255,7 @@ function scrollReadingBy(direction: 1 | -1) {
 // ===== 阅读进度记忆（存 app_settings: reading_pos_{novelId}） =====
 let posSaveTimer: number | null = null
 let scrollElCleanup: (() => void) | null = null
+let readingPosRestored = false
 
 async function saveReadingPos(percentOverride?: number, chapterIndexOverride?: number) {
   const id = currentNovelId.value

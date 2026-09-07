@@ -30,7 +30,10 @@ export interface Chapter {
   sortOrder: number
   startIndex: number
   createdAt: string
+  contentLength?: number
 }
+
+export type ChapterSummary = Omit<Chapter, 'content'> & { contentLength: number }
 
 export interface ImportResult {
   chapters: Chapter[]

@@ -45,9 +45,17 @@ const REBUILD_DEBOUNCE_MS = 220
 // closure captured in addProseMirrorPlugins().
 
 let currentWords: HighlightWord[] = []
+let cachedWordsMap: Map<string, HighlightWord> | null = null
+let cachedTargetIndex: ReturnType<typeof buildTargetIndex> | null = null
+
+function invalidateWordCaches() {
+  cachedWordsMap = null
+  cachedTargetIndex = null
+}
 
 export function setVocabHighlightWords(words: HighlightWord[]): void {
   currentWords = words
+  invalidateWordCaches()
 }
 
 export function refreshVocabHighlight(view: EditorView): void {
@@ -168,12 +176,19 @@ function buildTargetIndex(words: HighlightWord[]): {
   }
 }
 
+function getTargetIndex() {
+  if (!cachedTargetIndex) cachedTargetIndex = buildTargetIndex(currentWords)
+  return cachedTargetIndex
+}
+
 function buildDecorations(
   doc: { descendants: (fn: (node: { isText: boolean; text?: string }, pos: number) => boolean | void) => void },
   words: HighlightWord[],
 ): DecorationSet {
   const decorations: Decoration[] = []
-  const { byTerm, pattern } = buildTargetIndex(words)
+  const { byTerm, pattern } = words === currentWords
+    ? getTargetIndex()
+    : buildTargetIndex(words)
   if (!pattern) return DecorationSet.empty
 
   doc.descendants((node, pos) => {
@@ -209,6 +224,11 @@ function buildWordsMap(words: HighlightWord[]): Map<string, HighlightWord> {
     }
   }
   return map
+}
+
+function getWordsMap() {
+  if (!cachedWordsMap) cachedWordsMap = buildWordsMap(currentWords)
+  return cachedWordsMap
 }
 
 // ---- Tooltip singleton ----
@@ -299,6 +319,7 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
   addProseMirrorPlugins() {
     // Seed the module-level store from initial options
     currentWords = this.options.words
+    invalidateWordCaches()
 
     // Captured in `view()` so we can schedule debounced rebuilds.
     let editorView: EditorView | null = null
@@ -313,7 +334,7 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
       const view = editorView
       if (!view || generation !== rebuildGeneration) return
       const doc = view.state.doc
-      const { byTerm, pattern } = buildTargetIndex(currentWords)
+      const { byTerm, pattern } = getTargetIndex()
       view.dispatch(view.state.tr.setMeta('vocabHighlightClear', true))
       if (!pattern) return
 
@@ -405,7 +426,7 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
               }
             }
 
-            const wordsMap = buildWordsMap(currentWords)
+            const wordsMap = getWordsMap()
             const wordsChanged = !mapsEqual(oldState.wordsMap, wordsMap)
 
             if (wordsChanged) {

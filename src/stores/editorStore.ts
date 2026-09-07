@@ -1,10 +1,10 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { useNovelStore } from './novelStore'
-import { detectChapters, detectChaptersInBatches } from '@/utils/chapterDetector'
+import { detectChaptersOffMainThread } from '@/utils/chapterDetectorWorker'
+import { detectChaptersInBatches } from '@/utils/chapterDetector'
 import { looksLikeHtml } from '@/utils/editorHtml'
-import type { Chapter } from '@/types/novel'
+import type { Chapter, ChapterSummary } from '@/types/novel'
 
 export const useEditorStore = defineStore('editor', () => {
   const isDirty = ref(false)
@@ -13,7 +13,7 @@ export const useEditorStore = defineStore('editor', () => {
   const activeChapterIndex = ref(0)
 
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null
-  let chapterRefreshTimer: ReturnType<typeof setTimeout> | null = null
+  let pendingChapterId: number | null = null
   /** Promise of the in-flight autosave, so flushSave can await it
    *  instead of triggering a second concurrent write. */
   let inFlight: Promise<void> | null = null
@@ -21,11 +21,29 @@ export const useEditorStore = defineStore('editor', () => {
   /** Load persisted chapters only; an empty list means the novel needs parsing. */
   async function loadStoredChapters(novelId: number): Promise<Chapter[]> {
     try {
-      return await invoke<Chapter[]>('get_chapters', { novelId })
+      const summaries = await invoke<ChapterSummary[]>('get_chapter_list', { novelId })
+      return summaries.map((chapter) => ({ ...chapter, content: '' }))
     } catch (e) {
       console.error('[editorStore] get_chapters failed:', e)
       return []
     }
+  }
+
+  async function loadChapterContent(chapterId: number): Promise<string> {
+    const current = chapterList.value.find((chapter) => chapter.id === chapterId)
+    if (current?.content) return current.content
+    const chapter = await invoke<Chapter>('get_chapter_content', { chapterId })
+    const index = chapterList.value.findIndex((item) => item.id === chapterId)
+    if (index >= 0) {
+      chapterList.value[index] = { ...chapterList.value[index], ...chapter }
+    }
+    return chapter.content
+  }
+
+  function setChapterContent(chapterId: number | null, content: string) {
+    if (!chapterId) return
+    const chapter = chapterList.value.find((item) => item.id === chapterId)
+    if (chapter) chapter.content = content
   }
 
   /** Load chapters from DB, falling back to chunked client-side detection. */
@@ -46,7 +64,15 @@ export const useEditorStore = defineStore('editor', () => {
     // so the editor can paint progress instead of blocking on a huge string.
     // If text is HTML (from previous editor autosave), strip tags first
     const plainText = looksLikeHtml(text) ? stripHtml(text) : text
-    const detected = await detectChaptersInBatches(plainText, onProgress)
+    let detected: Chapter[]
+    try {
+      detected = await detectChaptersOffMainThread(plainText, onProgress)
+    } catch (e) {
+      console.warn('[editorStore] chapter worker failed, fallback to main thread:', e)
+      // A Worker can be unavailable in preview/build environments; keep the
+      // editor usable with the chunked main-thread implementation.
+      detected = await detectChaptersInBatches(plainText, onProgress)
+    }
     chapterList.value = detected.map((chapter) => ({
       ...chapter,
       novelId,
@@ -72,52 +98,19 @@ export const useEditorStore = defineStore('editor', () => {
       .trim()
   }
 
-  /** Rebuild chapter content from the current editor buffer without writing
-   * to disk yet. This keeps preview/navigation on the latest text. */
-  function refreshChaptersFromText(novelId: number, text: string) {
-    const plainText = looksLikeHtml(text) ? stripHtml(text) : text
-    const detected = detectChapters(plainText)
-    const previous = chapterList.value
-    chapterList.value = detected.map((chapter, index) => ({
-      ...chapter,
-      id: previous[index]?.id || 0,
-      novelId,
-      createdAt: previous[index]?.createdAt || '',
-    }))
-    activeChapterIndex.value = Math.min(
-      activeChapterIndex.value,
-      Math.max(0, chapterList.value.length - 1),
-    )
-  }
-
-  function scheduleChapterRefresh(novelId: number, text: string) {
-    if (chapterRefreshTimer) clearTimeout(chapterRefreshTimer)
-    chapterRefreshTimer = setTimeout(() => {
-      chapterRefreshTimer = null
-      refreshChaptersFromText(novelId, text)
-    }, 250)
-  }
-
-  async function persistChapters(novelId: number, text: string) {
-    refreshChaptersFromText(novelId, text)
-    await invoke('save_chapters', {
-      novelId,
-      chapters: chapterList.value,
-    })
-  }
-
   /** Auto-save with 30s debounce. If a previous autosave is still awaiting
    *  Rust, the next call awaits it before scheduling a new write. */
-  async function scheduleAutosave(novelId: number, html: string) {
+  async function scheduleAutosave(novelId: number, html: string, chapterId: number | null = null) {
     isDirty.value = true
+    pendingChapterId = chapterId
     if (autosaveTimer) clearTimeout(autosaveTimer)
     autosaveTimer = setTimeout(() => {
       autosaveTimer = null
-      void runAutosave(novelId, html)
+      void runAutosave(novelId, html, pendingChapterId)
     }, 30000)
   }
 
-  async function runAutosave(novelId: number, html: string) {
+  async function runAutosave(novelId: number, html: string, chapterId: number | null) {
     if (inFlight) {
       try {
         await inFlight
@@ -128,9 +121,12 @@ export const useEditorStore = defineStore('editor', () => {
     saving.value = true
     inFlight = (async () => {
       try {
-        const novelStore = useNovelStore()
-        await novelStore.update(novelId, { cleanedText: html } as any)
-        await persistChapters(novelId, html)
+        if (chapterId) {
+          await invoke('update_chapter_content', { chapterId, content: html })
+          setChapterContent(chapterId, html)
+        } else {
+          await invoke('update_novel_content', { id: novelId, cleanedText: html })
+        }
         isDirty.value = false
       } catch (e) {
         console.error('[editorStore] autosave failed:', e)
@@ -144,14 +140,14 @@ export const useEditorStore = defineStore('editor', () => {
 
   /** Cancel pending autosave and flush immediately. Awaits the in-flight
    *  write (if any) so two concurrent update_novel calls never collide. */
-  async function flushSave(novelId: number, html: string) {
+  async function flushSave(
+    novelId: number,
+    html: string,
+    chapterId: number | null = pendingChapterId,
+  ) {
     if (autosaveTimer) {
       clearTimeout(autosaveTimer)
       autosaveTimer = null
-    }
-    if (chapterRefreshTimer) {
-      clearTimeout(chapterRefreshTimer)
-      chapterRefreshTimer = null
     }
     if (inFlight) {
       try {
@@ -161,7 +157,7 @@ export const useEditorStore = defineStore('editor', () => {
       }
     }
     if (isDirty.value) {
-      await runAutosave(novelId, html)
+      await runAutosave(novelId, html, chapterId)
     }
   }
 
@@ -170,6 +166,7 @@ export const useEditorStore = defineStore('editor', () => {
     saving.value = false
     chapterList.value = []
     activeChapterIndex.value = 0
+    pendingChapterId = null
     if (autosaveTimer) {
       clearTimeout(autosaveTimer)
       autosaveTimer = null
@@ -183,9 +180,9 @@ export const useEditorStore = defineStore('editor', () => {
     chapterList,
     activeChapterIndex,
     loadStoredChapters,
+    loadChapterContent,
+    setChapterContent,
     loadChapters,
-    refreshChaptersFromText,
-    scheduleChapterRefresh,
     scheduleAutosave,
     flushSave,
     reset,
