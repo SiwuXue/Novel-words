@@ -134,8 +134,6 @@ struct Cet4OuterContent {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Cet4WordWrapper {
-    word_head: Option<String>,
-    word_id: Option<String>,
     content: Cet4InnerContent,
 }
 
@@ -156,7 +154,6 @@ struct Cet4InnerContent {
 struct Cet4Trans {
     tran_cn: String,
     pos: Option<String>,
-    tran_other: Option<String>,
 }
 
 #[derive(Deserialize)]

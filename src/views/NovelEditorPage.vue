@@ -328,7 +328,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import {
   ArrowLeft,
@@ -351,7 +351,9 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import type { HighlightWord } from '@/types/vocabWord'
 import { normalizeSteps, STEP_LABELS, type StepNum } from '@/types/pdfSteps'
 import { TEMPLATE_TYPE_LABELS } from '@/types/pdf'
-import NovelEditor from '@/components/novel/NovelEditor.vue'
+// Keep the editor implementation out of the page shell. The editor pulls in
+// Tiptap/ProseMirror and is only needed after this route has rendered.
+const NovelEditor = defineAsyncComponent(() => import('@/components/novel/NovelEditor.vue'))
 import ChapterList from '@/components/novel/ChapterList.vue'
 import PreviewPanel from '@/components/novel/PreviewPanel.vue'
 import { buildHtml as buildPreviewHtml } from '@/utils/pdfPreview'

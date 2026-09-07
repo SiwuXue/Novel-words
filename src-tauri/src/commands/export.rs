@@ -1,4 +1,5 @@
 use crate::db::DbState;
+use std::collections::HashSet;
 use std::io::Write;
 use tauri::{AppHandle, State};
 use tauri_plugin_fs::FsExt;
@@ -374,18 +375,18 @@ pub fn import_vocab_book_json(
     let db = state.db.lock().map_err(|e| e.to_string())?;
 
     // Existing words in the book (case-insensitive) to skip duplicates.
-    let mut existing: Vec<String> = Vec::new();
-    {
+    let mut existing: HashSet<String> = {
         let mut stmt = db
             .prepare("SELECT word FROM vocab_word WHERE vocab_book_id=?1")
             .map_err(|e| e.to_string())?;
-        existing = stmt
+        let values = stmt
             .query_map(rusqlite::params![vocab_book_id], |row| row.get::<_, String>(0))
             .map_err(|e| e.to_string())?
             .filter_map(|r| r.ok())
             .map(|w| w.to_lowercase())
             .collect();
-    }
+        values
+    };
 
     let mut inserted: i64 = 0;
     for w in words {
@@ -393,7 +394,7 @@ pub fn import_vocab_book_json(
         if word.is_empty() {
             continue;
         }
-        if existing.iter().any(|e| e == &word.to_lowercase()) {
+        if existing.contains(&word.to_lowercase()) {
             continue;
         }
         let definition = w.get("definition").and_then(|v| v.as_str()).unwrap_or("");
@@ -411,7 +412,7 @@ pub fn import_vocab_book_json(
             rusqlite::params![vocab_book_id, word, definition, phonetic, example, prof],
         )
         .map_err(|e| format!("写入单词失败: {}", e))?;
-        existing.push(word.to_lowercase());
+        existing.insert(word.to_lowercase());
         inserted += 1;
     }
     Ok(inserted)

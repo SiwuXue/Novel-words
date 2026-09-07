@@ -6,7 +6,7 @@
 ## 技术栈
 - 前端：Vue 3 + Vite + TypeScript + Element Plus + Tiptap + Pinia + Vue Router
 - 后端：Tauri v2 Rust + rusqlite (bundled) + SQLite
-- PDF：html2pdf.js（前端生成）
+- PDF：Tauri Rust 后端生成（前端仅负责触发导出与展示进度）
 
 ## 项目结构
 
