@@ -19,62 +19,69 @@ export const useSettingsStore = defineStore('settings', () => {
   const reviewDailyGoal = ref<number>(20)
   const speechAccent = ref<SpeechAccent>('us')
   const loaded = ref(false)
+  let loadPromise: Promise<void> | null = null
 
   async function load() {
-    try {
-      const settings = await invoke<Array<{ key: string; value: string }>>(
-        'get_all_settings',
-      )
-      for (const s of settings) {
-        switch (s.key) {
-          case 'theme':
-            if (s.value === 'dark' || s.value === 'light') {
-              theme.value = s.value
+    if (loaded.value) return
+    if (!loadPromise) {
+      loadPromise = (async () => {
+        try {
+          const settings = await invoke<Array<{ key: string; value: string }>>(
+            'get_all_settings',
+          )
+          for (const s of settings) {
+            switch (s.key) {
+              case 'theme':
+                if (s.value === 'dark' || s.value === 'light') {
+                  theme.value = s.value
+                }
+                break
+              case 'default_export_folder':
+                defaultExportFolder.value = s.value
+                break
+              case 'default_vocab_book_id': {
+                const n = Number(s.value)
+                defaultVocabBookId.value = Number.isFinite(n) && n > 0 ? n : null
+                break
+              }
+              case 'pdf_intensive_steps': {
+                try {
+                  pdfIntensiveSteps.value = normalizeSteps(JSON.parse(s.value))
+                } catch {
+                  /* 非法 JSON → 保持默认 [1,2,3] */
+                }
+                break
+              }
+              case 'pdf_background':
+                if (s.value === 'grid' || s.value === 'dots' || s.value === 'none') {
+                  pdfBackground.value = s.value
+                }
+                break
+              case 'auto_backup':
+                if (s.value === 'off' || s.value === 'daily' || s.value === 'weekly' || s.value === 'monthly') {
+                  autoBackup.value = s.value
+                }
+                break
+              case 'review_daily_goal': {
+                const n = Number(s.value)
+                if (Number.isFinite(n) && n > 0) reviewDailyGoal.value = Math.floor(n)
+                break
+              }
+              case 'speech_accent':
+                if (s.value === 'uk' || s.value === 'us') {
+                  speechAccent.value = s.value
+                }
+                break
             }
-            break
-          case 'default_export_folder':
-            defaultExportFolder.value = s.value
-            break
-          case 'default_vocab_book_id': {
-            const n = Number(s.value)
-            defaultVocabBookId.value = Number.isFinite(n) && n > 0 ? n : null
-            break
           }
-          case 'pdf_intensive_steps': {
-            try {
-              pdfIntensiveSteps.value = normalizeSteps(JSON.parse(s.value))
-            } catch {
-              /* 非法 JSON → 保持默认 [1,2,3] */
-            }
-            break
-          }
-          case 'pdf_background':
-            if (s.value === 'grid' || s.value === 'dots' || s.value === 'none') {
-              pdfBackground.value = s.value
-            }
-            break
-          case 'auto_backup':
-            if (s.value === 'off' || s.value === 'daily' || s.value === 'weekly' || s.value === 'monthly') {
-              autoBackup.value = s.value
-            }
-            break
-          case 'review_daily_goal': {
-            const n = Number(s.value)
-            if (Number.isFinite(n) && n > 0) reviewDailyGoal.value = Math.floor(n)
-            break
-          }
-          case 'speech_accent':
-            if (s.value === 'uk' || s.value === 'us') {
-              speechAccent.value = s.value
-            }
-            break
+        } catch (e) {
+          console.error('[settingsStore] load failed:', e)
+        } finally {
+          loaded.value = true
         }
-      }
-    } catch (e) {
-      console.error('[settingsStore] load failed:', e)
-    } finally {
-      loaded.value = true
+      })()
     }
+    await loadPromise
   }
 
   /** Apply theme to DOM, persist to localStorage + DB. */

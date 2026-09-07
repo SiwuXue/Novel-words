@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useNovelStore } from './novelStore'
-import { detectChapters } from '@/utils/chapterDetector'
+import { detectChapters, detectChaptersInBatches } from '@/utils/chapterDetector'
 import { looksLikeHtml } from '@/utils/editorHtml'
 import type { Chapter } from '@/types/novel'
 
@@ -18,24 +18,39 @@ export const useEditorStore = defineStore('editor', () => {
    *  instead of triggering a second concurrent write. */
   let inFlight: Promise<void> | null = null
 
-  /** Load chapters from DB. Falls back to client-side detection if DB empty. */
-  async function loadChapters(novelId: number, text: string) {
-    // 1. Try DB first
+  /** Load persisted chapters only; an empty list means the novel needs parsing. */
+  async function loadStoredChapters(novelId: number): Promise<Chapter[]> {
     try {
-      const dbChapters = await invoke<Chapter[]>('get_chapters', { novelId })
-      if (dbChapters.length > 0) {
-        chapterList.value = dbChapters
-        activeChapterIndex.value = 0
-        return
-      }
+      return await invoke<Chapter[]>('get_chapters', { novelId })
     } catch (e) {
       console.error('[editorStore] get_chapters failed:', e)
+      return []
+    }
+  }
+
+  /** Load chapters from DB, falling back to chunked client-side detection. */
+  async function loadChapters(
+    novelId: number,
+    text: string,
+    storedChapters?: Chapter[],
+    onProgress?: (progress: number) => void,
+  ) {
+    const dbChapters = storedChapters ?? await loadStoredChapters(novelId)
+    if (dbChapters.length > 0) {
+      chapterList.value = dbChapters
+      activeChapterIndex.value = 0
+      return
     }
 
-    // 2. Fallback: client-side detection from plain text
+    // Fallback: client-side detection from plain text. Yield between chunks
+    // so the editor can paint progress instead of blocking on a huge string.
     // If text is HTML (from previous editor autosave), strip tags first
     const plainText = looksLikeHtml(text) ? stripHtml(text) : text
-    chapterList.value = detectChapters(plainText)
+    const detected = await detectChaptersInBatches(plainText, onProgress)
+    chapterList.value = detected.map((chapter) => ({
+      ...chapter,
+      novelId,
+    }))
     activeChapterIndex.value = 0
   }
 
@@ -167,6 +182,7 @@ export const useEditorStore = defineStore('editor', () => {
     saving,
     chapterList,
     activeChapterIndex,
+    loadStoredChapters,
     loadChapters,
     refreshChaptersFromText,
     scheduleChapterRefresh,

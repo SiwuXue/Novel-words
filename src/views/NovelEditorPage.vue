@@ -291,9 +291,22 @@
     </div>
 
     <!-- Loading -->
-    <div v-else-if="loadState === 'loading'" class="editor-state-block">
+    <div
+      v-else-if="loadState === 'loading'"
+      class="editor-state-block editor-loading-state"
+      role="status"
+      aria-live="polite"
+    >
       <el-icon class="is-loading" :size="32"><Loading /></el-icon>
-      <span>加载中...（已等待 {{ elapsedSeconds }}s）</span>
+      <div class="loading-stage-title">{{ loadStageLabel }}</div>
+      <el-progress
+        class="loading-stage-progress"
+        :percentage="loadStageProgress"
+        :stroke-width="8"
+        :show-text="false"
+      />
+      <div class="loading-stage-detail">{{ loadStageDetail }}</div>
+      <div class="loading-stage-elapsed">已等待 {{ elapsedSeconds }}s</div>
     </div>
 
     <!-- Error / not-found -->
@@ -544,7 +557,7 @@ watch(
   ([loaded, v]) => {
     if (loaded) pdfSteps.value = [...v]
   },
-  { immediate: true, once: true },
+  { immediate: true },
 )
 
 function togglePreviewFullscreen() {
@@ -623,6 +636,26 @@ type LoadState = 'loading' | 'loaded' | 'error'
 const loadState = ref<LoadState>('loading')
 const errorMessage = ref('')
 const elapsedSeconds = ref(0)
+
+type LoadStage = 'reading' | 'parsing' | 'preparing'
+const loadStage = ref<LoadStage>('reading')
+const loadStageProgressOverride = ref<number | null>(null)
+const loadStageProgress = computed(() => {
+  if (loadStageProgressOverride.value != null) return loadStageProgressOverride.value
+  if (loadStage.value === 'reading') return 28
+  if (loadStage.value === 'parsing') return 62
+  return 88
+})
+const loadStageLabel = computed(() => {
+  if (loadStage.value === 'reading') return '正在读取小说'
+  if (loadStage.value === 'parsing') return '正在解析正文'
+  return '正在准备编辑器'
+})
+const loadStageDetail = computed(() => {
+  if (loadStage.value === 'reading') return '正在从本地数据库读取小说内容…'
+  if (loadStage.value === 'parsing') return '正在识别章节并整理正文结构…'
+  return '正在准备章节导航、预览和编辑区域…'
+})
 
 let loadStartedAt = 0
 let elapsedTimer: number | null = null
@@ -837,6 +870,9 @@ async function handleExportPdf() {
 
 async function loadNovel() {
   loadStartedAt = Date.now()
+  elapsedSeconds.value = 0
+  loadStage.value = 'reading'
+  loadStageProgressOverride.value = null
   errorMessage.value = ''
   editorContentOverride.value = null
 
@@ -861,7 +897,13 @@ async function loadNovel() {
 
   try {
     editorStore.reset()
-    await store.fetchOne(id)
+    // These requests do not depend on each other. Start them together so the
+    // database read for the novel, persisted chapters, and settings overlap.
+    const [, storedChapters] = await Promise.all([
+      store.fetchOne(id),
+      editorStore.loadStoredChapters(id),
+      settingsStore.load(),
+    ])
     if (loadState.value === 'error') return
     if (!store.currentNovel) {
       errorMessage.value = '小说不存在'
@@ -870,8 +912,19 @@ async function loadNovel() {
     }
     const text = store.currentNovel.cleanedText || store.currentNovel.rawText || ''
     editorContentOverride.value = text
-    if (text) await editorStore.loadChapters(id, text)
-    editorStore.refreshChaptersFromText(id, text)
+    if (text) {
+      loadStage.value = storedChapters.length > 0 ? 'preparing' : 'parsing'
+      await editorStore.loadChapters(
+        id,
+        text,
+        storedChapters,
+        (progress) => {
+          loadStageProgressOverride.value = 35 + Math.round(progress * 30)
+        },
+      )
+    }
+    loadStage.value = 'preparing'
+    loadStageProgressOverride.value = null
     prepareSourceChapterFromQuery()
     loadState.value = 'loaded'
     await nextTick()
@@ -1454,8 +1507,35 @@ function attachScrollListener() {
   color: var(--text-secondary);
   font-size: 14px;
 }
+.editor-loading-state {
+  min-height: 260px;
+  padding: 32px 20px;
+}
+.loading-stage-title {
+  color: var(--text-primary, #303133);
+  font-size: 16px;
+  font-weight: 600;
+}
+.loading-stage-progress {
+  width: min(320px, 72vw);
+}
+.loading-stage-detail,
+.loading-stage-elapsed {
+  color: var(--text-secondary, #909399);
+  font-size: 13px;
+}
+.loading-stage-elapsed {
+  color: var(--text-placeholder, #a8abb2);
+  font-size: 12px;
+}
 .editor-state-block.error {
   color: var(--danger-color, #f56c6c);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editor-loading-state .is-loading {
+    animation: none;
+  }
 }
 
 /* PDF export progress overlay */

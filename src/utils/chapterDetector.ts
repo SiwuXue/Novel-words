@@ -32,14 +32,22 @@ function isHeading(line: string): boolean {
  * Handles \n, \r\n, and standalone \r line endings.
  * Offsets are JavaScript string indices (UTF-16 code units).
  */
-function lineStarts(text: string): Array<[number, string]> {
-  const result: Array<[number, string]> = []
+type Heading = { lineStart: number; title: string; contentStart: number }
+
+function collectHeadings(text: string): Heading[] {
+  const result: Heading[] = []
   let lineStart = 0
   for (let i = 0; i <= text.length; i++) {
     const ch = i < text.length ? text[i] : '\n' // treat EOF as newline
     if (ch === '\n' || ch === '\r') {
       const line = text.slice(lineStart, i)
-      result.push([lineStart, line])
+      if (isHeading(line)) {
+        result.push({
+          lineStart,
+          title: line.trim(),
+          contentStart: lineStart + line.length,
+        })
+      }
       // Skip \r\n sequence
       if (ch === '\r' && i + 1 < text.length && text[i + 1] === '\n') {
         i++ // skip \n
@@ -50,18 +58,7 @@ function lineStarts(text: string): Array<[number, string]> {
   return result
 }
 
-export function detectChapters(text: string): Chapter[] {
-  // Collect all heading positions first: (charOffsetOfLineStart, title, contentStart)
-  const headings: Array<{ lineStart: number; title: string; contentStart: number }> = []
-  for (const [lineStart, line] of lineStarts(text)) {
-    if (!isHeading(line)) continue
-    headings.push({
-      lineStart,
-      title: line.trim(),
-      contentStart: lineStart + line.length,
-    })
-  }
-
+function buildChapters(text: string, headings: Heading[]): Chapter[] {
   // No headings at all → whole text as one chapter.
   if (headings.length === 0) {
     if (!text.trim()) return []
@@ -111,4 +108,56 @@ export function detectChapters(text: string): Chapter[] {
   }
 
   return chapters
+}
+
+export function detectChapters(text: string): Chapter[] {
+  return buildChapters(text, collectHeadings(text))
+}
+
+/**
+ * Detect chapters in batches so a large novel yields to the browser between
+ * chunks. The synchronous detector is kept for small edits/autosaves.
+ */
+export async function detectChaptersInBatches(
+  text: string,
+  onProgress?: (progress: number) => void,
+): Promise<Chapter[]> {
+  const headings: Heading[] = []
+  const batchSize = 64 * 1024
+  let lineStart = 0
+  let lastYieldAt = 0
+
+  for (let i = 0; i <= text.length; i++) {
+    const ch = i < text.length ? text[i] : '\n'
+    if (ch !== '\n' && ch !== '\r') continue
+
+    const line = text.slice(lineStart, i)
+    if (isHeading(line)) {
+      headings.push({
+        lineStart,
+        title: line.trim(),
+        contentStart: lineStart + line.length,
+      })
+    }
+
+    if (i - lastYieldAt >= batchSize && i < text.length) {
+      onProgress?.(i / Math.max(1, text.length))
+      lastYieldAt = i
+      await new Promise<void>((resolve) => {
+        if (typeof requestAnimationFrame === 'function') {
+          requestAnimationFrame(() => resolve())
+        } else {
+          setTimeout(resolve, 0)
+        }
+      })
+    }
+
+    if (ch === '\r' && i + 1 < text.length && text[i + 1] === '\n') {
+      i++
+    }
+    lineStart = i + 1
+  }
+
+  onProgress?.(1)
+  return buildChapters(text, headings)
 }

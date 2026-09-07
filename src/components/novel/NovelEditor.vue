@@ -73,7 +73,16 @@
     <div v-if="!contentReady" class="editor-loading-state" aria-live="polite">
       <div class="editor-loading-spinner" aria-hidden="true"></div>
       <div class="editor-loading-title">正在准备原文…</div>
-      <div class="editor-loading-hint">正文较长时需要一点时间，请稍候</div>
+      <el-progress
+        v-if="contentProgress > 0"
+        :percentage="contentProgress"
+        :stroke-width="6"
+        :show-text="false"
+        class="editor-loading-progress"
+      />
+      <div class="editor-loading-hint">
+        {{ contentProgress > 0 ? `已处理 ${contentProgress}%` : '正文较长时需要一点时间，请稍候' }}
+      </div>
     </div>
 
     <!-- Dict Lookup Popover -->
@@ -100,7 +109,7 @@ import { useVocabBookStore } from '@/stores/vocabBookStore'
 import { useDictionaryStore } from '@/stores/dictionaryStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { speakWord } from '@/utils/speech'
-import { plainTextToHtml } from '@/utils/editorHtml'
+import { looksLikeHtml, plainTextToHtml } from '@/utils/editorHtml'
 import { cleanText } from '@/utils/textCleaner'
 import {
   VocabHighlight,
@@ -132,6 +141,8 @@ const dictStore = useDictionaryStore()
 const settingsStore = useSettingsStore()
 vocabBookStore.fetchAll()
 const contentReady = ref(false)
+const contentProgress = ref(0)
+let contentLoadToken = 0
 
 // ===== Dict lookup state =====
 const editorContentRef = ref<InstanceType<typeof EditorContent> | null>(null)
@@ -285,12 +296,80 @@ watch(
 // when novelId changes so route navigation reloads the body.
 const loadedNovelId = ref<number | null>(null)
 
-function loadContent(raw: string) {
+function splitEditorContent(raw: string, maxChars = 64 * 1024): string[] {
+  if (!raw || raw.length <= maxChars) return raw ? [raw] : []
+
+  // Imported novels are plain text. Keep paragraph boundaries so each Tiptap
+  // batch remains a valid document fragment and never rebuild the prefix.
+  if (!looksLikeHtml(raw)) {
+    const chunks: string[] = []
+    let current = ''
+    for (const paragraph of raw.split(/(\n{2,})/)) {
+      const candidate = current + paragraph
+      if (current && candidate.length > maxChars) {
+        chunks.push(current)
+        current = paragraph
+      } else {
+        current = candidate
+      }
+    }
+    if (current) chunks.push(current)
+    return chunks.length > 1 ? chunks : [raw]
+  }
+
+  // For previously saved HTML, split only at complete paragraph blocks. If
+  // the fragment is not safely block-shaped, keep it as one document.
+  const blocks = raw.match(/[\s\S]*?<\/p>/gi)
+  if (!blocks || blocks.join('').length < raw.length * 0.8) return [raw]
+  const chunks: string[] = []
+  let current = ''
+  for (const block of blocks) {
+    if (current && current.length + block.length > maxChars) {
+      chunks.push(current)
+      current = block
+    } else {
+      current += block
+    }
+  }
+  const consumed = blocks.join('').length
+  if (consumed < raw.length) current += raw.slice(consumed)
+  if (current) chunks.push(current)
+  return chunks.length > 1 ? chunks : [raw]
+}
+
+function yieldToBrowser(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => resolve())
+    } else {
+      setTimeout(resolve, 0)
+    }
+  })
+}
+
+async function loadContent(raw: string) {
   if (!editor.value) return
+  const token = ++contentLoadToken
   contentReady.value = false
+  contentProgress.value = 0
   try {
-    const html = plainTextToHtml(raw)
-    editor.value.commands.setContent(html, { emitUpdate: false })
+    const chunks = splitEditorContent(raw)
+    if (chunks.length === 0) {
+      editor.value.commands.clearContent(true)
+    } else {
+      editor.value.commands.setContent(plainTextToHtml(chunks[0]), { emitUpdate: false })
+      contentProgress.value = chunks.length === 1 ? 100 : Math.round(100 / chunks.length)
+      for (let i = 1; i < chunks.length; i += 1) {
+        await yieldToBrowser()
+        if (token !== contentLoadToken || !editor.value) return
+        editor.value.commands.insertContentAt(
+          editor.value.state.doc.content.size,
+          plainTextToHtml(chunks[i]),
+          { updateSelection: false, applyInputRules: false, applyPasteRules: false },
+        )
+        contentProgress.value = Math.round(((i + 1) / chunks.length) * 100)
+      }
+    }
     contentReady.value = true
     emit('ready')
   } catch (e) {
@@ -307,7 +386,7 @@ watch(
     setTimeout(() => {
       if (!editor.value) return
       loadedNovelId.value = props.novelId
-      loadContent(props.content)
+      void loadContent(props.content)
     }, 0)
   },
   { immediate: true },
@@ -323,7 +402,7 @@ watch(
     setTimeout(() => {
       if (!editor.value) return
       loadedNovelId.value = id
-      loadContent(props.content)
+      void loadContent(props.content)
     }, 0)
   },
 )
@@ -456,6 +535,9 @@ defineExpose({ scrollToText, highlightText, getScrollEl, getScrollPercent, setSc
   gap: 8px;
   background: var(--bg-primary, #f5f7fa);
   color: var(--text-secondary, #909399);
+}
+.editor-loading-progress {
+  width: min(260px, 70vw);
 }
 
 .editor-loading-spinner {
