@@ -31,6 +31,7 @@ const PROFICIENCY_TEXTS: Record<string, string> = {
 interface PluginState {
   wordsMap: Map<string, HighlightWord>
   decorations: DecorationSet
+  focusDecorations: DecorationSet
   /** Doc changed but decorations not yet rebuilt (debounced). */
   dirty: boolean
 }
@@ -86,6 +87,58 @@ function trustedCnTerms(word: HighlightWord): string[] {
     }
   }
   return terms
+}
+
+let focusTimer: ReturnType<typeof setTimeout> | null = null
+let focusView: EditorView | null = null
+
+function buildFocusDecorations(
+  doc: { descendants: (fn: (node: { isText: boolean; text?: string }, pos: number) => boolean | void) => void },
+  keyword: string,
+): { decorations: DecorationSet; found: boolean } {
+  const target = keyword.trim()
+  if (!target) return { decorations: DecorationSet.empty, found: false }
+  const pattern = new RegExp(escapeRegExp(target), 'gi')
+  const decorations: Decoration[] = []
+  let found = false
+
+  doc.descendants((node, pos) => {
+    if (!node.isText || !node.text) return
+    pattern.lastIndex = 0
+    for (let match = pattern.exec(node.text); match; match = pattern.exec(node.text)) {
+      const before = node.text[match.index - 1]
+      const after = node.text[match.index + match[0].length]
+      const isWordChar = (char: string | undefined) => Boolean(char && /[A-Za-z0-9_]/.test(char))
+      if (isWordChar(before) || isWordChar(after)) continue
+      found = true
+      decorations.push(
+        Decoration.inline(pos + match.index, pos + match.index + match[0].length, {
+          class: 'source-focus-highlight',
+          style: 'color: #422006 !important; background: #facc15 !important; border: 2px solid #f59e0b; border-radius: 4px; box-shadow: 0 0 0 4px rgba(250, 204, 21, 0.4), 0 3px 12px rgba(180, 83, 9, 0.35); font-weight: 700; padding: 1px 3px;',
+          nodeName: 'span',
+        }),
+      )
+    }
+  })
+
+  return { decorations: DecorationSet.create(doc as any, decorations), found }
+}
+
+/** Add a visible, temporary source-location highlight for a word. */
+export function focusVocabText(view: EditorView, keyword: string, duration = 5000): boolean {
+  const result = buildFocusDecorations(view.state.doc, keyword)
+  if (!result.found) return false
+  if (focusTimer != null) clearTimeout(focusTimer)
+  focusView = view
+  view.dispatch(view.state.tr.setMeta('vocabHighlightFocus', result.decorations))
+  focusTimer = setTimeout(() => {
+    if (focusView === view) {
+      view.dispatch(view.state.tr.setMeta('vocabHighlightFocus', DecorationSet.empty))
+      focusView = null
+    }
+    focusTimer = null
+  }, Math.max(100, duration))
+  return true
 }
 
 function escapeRegExp(value: string): string {
@@ -324,19 +377,30 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
             return {
               wordsMap,
               decorations: DecorationSet.empty,
+              focusDecorations: DecorationSet.empty,
               dirty: false,
             }
           },
 
           apply(tr, oldState, _oldEditorState, newEditorState) {
+            const focus = tr.getMeta('vocabHighlightFocus') as DecorationSet | undefined
+            if (focus) {
+              return { ...oldState, focusDecorations: focus }
+            }
             if (tr.getMeta('vocabHighlightClear')) {
-              return { ...oldState, decorations: DecorationSet.empty, dirty: true }
+              return {
+                ...oldState,
+                decorations: DecorationSet.empty,
+                focusDecorations: oldState.focusDecorations.map(tr.mapping, tr.doc),
+                dirty: true,
+              }
             }
             const partial = tr.getMeta('vocabHighlightPartial') as Decoration[] | undefined
             if (partial) {
               return {
                 ...oldState,
                 decorations: oldState.decorations.add(newEditorState.doc, partial),
+                focusDecorations: oldState.focusDecorations.map(tr.mapping, tr.doc),
                 dirty: true,
               }
             }
@@ -354,12 +418,14 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
                 return {
                   wordsMap,
                   decorations: DecorationSet.empty,
+                  focusDecorations: oldState.focusDecorations.map(tr.mapping, tr.doc),
                   dirty: true,
                 }
               }
               return {
                 wordsMap,
                 decorations: buildDecorations(newEditorState.doc, currentWords),
+                focusDecorations: oldState.focusDecorations.map(tr.mapping, tr.doc),
                 dirty: false,
               }
             }
@@ -369,6 +435,7 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
               return {
                 wordsMap,
                 decorations: oldState.decorations.map(tr.mapping, tr.doc),
+                focusDecorations: oldState.focusDecorations.map(tr.mapping, tr.doc),
                 dirty: oldState.dirty,
               }
             }
@@ -377,6 +444,7 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
               return {
                 wordsMap,
                 decorations: buildDecorations(newEditorState.doc, currentWords),
+                focusDecorations: oldState.focusDecorations.map(tr.mapping, tr.doc),
                 dirty: false,
               }
             }
@@ -386,6 +454,7 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
             return {
               wordsMap,
               decorations: oldState.decorations.map(tr.mapping, tr.doc),
+              focusDecorations: oldState.focusDecorations.map(tr.mapping, tr.doc),
               dirty: true,
             }
           },
@@ -394,7 +463,11 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
         props: {
           decorations(state) {
             const ps = PLUGIN_KEY.getState(state)
-            return ps?.decorations ?? DecorationSet.empty
+            if (!ps) return DecorationSet.empty
+            return DecorationSet.create(state.doc, [
+              ...ps.decorations.find(),
+              ...ps.focusDecorations.find(),
+            ])
           },
 
           handleDOMEvents: {
@@ -439,6 +512,11 @@ export const VocabHighlight = Extension.create<VocabHighlightOptions>({
                 clearTimeout(rebuildTimer)
                 rebuildTimer = null
               }
+              if (focusTimer != null) {
+                clearTimeout(focusTimer)
+                focusTimer = null
+              }
+              focusView = null
               rebuildGeneration++
               editorView = null
               if (tooltipEl?.parentElement) {

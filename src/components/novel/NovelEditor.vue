@@ -1,7 +1,7 @@
 <template>
   <div class="novel-editor-wrapper">
     <!-- Toolbar -->
-    <div class="editor-toolbar" v-if="editor && !props.readOnly">
+    <div class="editor-toolbar" v-if="editor && !props.readOnly && contentReady">
       <el-select
         class="highlight-select"
         :model-value="highlightBookId"
@@ -70,6 +70,12 @@
     <!-- Editor -->
     <editor-content ref="editorContentRef" :editor="editor" class="tiptap-editor" />
 
+    <div v-if="!contentReady" class="editor-loading-state" aria-live="polite">
+      <div class="editor-loading-spinner" aria-hidden="true"></div>
+      <div class="editor-loading-title">正在准备原文…</div>
+      <div class="editor-loading-hint">正文较长时需要一点时间，请稍候</div>
+    </div>
+
     <!-- Dict Lookup Popover -->
     <DictLookupPopover
       v-if="popoverVisible"
@@ -96,7 +102,12 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { speakWord } from '@/utils/speech'
 import { plainTextToHtml } from '@/utils/editorHtml'
 import { cleanText } from '@/utils/textCleaner'
-import { VocabHighlight, setVocabHighlightWords, refreshVocabHighlight } from '@/extensions/VocabHighlight'
+import {
+  VocabHighlight,
+  setVocabHighlightWords,
+  refreshVocabHighlight,
+  focusVocabText,
+} from '@/extensions/VocabHighlight'
 import type { HighlightWord } from '@/types/vocabWord'
 import DictLookupPopover from './DictLookupPopover.vue'
 
@@ -112,6 +123,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'update:content', html: string): void
   (e: 'update:highlightBookId', id: number | null): void
+  (e: 'ready'): void
 }>()
 
 const store = useEditorStore()
@@ -119,6 +131,7 @@ const vocabBookStore = useVocabBookStore()
 const dictStore = useDictionaryStore()
 const settingsStore = useSettingsStore()
 vocabBookStore.fetchAll()
+const contentReady = ref(false)
 
 // ===== Dict lookup state =====
 const editorContentRef = ref<InstanceType<typeof EditorContent> | null>(null)
@@ -274,9 +287,12 @@ const loadedNovelId = ref<number | null>(null)
 
 function loadContent(raw: string) {
   if (!editor.value) return
+  contentReady.value = false
   try {
     const html = plainTextToHtml(raw)
     editor.value.commands.setContent(html, { emitUpdate: false })
+    contentReady.value = true
+    emit('ready')
   } catch (e) {
     console.error('[NovelEditor] setContent failed:', e)
   }
@@ -288,7 +304,6 @@ watch(
   editor,
   (ed) => {
     if (!ed || loadedNovelId.value === props.novelId) return
-    if (!props.content) return
     setTimeout(() => {
       if (!editor.value) return
       loadedNovelId.value = props.novelId
@@ -303,7 +318,7 @@ watch(
   () => props.novelId,
   (id, prev) => {
     if (id === prev) return
-    if (!editor.value || !props.content) return
+    if (!editor.value) return
     loadedNovelId.value = null
     setTimeout(() => {
       if (!editor.value) return
@@ -344,10 +359,15 @@ function scrollToText(keyword: string): boolean {
   try {
     const doc = editor.value.state.doc
     let foundPos: number | null = null
+    const normalizedKeyword = keyword.toLocaleLowerCase()
     doc.descendants((node, pos) => {
       if (foundPos !== null) return false
-      if (node.isText && node.text && node.text.includes(keyword)) {
-        foundPos = pos + node.text.indexOf(keyword)
+      const text = node.text || ''
+      const matchIndex = node.isText
+        ? text.toLocaleLowerCase().indexOf(normalizedKeyword)
+        : -1
+      if (matchIndex >= 0) {
+        foundPos = pos + matchIndex
         return false
       }
       return true
@@ -364,6 +384,16 @@ function scrollToText(keyword: string): boolean {
     console.warn('[NovelEditor] scrollToText failed:', e)
     return false
   }
+}
+
+/** Scroll to and temporarily emphasize a source word without changing the document. */
+function highlightText(keyword: string, duration = 5000): boolean {
+  const view = (editor.value as any)?.view as EditorView | undefined
+  if (!view || !keyword.trim()) return false
+  const found = scrollToText(keyword.trim())
+  if (!found) return false
+  focusVocabText(view, keyword.trim(), duration)
+  return true
 }
 
 // Keep VocabHighlight extension in sync when highlightWords change externally
@@ -404,7 +434,7 @@ function setScrollPercent(p: number) {
   el.scrollTop = max * Math.min(1, Math.max(0, p))
 }
 
-defineExpose({ scrollToText, getScrollEl, getScrollPercent, setScrollPercent })
+defineExpose({ scrollToText, highlightText, getScrollEl, getScrollPercent, setScrollPercent })
 </script>
 
 <style scoped>
@@ -412,6 +442,42 @@ defineExpose({ scrollToText, getScrollEl, getScrollPercent, setScrollPercent })
   display: flex;
   flex-direction: column;
   height: 100%;
+  position: relative;
+}
+
+.editor-loading-state {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--bg-primary, #f5f7fa);
+  color: var(--text-secondary, #909399);
+}
+
+.editor-loading-spinner {
+  width: 26px;
+  height: 26px;
+  border: 3px solid var(--border-color, #dcdfe6);
+  border-top-color: var(--accent-color, #409eff);
+  border-radius: 50%;
+  animation: editor-loading-spin 0.8s linear infinite;
+}
+
+.editor-loading-title {
+  color: var(--text-regular, #606266);
+  font-size: 14px;
+}
+
+.editor-loading-hint {
+  font-size: 12px;
+}
+
+@keyframes editor-loading-spin {
+  to { transform: rotate(360deg); }
 }
 
 .editor-toolbar {

@@ -147,6 +147,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Search, Plus, Download, Upload, Delete, ArrowDown, Reading } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { save, open } from '@tauri-apps/plugin-dialog'
 import { useVocabWordStore } from '@/stores/vocabWordStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
@@ -212,8 +213,37 @@ function sourceLabel(word: VocabWord): string {
   return word.chapterId ? `章节 ${word.chapterId}` : '原文'
 }
 
+let sourceWindowSequence = 0
+
 function goToSource(word: VocabWord) {
-  if (word.novelId) router.push(`/novels/${word.novelId}`)
+  if (!word.novelId) return
+
+  const params = new URLSearchParams({ focusWord: word.word.trim() })
+  if (word.chapterId) params.set('focusChapterId', String(word.chapterId))
+  const path = `/novels/${word.novelId}?${params.toString()}`
+  const label = `source-${word.novelId}-${Date.now()}-${sourceWindowSequence++}`
+
+  try {
+    const sourceWindow = new WebviewWindow(label, {
+      // Tauri app routes must be passed as relative paths so they are
+      // resolved against the bundled app URL in both dev and production.
+      url: path,
+      title: `原文：${word.word}`,
+      width: 1200,
+      height: 800,
+      minWidth: 800,
+      minHeight: 500,
+      resizable: true,
+      decorations: false,
+    })
+    void sourceWindow.once('tauri://error', (event) => {
+      console.error('[VocabBookDetailPage] source window failed:', event.payload)
+      ElMessage.error('打开原文窗口失败')
+    })
+  } catch (error) {
+    console.error('[VocabBookDetailPage] source window creation failed:', error)
+    ElMessage.error('打开原文窗口失败')
+  }
 }
 
 function onSizeChange() {

@@ -201,6 +201,7 @@
           :read-only="readingMode"
           @update:content="onEditorContentChange"
           @update:highlight-book-id="highlightBookId = $event"
+          @ready="handleEditorReady"
         />
       </div>
       <div
@@ -869,6 +870,7 @@ async function loadNovel() {
     editorContentOverride.value = text
     if (text) await editorStore.loadChapters(id, text)
     editorStore.refreshChaptersFromText(id, text)
+    prepareSourceChapterFromQuery()
     loadState.value = 'loaded'
     await nextTick()
     await restoreReadingPos()
@@ -966,6 +968,41 @@ async function handleManualSave() {
   if (!editorStore.isDirty) {
     ElMessage.success('已保存')
   }
+}
+
+function getSourceFocusWord(): string {
+  return typeof route.query.focusWord === 'string'
+    ? route.query.focusWord.trim()
+    : ''
+}
+
+function prepareSourceChapterFromQuery() {
+  const focusChapterId = Number(route.query.focusChapterId)
+  if (!Number.isSafeInteger(focusChapterId) || focusChapterId <= 0) return
+  const index = editorStore.chapterList.findIndex((chapter) => chapter.id === focusChapterId)
+  if (index >= 0) editorStore.activeChapterIndex = index
+}
+
+async function focusSourceWordFromQuery() {
+  const focusWord = getSourceFocusWord()
+  if (!focusWord) return
+
+  prepareSourceChapterFromQuery()
+  // Tiptap can finish its first DOM paint one frame after it emits ready.
+  // Retry briefly so a slow/large novel cannot lose the one-shot highlight.
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    await nextTick()
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    )
+    if (editorRef.value?.highlightText(focusWord, 5000)) return
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 120))
+  }
+  console.warn(`[NovelEditorPage] source word not found: ${focusWord}`)
+}
+
+function handleEditorReady() {
+  void focusSourceWordFromQuery()
 }
 
 function onKeyDown(e: KeyboardEvent) {

@@ -78,3 +78,30 @@ a {
   color: var(--text-primary);
   border: 1px solid var(--border-color);
 }
+
+/* Temporary emphasis used when opening a source word from the vocabulary book. */
+.source-focus-highlight {
+  color: #422006 !important;
+  background: #facc15 !important;
+  border: 2px solid #f59e0b;
+  border-radius: 4px;
+  box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.28), 0 3px 10px rgba(180, 83, 9, 0.28);
+  font-weight: 700;
+  padding: 1px 3px;
+  animation: source-focus-pulse 900ms ease-in-out 4;
+}
+
+.dark .source-focus-highlight {
+  color: #451a03 !important;
+  background: #fbbf24 !important;
+  border-color: #fde68a;
+}
+
+@keyframes source-focus-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.28), 0 3px 10px rgba(180, 83, 9, 0.28); }
+  50% { box-shadow: 0 0 0 8px rgba(250, 204, 21, 0.48), 0 4px 18px rgba(180, 83, 9, 0.4); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .source-focus-highlight { animation: none; }
+}
