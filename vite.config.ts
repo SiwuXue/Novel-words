@@ -36,4 +36,45 @@ export default defineConfig(async () => ({
       ignored: ["**/src-tauri/**"],
     },
   },
+
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          const normalizedId = id.replace(/\\/g, '/')
+          if (normalizedId.includes('/element-plus/')) {
+            const component = normalizedId.match(/element-plus\/(?:es|lib)\/components\/([^/]+)/)?.[1]
+            // time-picker has a circular dependency with Element Plus' shared
+            // helpers; keep shared building blocks in one stable chunk.
+            const sharedComponents = new Set([
+              'time-picker',
+              'tooltip',
+              'icon',
+              'form',
+              'input',
+              'scrollbar',
+              'popper',
+              'slot',
+              'focus-trap',
+            ])
+            return component && !sharedComponents.has(component)
+              ? `el-${component}`
+              : 'vendor-element-plus'
+          }
+          if (normalizedId.includes('/@tiptap/') || normalizedId.includes('/prosemirror/')) {
+            return 'vendor-editor'
+          }
+          if (
+            normalizedId.includes('/vue/') ||
+            normalizedId.includes('/vue-router/') ||
+            normalizedId.includes('/pinia/')
+          ) {
+            return 'vendor-vue'
+          }
+          return undefined
+        },
+      },
+    },
+  },
 }));
