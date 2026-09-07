@@ -69,7 +69,7 @@ pub async fn export_pdf(
         let vocabs: Vec<VocabWord> = if let Some(book_id) = vocab_book_id {
             let mut stmt = db
                 .prepare(
-                    "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, created_at, match_terms
+                    "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, chapter_id, proficiency, memory_tag, created_at, match_terms
                      FROM vocab_word WHERE vocab_book_id = ?1",
                 )
                 .map_err(|e| format!("查询生词失败: {}", e))?;
@@ -83,11 +83,11 @@ pub async fn export_pdf(
                         phonetic: row.get(4)?,
                         example_sentence: row.get(5)?,
                         novel_id: row.get(6)?,
-                        chapter_id: None,
-                        proficiency: row.get(7)?,
-                        memory_tag: row.get(8)?,
-                        created_at: row.get(9)?,
-                        match_terms: row.get(10)?,
+                        chapter_id: row.get(7)?,
+                        proficiency: row.get(8)?,
+                        memory_tag: row.get(9)?,
+                        created_at: row.get(10)?,
+                        match_terms: row.get(11)?,
                     })
                 })
                 .map_err(|e| format!("查询生词失败: {}", e))?;

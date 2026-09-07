@@ -91,6 +91,20 @@
           {{ row.exampleSentence || '—' }}
         </template>
       </el-table-column>
+      <el-table-column :label="t('vocabDetail.source')" min-width="150">
+        <template #default="{ row }">
+          <el-button
+            v-if="row.novelId"
+            link
+            type="primary"
+            size="small"
+            @click="goToSource(row)"
+          >
+            {{ sourceLabel(row) }}
+          </el-button>
+          <span v-else>—</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="proficiency" :label="t('vocabDetail.proficiency')" width="100">
         <template #default="{ row }">
           <el-tag :type="proficiencyType(row.proficiency)" size="small">
@@ -137,6 +151,7 @@ import { save, open } from '@tauri-apps/plugin-dialog'
 import { useVocabWordStore } from '@/stores/vocabWordStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
 import type { VocabWord, VocabWordFormData } from '@/types/vocabWord'
+import type { Chapter } from '@/types/novel'
 import VocabWordFormDialog from '@/components/vocabulary/VocabWordFormDialog.vue'
 import { t } from '@/i18n'
 
@@ -158,6 +173,7 @@ const selectedRows = ref<VocabWord[]>([])
 const page = ref(1)
 const pageSize = ref(50)
 const tableRef = ref<{ clearSelection: () => void } | null>(null)
+const chapterTitles = ref<Record<number, string>>({})
 
 const book = computed(() =>
   bookStore.books.find((b) => b.id === bookId.value) || null,
@@ -170,6 +186,34 @@ async function load() {
     offset: (page.value - 1) * pageSize.value,
     limit: pageSize.value,
   })
+  await loadSourceTitles()
+}
+
+async function loadSourceTitles() {
+  const novelIds = [...new Set(store.words.map((word) => word.novelId).filter((id): id is number => Boolean(id)))]
+  const next: Record<number, string> = { ...chapterTitles.value }
+  await Promise.all(novelIds.map(async (novelId) => {
+    try {
+      const chapters = await invoke<Chapter[]>('get_chapters', { novelId })
+      for (const chapter of chapters) {
+        next[chapter.id] = chapter.title
+      }
+    } catch {
+      // Source metadata is supplementary; the word remains usable if it is unavailable.
+    }
+  }))
+  chapterTitles.value = next
+}
+
+function sourceLabel(word: VocabWord): string {
+  if (word.chapterId && chapterTitles.value[word.chapterId]) {
+    return chapterTitles.value[word.chapterId]
+  }
+  return word.chapterId ? `章节 ${word.chapterId}` : '原文'
+}
+
+function goToSource(word: VocabWord) {
+  if (word.novelId) router.push(`/novels/${word.novelId}`)
 }
 
 function onSizeChange() {

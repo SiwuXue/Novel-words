@@ -2,7 +2,7 @@ use crate::commands::vocab_word::row_to_vocab_word;
 use crate::db::DbState;
 use crate::models::VocabWord;
 use crate::utils::srs::{
-    apply_rating, is_due, parse_last_reviewed_at, parse_memory_tag, serialize_memory_tag_reviewed,
+    apply_rating, is_due, parse_memory_tag, serialize_memory_tag_reviewed,
 };
 use serde::Serialize;
 use tauri::State;
@@ -37,32 +37,67 @@ fn local_today_start_secs() -> u64 {
     now.saturating_sub(now % secs_per_day)
 }
 
-/// Return all words in a book that are due for review today.
-/// A card without any SRS state is considered new and therefore due.
-#[tauri::command]
-pub fn get_due_words(state: State<DbState>, vocab_book_id: i64) -> Result<Vec<VocabWord>, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    let mut stmt = db
-        .prepare(
-            "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, created_at, match_terms \
-             FROM vocab_word WHERE vocab_book_id=?1 ORDER BY created_at DESC",
-        )
-        .map_err(|e| e.to_string())?;
+fn sort_due_words(words: &mut [VocabWord]) {
+    words.sort_by(|a, b| {
+        let (_, a_srs) = parse_memory_tag(&a.memory_tag);
+        let (_, b_srs) = parse_memory_tag(&b.memory_tag);
+        // New cards first, then the oldest due date first, and finally the
+        // newest-created card as a stable tie breaker.
+        a_srs
+            .due
+            .is_empty()
+            .cmp(&b_srs.due.is_empty())
+            .reverse()
+            .then_with(|| a_srs.due.cmp(&b_srs.due))
+            .then_with(|| b.created_at.cmp(&a.created_at))
+    });
+}
 
+fn load_due_words_for_query(
+    db: &rusqlite::Connection,
+    query: &str,
+    params: &[&dyn rusqlite::ToSql],
+) -> Result<Vec<VocabWord>, String> {
+    let mut stmt = db.prepare(query).map_err(|e| e.to_string())?;
     let all: Vec<VocabWord> = stmt
-        .query_map(rusqlite::params![vocab_book_id], row_to_vocab_word)
+        .query_map(params, row_to_vocab_word)
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
-        .collect();
-
-    let due: Vec<VocabWord> = all
-        .into_iter()
         .filter(|w| {
             let (_, srs) = parse_memory_tag(&w.memory_tag);
             is_due(&srs)
         })
         .collect();
+    Ok(all)
+}
 
+/// Return all words in a book that are due for review today.
+/// A card without any SRS state is considered new and therefore due.
+#[tauri::command]
+pub fn get_due_words(state: State<DbState>, vocab_book_id: i64) -> Result<Vec<VocabWord>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let mut due = load_due_words_for_query(
+        &db,
+        "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, chapter_id, proficiency, memory_tag, created_at, match_terms \
+         FROM vocab_word WHERE vocab_book_id=?1",
+        &[&vocab_book_id],
+    )?;
+    sort_due_words(&mut due);
+
+    Ok(due)
+}
+
+/// Return due cards across all user-created books, excluding bundled presets.
+#[tauri::command]
+pub fn get_all_due_words(state: State<DbState>) -> Result<Vec<VocabWord>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let mut due = load_due_words_for_query(
+        &db,
+        "SELECT w.id, w.vocab_book_id, w.word, w.definition, w.phonetic, w.example_sentence, w.novel_id, w.chapter_id, w.proficiency, w.memory_tag, w.created_at, w.match_terms \
+         FROM vocab_word w JOIN vocab_book b ON b.id = w.vocab_book_id WHERE b.is_preset = 0",
+        &[],
+    )?;
+    sort_due_words(&mut due);
     Ok(due)
 }
 
@@ -101,11 +136,15 @@ pub fn review_vocab_word(
     id: i64,
     rating: String,
 ) -> Result<VocabWord, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let mut db = state.db.lock().map_err(|e| e.to_string())?;
+
+    if !matches!(rating.as_str(), "again" | "good" | "easy") {
+        return Err("无效的复习评分".into());
+    }
 
     let word = db
         .query_row(
-            "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, created_at, match_terms \
+            "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, chapter_id, proficiency, memory_tag, created_at, match_terms \
              FROM vocab_word WHERE id=?1",
             rusqlite::params![id],
             row_to_vocab_word,
@@ -113,18 +152,39 @@ pub fn review_vocab_word(
         .map_err(|e| format!("未找到该单词: {}", e))?;
 
     let (tag, mut srs) = parse_memory_tag(&word.memory_tag);
+    let due_before = srs.due.clone();
     let proficiency = apply_rating(&mut srs, &rating);
-    let new_tag = serialize_memory_tag_reviewed(&tag, &srs, now_secs());
+    let reviewed_at = now_secs();
+    let new_tag = serialize_memory_tag_reviewed(&tag, &srs, reviewed_at);
 
-    db.execute(
+    let tx = db
+        .transaction()
+        .map_err(|e| format!("开启复习事务失败: {}", e))?;
+    tx.execute(
         "UPDATE vocab_word SET proficiency=?1, memory_tag=?2 WHERE id=?3",
         rusqlite::params![proficiency, new_tag, id],
     )
     .map_err(|e| format!("更新单词失败: {}", e))?;
 
+    tx.execute(
+        "INSERT INTO review_log (vocab_word_id, vocab_book_id, rating, reviewed_at, due_before, due_after, proficiency) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        rusqlite::params![
+            word.id,
+            word.vocab_book_id,
+            rating,
+            reviewed_at as i64,
+            due_before,
+            srs.due,
+            proficiency,
+        ],
+    )
+    .map_err(|e| format!("记录复习历史失败: {}", e))?;
+    tx.commit()
+        .map_err(|e| format!("提交复习事务失败: {}", e))?;
+
     let updated = db
         .query_row(
-            "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, created_at, match_terms \
+            "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, chapter_id, proficiency, memory_tag, created_at, match_terms \
              FROM vocab_word WHERE id=?1",
             rusqlite::params![id],
             row_to_vocab_word,
@@ -163,7 +223,7 @@ pub fn get_review_progress(
                 Some(id) => {
                     let mut stmt = db
                         .prepare(
-                            "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, created_at, match_terms \
+                            "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, chapter_id, proficiency, memory_tag, created_at, match_terms \
                              FROM vocab_word WHERE vocab_book_id=?1",
                         )
                         .map_err(|e| e.to_string())?;
@@ -176,7 +236,7 @@ pub fn get_review_progress(
                     // All user books (exclude presets — no personal SRS state).
                     let mut stmt = db
                         .prepare(
-                            "SELECT w.id, w.vocab_book_id, w.word, w.definition, w.phonetic, w.example_sentence, w.novel_id, w.proficiency, w.memory_tag, w.created_at, w.match_terms \
+                            "SELECT w.id, w.vocab_book_id, w.word, w.definition, w.phonetic, w.example_sentence, w.novel_id, w.chapter_id, w.proficiency, w.memory_tag, w.created_at, w.match_terms \
                              FROM vocab_word w JOIN vocab_book b ON b.id = w.vocab_book_id \
                              WHERE b.is_preset = 0",
                         )
@@ -191,18 +251,28 @@ pub fn get_review_progress(
         load(vocab_book_id)?
     };
 
-    let today_start = local_today_start_secs();
+    let today_start = local_today_start_secs() as i64;
     let mut due_total: i64 = 0;
-    let mut reviewed_today: i64 = 0;
+    let reviewed_today: i64 = match vocab_book_id {
+        Some(id) => db
+            .query_row(
+                "SELECT COUNT(*) FROM review_log WHERE vocab_book_id=?1 AND reviewed_at >= ?2",
+                rusqlite::params![id, today_start],
+                |row| row.get(0),
+            )
+            .unwrap_or(0),
+        None => db
+            .query_row(
+                "SELECT COUNT(*) FROM review_log r JOIN vocab_book b ON b.id = r.vocab_book_id WHERE b.is_preset=0 AND r.reviewed_at >= ?1",
+                rusqlite::params![today_start],
+                |row| row.get(0),
+            )
+            .unwrap_or(0),
+    };
     for w in &words {
         let (_, srs) = parse_memory_tag(&w.memory_tag);
         if is_due(&srs) {
             due_total += 1;
-        }
-        if let Some(ts) = parse_last_reviewed_at(&w.memory_tag) {
-            if ts >= today_start {
-                reviewed_today += 1;
-            }
         }
     }
 
@@ -277,34 +347,37 @@ pub fn get_learning_stats(state: State<DbState>) -> Result<LearningStats, String
     let secs_per_day: u64 = 86_400;
     let seven_days_ago = today_start.saturating_sub(secs_per_day * 6); // include today = 7 days
 
+    let reviewed_today: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM review_log r JOIN vocab_book b ON b.id = r.vocab_book_id WHERE b.is_preset=0 AND r.reviewed_at >= ?1",
+            rusqlite::params![today_start as i64],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    let total_reviews: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM review_log r JOIN vocab_book b ON b.id = r.vocab_book_id WHERE b.is_preset=0",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    let mut daily_buckets: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
+    use chrono::{Local, TimeZone};
     let mut stmt = db
         .prepare(
-            "SELECT w.memory_tag FROM vocab_word w JOIN vocab_book b ON b.id = w.vocab_book_id WHERE b.is_preset = 0",
+            "SELECT r.reviewed_at FROM review_log r JOIN vocab_book b ON b.id = r.vocab_book_id WHERE b.is_preset=0 AND r.reviewed_at >= ?1",
         )
         .map_err(|e| e.to_string())?;
-    let tags: Vec<String> = stmt
-        .query_map([], |row| row.get(0))
+    let review_times: Vec<i64> = stmt
+        .query_map(rusqlite::params![seven_days_ago as i64], |row| row.get(0))
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
         .collect();
-
-    let mut reviewed_today: i64 = 0;
-    let mut total_reviews: i64 = 0;
-    let mut daily_buckets: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
-    use chrono::{Local, TimeZone};
-    for tag in &tags {
-        if let Some(ts) = parse_last_reviewed_at(tag) {
-            total_reviews += 1;
-            if ts >= today_start {
-                reviewed_today += 1;
-            }
-            if ts >= seven_days_ago {
-                // Convert Unix seconds to local date string for bucketing.
-                if let Some(dt) = Local.timestamp_opt(ts as i64, 0).single() {
-                    let d = dt.date_naive().to_string();
-                    *daily_buckets.entry(d).or_insert(0) += 1;
-                }
-            }
+    for ts in review_times {
+        // Convert Unix seconds to local date string for bucketing.
+        if let Some(dt) = Local.timestamp_opt(ts, 0).single() {
+            let d = dt.date_naive().to_string();
+            *daily_buckets.entry(d).or_insert(0) += 1;
         }
     }
 

@@ -43,7 +43,7 @@ use commands::preset_vocab::{
     commit_preset_clone, list_preset_vocab_books, preview_preset_clone,
     repair_cloned_parts_of_speech,
 };
-use commands::review::{get_due_words, get_due_words_count, get_learning_stats, get_review_progress, review_vocab_word};
+use commands::review::{get_all_due_words, get_due_words, get_due_words_count, get_learning_stats, get_review_progress, review_vocab_word};
 use commands::settings::{get_all_settings, get_setting, set_setting};
 use commands::ai_enhancer::{get_ai_settings, list_ai_models, save_ai_settings, test_ai_connection};
 use dictionary::{dict_lookup_chinese, dict_lookup_english, DictDbState};
@@ -224,6 +224,7 @@ pub fn run() {
             preview_preset_clone,
             commit_preset_clone,
             get_due_words,
+            get_all_due_words,
             get_due_words_count,
             get_review_progress,
             get_learning_stats,

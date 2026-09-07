@@ -136,6 +136,7 @@
         <NovelEditor
           ref="editorRef"
           :novel-id="currentNovelId"
+          :chapter-id="editorStore.chapterList[editorStore.activeChapterIndex]?.id ?? null"
           :content="editorContent"
           :highlight-words="highlightWords"
           :highlight-book-id="highlightBookId"
@@ -381,6 +382,7 @@ const editorContent = computed<string>({
 })
 function onEditorContentChange(html: string) {
   editorContentOverride.value = html
+  editorStore.scheduleChapterRefresh(currentNovelId.value, html)
 }
 
 const topbarTitle = computed(() => {
@@ -494,6 +496,22 @@ async function handleExportPdf() {
     return
   }
   if (!filePath) return
+
+  // Export must use the latest editor buffer, even when the 30s autosave
+  // debounce has not fired yet.
+  if (editorStore.isDirty) {
+    try {
+      await editorStore.flushSave(novel.id, editorContent.value)
+    } catch (e: any) {
+      ElMessage.error('导出前保存失败：' + String(e?.message || e || '未知错误'))
+      return
+    }
+    if (editorStore.isDirty) {
+      ElMessage.error('导出前保存失败，请重试')
+      return
+    }
+  }
+
   exportingPdf.value = true
   pdfPercent.value = 0
   pdfMessage.value = '正在准备导出…'
@@ -592,6 +610,7 @@ async function loadNovel() {
     const text = store.currentNovel.cleanedText || store.currentNovel.rawText || ''
     editorContentOverride.value = text
     if (text) await editorStore.loadChapters(id, text)
+    editorStore.refreshChaptersFromText(id, text)
     loadState.value = 'loaded'
     await nextTick()
     await restoreReadingPos()
@@ -678,7 +697,7 @@ async function handleManualSave() {
   const id = currentNovelId.value
   if (!id) return
   await editorStore.flushSave(id, editorContent.value)
-  if (editorStore.isDirty) {
+  if (!editorStore.isDirty) {
     ElMessage.success('已保存')
   }
 }

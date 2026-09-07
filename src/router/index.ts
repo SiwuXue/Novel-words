@@ -52,6 +52,12 @@ const router = createRouter({
       meta: { title: '卡片复习' },
     },
     {
+      path: '/review',
+      name: 'VocabReviewAll',
+      component: () => import('@/views/ReviewPage.vue'),
+      meta: { title: '全部复习' },
+    },
+    {
       path: '/settings',
       name: 'Settings',
       component: () => import('@/views/SettingsPage.vue'),

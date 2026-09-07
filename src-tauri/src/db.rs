@@ -214,6 +214,41 @@ pub fn init_db(app_data_dir: &PathBuf) -> Result<DbState, String> {
     )
     .map_err(|e| format!("seed speech_accent 失败: {}", e))?;
 
+    // Migration: preserve every review as an append-only event.  Older
+    // versions only kept the last review timestamp inside vocab_word.memory_tag;
+    // seed one best-effort legacy event for already-reviewed cards so existing
+    // users do not start with an entirely empty history.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS review_log (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            vocab_word_id   INTEGER NOT NULL,
+            vocab_book_id   INTEGER NOT NULL,
+            rating          TEXT NOT NULL DEFAULT 'legacy',
+            reviewed_at     INTEGER NOT NULL,
+            due_before      TEXT NOT NULL DEFAULT '',
+            due_after       TEXT NOT NULL DEFAULT '',
+            proficiency     TEXT NOT NULL DEFAULT '',
+            FOREIGN KEY (vocab_word_id) REFERENCES vocab_word(id) ON DELETE CASCADE,
+            FOREIGN KEY (vocab_book_id) REFERENCES vocab_book(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_review_log_reviewed_at ON review_log(reviewed_at);
+        CREATE INDEX IF NOT EXISTS idx_review_log_word ON review_log(vocab_word_id);
+        INSERT INTO review_log (
+            vocab_word_id, vocab_book_id, rating, reviewed_at, due_after, proficiency
+        )
+        SELECT w.id, w.vocab_book_id, 'legacy',
+               CAST(json_extract(w.memory_tag, '$.last_reviewed_at') AS INTEGER),
+               COALESCE(json_extract(w.memory_tag, '$.srs.due'), ''),
+               w.proficiency
+        FROM vocab_word w
+        WHERE json_valid(w.memory_tag)
+          AND json_extract(w.memory_tag, '$.last_reviewed_at') IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM review_log r WHERE r.vocab_word_id = w.id
+          );",
+    )
+    .map_err(|e| format!("迁移复习历史失败: {}", e))?;
+
     Ok(DbState {
         db: Mutex::new(conn),
     })
@@ -293,6 +328,21 @@ CREATE TABLE IF NOT EXISTS app_settings (
     value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS review_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    vocab_word_id   INTEGER NOT NULL,
+    vocab_book_id   INTEGER NOT NULL,
+    rating          TEXT NOT NULL DEFAULT 'legacy',
+    reviewed_at     INTEGER NOT NULL,
+    due_before      TEXT NOT NULL DEFAULT '',
+    due_after       TEXT NOT NULL DEFAULT '',
+    proficiency     TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (vocab_word_id) REFERENCES vocab_word(id) ON DELETE CASCADE,
+    FOREIGN KEY (vocab_book_id) REFERENCES vocab_book(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_review_log_reviewed_at ON review_log(reviewed_at);
+CREATE INDEX IF NOT EXISTS idx_review_log_word ON review_log(vocab_word_id);
+
 -- Seed default settings
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('theme', 'light');
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('default_export_folder', '');
@@ -343,6 +393,60 @@ mod tests {
             .unwrap();
         assert_eq!(serde_json::from_str::<Vec<String>>(&encoded).unwrap(), vec!["天赋"]);
 
+        drop(state);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn creates_review_log_and_seeds_legacy_review_once() {
+        let unique = format!(
+            "novel-words-review-migration-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let dir = std::env::temp_dir().join(unique);
+        let reviewed_at = 1_700_000_000_u64;
+
+        {
+            let state = init_db(&dir).unwrap();
+            let db = state.db.lock().unwrap();
+            db.execute("INSERT INTO vocab_book (name) VALUES ('测试词汇本')", [])
+                .unwrap();
+            let memory_tag = format!(
+                "{{\"tag\":\"\",\"srs\":{{\"due\":\"2026-01-01\"}},\"last_reviewed_at\":{}}}",
+                reviewed_at
+            );
+            db.execute(
+                "INSERT INTO vocab_word (vocab_book_id, word, memory_tag) VALUES (1, 'test', ?1)",
+                rusqlite::params![memory_tag],
+            )
+            .unwrap();
+        }
+
+        let state = init_db(&dir).unwrap();
+        let db = state.db.lock().unwrap();
+        let count: i64 = db
+            .query_row("SELECT COUNT(*) FROM review_log", [], |row| row.get(0))
+            .unwrap();
+        let timestamp: i64 = db
+            .query_row("SELECT reviewed_at FROM review_log", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(timestamp, reviewed_at as i64);
+        drop(db);
+        drop(state);
+
+        let state = init_db(&dir).unwrap();
+        let count: i64 = state
+            .db
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM review_log", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
         drop(state);
         std::fs::remove_dir_all(&dir).unwrap();
     }

@@ -21,7 +21,7 @@
         <div class="stat-num">{{ wordCount }}</div>
         <div class="stat-label">{{ t('home.statWords') }}</div>
       </div>
-      <div class="stat-card" @click="$router.push('/vocabulary')">
+      <div class="stat-card" @click="$router.push('/review')">
         <el-icon :size="28"><AlarmClock /></el-icon>
         <div class="stat-num">{{ dueCount }}</div>
         <div class="stat-label">{{ t('home.statDue') }}</div>

@@ -163,6 +163,7 @@ export default {
 
   // ---- Review ----
   'review.back': '返回',
+  'review.allBooks': '全部词汇',
   'review.today': '今日复习',
   'review.due': '待复习',
   'review.noDueTitle': '今日没有需要复习的单词',
@@ -227,6 +228,7 @@ export default {
   'vocabDetail.phonetic': '音标',
   'vocabDetail.definition': '释义',
   'vocabDetail.example': '例句',
+  'vocabDetail.source': '来源章节',
   'vocabDetail.proficiency': '熟练度',
   'vocabDetail.actions': '操作',
   'vocabDetail.edit': '编辑',

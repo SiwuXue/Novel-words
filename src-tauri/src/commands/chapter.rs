@@ -2,31 +2,54 @@ use crate::db::DbState;
 use crate::models::Chapter;
 use tauri::State;
 
-/// Save chapters for a novel. Replaces all existing chapters for the novel
-/// with the provided list (delete then re-insert).
+/// Save chapters for a novel while reusing IDs by position. Reusing IDs keeps
+/// vocab words linked to their source chapter when only the chapter content
+/// changes.
 #[tauri::command]
 pub fn save_chapters(
     state: State<DbState>,
     novel_id: i64,
     chapters: Vec<Chapter>,
 ) -> Result<(), String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.execute(
-        "DELETE FROM chapter WHERE novel_id = ?1",
-        rusqlite::params![novel_id],
-    )
-    .map_err(|e| format!("清理旧章节失败: {}", e))?;
-
-    let mut stmt = db
-        .prepare(
-            "INSERT INTO chapter (novel_id, title, content, sort_order) VALUES (?1, ?2, ?3, ?4)",
-        )
-        .map_err(|e| format!("准备插入章节失败: {}", e))?;
-
+    let mut db = state.db.lock().map_err(|e| e.to_string())?;
+    let tx = db
+        .transaction()
+        .map_err(|e| format!("开启章节保存事务失败: {}", e))?;
+    let old_ids: Vec<i64> = {
+        let mut stmt = tx
+            .prepare("SELECT id FROM chapter WHERE novel_id=?1 ORDER BY sort_order")
+            .map_err(|e| format!("读取旧章节失败: {}", e))?;
+        let rows = stmt.query_map(rusqlite::params![novel_id], |row| row.get(0))
+            .map_err(|e| format!("读取旧章节失败: {}", e))?
+            .filter_map(|r| r.ok())
+            .collect::<Vec<i64>>();
+        rows
+    };
     for (i, ch) in chapters.iter().enumerate() {
-        stmt.execute(rusqlite::params![novel_id, ch.title, ch.content, i as i32])
+        if let Some(id) = old_ids.get(i) {
+            tx.execute(
+                "UPDATE chapter SET title=?1, content=?2, sort_order=?3 WHERE id=?4 AND novel_id=?5",
+                rusqlite::params![ch.title, ch.content, i as i32, id, novel_id],
+            )
+            .map_err(|e| format!("更新章节 '{}' 失败: {}", ch.title, e))?;
+        } else {
+            tx.execute(
+                "INSERT INTO chapter (novel_id, title, content, sort_order) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![novel_id, ch.title, ch.content, i as i32],
+            )
             .map_err(|e| format!("插入章节 '{}' 失败: {}", ch.title, e))?;
+        }
     }
+    for id in old_ids.iter().skip(chapters.len()) {
+        tx.execute(
+            "UPDATE vocab_word SET chapter_id=NULL WHERE chapter_id=?1",
+            rusqlite::params![id],
+        )
+        .map_err(|e| format!("清理章节词汇关联失败: {}", e))?;
+        tx.execute("DELETE FROM chapter WHERE id=?1", rusqlite::params![id])
+            .map_err(|e| format!("删除旧章节失败: {}", e))?;
+    }
+    tx.commit().map_err(|e| format!("提交章节保存失败: {}", e))?;
     Ok(())
 }
 

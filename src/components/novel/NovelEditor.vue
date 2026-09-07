@@ -76,6 +76,7 @@
       :text="popoverText"
       :position="popoverPosition"
       :novel-id="props.novelId"
+      :chapter-id="props.chapterId"
       @close="closePopover"
     />
   </div>
@@ -101,6 +102,7 @@ import DictLookupPopover from './DictLookupPopover.vue'
 
 const props = defineProps<{
   novelId: number
+  chapterId: number | null
   content: string
   highlightWords: HighlightWord[]
   highlightBookId: number | null

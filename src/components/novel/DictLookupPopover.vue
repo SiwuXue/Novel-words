@@ -139,6 +139,7 @@ const props = defineProps<{
   text: string
   position: { x: number; y: number }
   novelId: number | null
+  chapterId: number | null
 }>()
 
 const emit = defineEmits<{
@@ -204,6 +205,7 @@ async function addEnglishWord(w: DictWord) {
       phonetic: w.phonetic_us || w.phonetic_uk,
       exampleSentence: '',
       novelId: props.novelId,
+      chapterId: props.chapterId,
       proficiency: 'unknown',
       memoryTag: '',
     })

@@ -4,7 +4,7 @@
       <el-button link @click="goBack">
         <el-icon><ArrowLeft /></el-icon> {{ t('review.back') }}
       </el-button>
-      <h2 v-if="book">{{ book.name }}</h2>
+      <h2>{{ book?.name || t('review.allBooks') }}</h2>
       <span class="review-progress" v-if="progress">
         {{ t('review.today') }} <strong>{{ progress.reviewed_today }}</strong> / {{ progress.goal }} ·
         {{ t('review.due') }} <strong>{{ progress.due_total }}</strong>
@@ -149,9 +149,9 @@ onMounted(async () => {
   }
   loading.value = true
   try {
-    queue.value = await invoke<VocabWord[]>('get_due_words', {
-      vocabBookId: bookId.value,
-    })
+    queue.value = bookId.value
+      ? await invoke<VocabWord[]>('get_due_words', { vocabBookId: bookId.value })
+      : await invoke<VocabWord[]>('get_all_due_words')
     await refreshProgress()
   } catch (e: any) {
     ElMessage.error(String(e?.message || e || '加载复习队列失败'))
@@ -176,7 +176,7 @@ async function answer(rating: 'again' | 'good' | 'easy') {
 }
 
 function goBack() {
-  router.push(`/vocabulary/${bookId.value}`)
+  router.push(bookId.value ? `/vocabulary/${bookId.value}` : '/vocabulary')
 }
 </script>
 

@@ -13,6 +13,7 @@ export const useEditorStore = defineStore('editor', () => {
   const activeChapterIndex = ref(0)
 
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null
+  let chapterRefreshTimer: ReturnType<typeof setTimeout> | null = null
   /** Promise of the in-flight autosave, so flushSave can await it
    *  instead of triggering a second concurrent write. */
   let inFlight: Promise<void> | null = null
@@ -56,6 +57,40 @@ export const useEditorStore = defineStore('editor', () => {
       .trim()
   }
 
+  /** Rebuild chapter content from the current editor buffer without writing
+   * to disk yet. This keeps preview/navigation on the latest text. */
+  function refreshChaptersFromText(novelId: number, text: string) {
+    const plainText = looksLikeHtml(text) ? stripHtml(text) : text
+    const detected = detectChapters(plainText)
+    const previous = chapterList.value
+    chapterList.value = detected.map((chapter, index) => ({
+      ...chapter,
+      id: previous[index]?.id || 0,
+      novelId,
+      createdAt: previous[index]?.createdAt || '',
+    }))
+    activeChapterIndex.value = Math.min(
+      activeChapterIndex.value,
+      Math.max(0, chapterList.value.length - 1),
+    )
+  }
+
+  function scheduleChapterRefresh(novelId: number, text: string) {
+    if (chapterRefreshTimer) clearTimeout(chapterRefreshTimer)
+    chapterRefreshTimer = setTimeout(() => {
+      chapterRefreshTimer = null
+      refreshChaptersFromText(novelId, text)
+    }, 250)
+  }
+
+  async function persistChapters(novelId: number, text: string) {
+    refreshChaptersFromText(novelId, text)
+    await invoke('save_chapters', {
+      novelId,
+      chapters: chapterList.value,
+    })
+  }
+
   /** Auto-save with 30s debounce. If a previous autosave is still awaiting
    *  Rust, the next call awaits it before scheduling a new write. */
   async function scheduleAutosave(novelId: number, html: string) {
@@ -80,6 +115,7 @@ export const useEditorStore = defineStore('editor', () => {
       try {
         const novelStore = useNovelStore()
         await novelStore.update(novelId, { cleanedText: html } as any)
+        await persistChapters(novelId, html)
         isDirty.value = false
       } catch (e) {
         console.error('[editorStore] autosave failed:', e)
@@ -97,6 +133,10 @@ export const useEditorStore = defineStore('editor', () => {
     if (autosaveTimer) {
       clearTimeout(autosaveTimer)
       autosaveTimer = null
+    }
+    if (chapterRefreshTimer) {
+      clearTimeout(chapterRefreshTimer)
+      chapterRefreshTimer = null
     }
     if (inFlight) {
       try {
@@ -128,6 +168,8 @@ export const useEditorStore = defineStore('editor', () => {
     chapterList,
     activeChapterIndex,
     loadChapters,
+    refreshChaptersFromText,
+    scheduleChapterRefresh,
     scheduleAutosave,
     flushSave,
     reset,

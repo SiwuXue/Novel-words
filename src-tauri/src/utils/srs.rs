@@ -58,20 +58,6 @@ pub fn parse_memory_tag(raw: &str) -> (String, SrsState) {
     }
 }
 
-/// Serialize `(tag, srs)` back into the `memory_tag` column.
-/// Cards with no meaningful SRS state keep the plain tag for backward compat.
-pub fn serialize_memory_tag(tag: &str, srs: &SrsState) -> String {
-    if srs.reps == 0 && srs.interval == 0 && srs.due.is_empty() {
-        return tag.to_string();
-    }
-    serde_json::to_string(&MemoryTagEnvelope {
-        tag: Some(tag.to_string()),
-        srs: Some(srs.clone()),
-        last_reviewed_at: None,
-    })
-    .unwrap_or_else(|_| tag.to_string())
-}
-
 /// Serialize with an explicit `last_reviewed_at` timestamp (Unix seconds).
 /// Used by the review command to record when the card was last studied, so
 /// the frontend can compute "reviewed today" progress.
@@ -89,16 +75,6 @@ pub fn serialize_memory_tag_reviewed(
         last_reviewed_at: Some(last_reviewed_at),
     })
     .unwrap_or_else(|_| tag.to_string())
-}
-
-/// Read the `last_reviewed_at` timestamp from a `memory_tag` value.
-pub fn parse_last_reviewed_at(raw: &str) -> Option<u64> {
-    if raw.is_empty() {
-        return None;
-    }
-    serde_json::from_str::<MemoryTagEnvelope>(raw)
-        .ok()
-        .and_then(|env| env.last_reviewed_at)
 }
 
 /// A card is due when it has never been scheduled, or its due date is today or earlier.

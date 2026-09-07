@@ -13,6 +13,7 @@ pub fn create_vocab_word(
     phonetic: String,
     example_sentence: String,
     novel_id: Option<i64>,
+    chapter_id: Option<i64>,
     proficiency: String,
     memory_tag: String,
 ) -> Result<VocabWord, String> {
@@ -28,8 +29,8 @@ pub fn create_vocab_word(
     }
 
     db.execute(
-        "INSERT INTO vocab_word (vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        rusqlite::params![vocab_book_id, word.trim(), definition, phonetic, example_sentence, novel_id, proficiency, memory_tag],
+        "INSERT INTO vocab_word (vocab_book_id, word, definition, phonetic, example_sentence, novel_id, chapter_id, proficiency, memory_tag) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        rusqlite::params![vocab_book_id, word.trim(), definition, phonetic, example_sentence, novel_id, chapter_id, proficiency, memory_tag],
     )
     .map_err(|e| format!("创建单词失败: {}", e))?;
 
@@ -45,7 +46,7 @@ pub fn get_vocab_words(
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let mut stmt = db
         .prepare(
-            "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, created_at, match_terms FROM vocab_word WHERE vocab_book_id=?1 ORDER BY created_at DESC",
+            "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, chapter_id, proficiency, memory_tag, created_at, match_terms FROM vocab_word WHERE vocab_book_id=?1 ORDER BY created_at DESC",
         )
         .map_err(|e| e.to_string())?;
 
@@ -110,7 +111,7 @@ pub fn get_vocab_words_page(
         .map_err(|e| format!("统计单词失败: {}", e))?;
 
     let page_sql = format!(
-        "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, created_at, match_terms \
+        "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, chapter_id, proficiency, memory_tag, created_at, match_terms \
          FROM vocab_word WHERE {} ORDER BY created_at DESC LIMIT ? OFFSET ?",
         where_sql
     );
@@ -196,7 +197,7 @@ pub fn search_vocab_words(
     let pattern = format!("%{}%", query);
     let mut stmt = db
         .prepare(
-            "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, created_at, match_terms FROM vocab_word WHERE vocab_book_id=?1 AND word LIKE ?2 ORDER BY created_at DESC",
+            "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, chapter_id, proficiency, memory_tag, created_at, match_terms FROM vocab_word WHERE vocab_book_id=?1 AND word LIKE ?2 ORDER BY created_at DESC",
         )
         .map_err(|e| e.to_string())?;
 
@@ -211,7 +212,7 @@ pub fn search_vocab_words(
 
 fn get_vocab_word_by_id(db: &rusqlite::Connection, id: i64) -> Result<VocabWord, String> {
     db.query_row(
-        "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, created_at, match_terms FROM vocab_word WHERE id=?1",
+        "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, chapter_id, proficiency, memory_tag, created_at, match_terms FROM vocab_word WHERE id=?1",
         rusqlite::params![id],
         row_to_vocab_word,
     )
@@ -227,11 +228,11 @@ pub(crate) fn row_to_vocab_word(row: &rusqlite::Row) -> rusqlite::Result<VocabWo
         phonetic: row.get(4)?,
         example_sentence: row.get(5)?,
         novel_id: row.get(6)?,
-        chapter_id: None,
-        proficiency: row.get(7)?,
-        memory_tag: row.get(8)?,
-        created_at: row.get(9)?,
-        match_terms: row.get(10)?,
+        chapter_id: row.get(7)?,
+        proficiency: row.get(8)?,
+        memory_tag: row.get(9)?,
+        created_at: row.get(10)?,
+        match_terms: row.get(11)?,
     })
 }
 

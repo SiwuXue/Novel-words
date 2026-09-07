@@ -6,6 +6,7 @@ export interface VocabWord {
   phonetic: string
   exampleSentence: string
   novelId: number | null
+  chapterId: number | null
   proficiency: 'unknown' | 'familiar' | 'mastered'
   memoryTag: string
   createdAt: string
@@ -19,6 +20,7 @@ export interface VocabWordFormData {
   exampleSentence: string
   proficiency: 'unknown' | 'familiar' | 'mastered'
   memoryTag: string
+  chapterId?: number | null
 }
 
 export interface HighlightWord {

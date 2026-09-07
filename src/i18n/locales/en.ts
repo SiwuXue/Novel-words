@@ -163,6 +163,7 @@ export default {
 
   // ---- Review ----
   'review.back': 'Back',
+  'review.allBooks': 'All vocabulary',
   'review.today': 'Today',
   'review.due': 'Due',
   'review.noDueTitle': 'Nothing due for review today',
@@ -227,6 +228,7 @@ export default {
   'vocabDetail.phonetic': 'Phonetic',
   'vocabDetail.definition': 'Definition',
   'vocabDetail.example': 'Example',
+  'vocabDetail.source': 'Source chapter',
   'vocabDetail.proficiency': 'Proficiency',
   'vocabDetail.actions': 'Actions',
   'vocabDetail.edit': 'Edit',

@@ -756,7 +756,7 @@ fn load_preset_and_novel(
         )
         .map_err(|_| format!("未找到预设词表: {}", preset_key))?;
     let mut stmt = db
-        .prepare("SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, created_at, match_terms FROM vocab_word WHERE vocab_book_id = ?1")
+        .prepare("SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, chapter_id, proficiency, memory_tag, created_at, match_terms FROM vocab_word WHERE vocab_book_id = ?1")
         .map_err(|e| e.to_string())?;
     let preset_words: Vec<VocabWord> = stmt
         .query_map(params![preset_id], row_to_vocab_word)

@@ -61,6 +61,7 @@ export const useVocabWordStore = defineStore('vocabWord', () => {
       phonetic: data.phonetic || '',
       exampleSentence: data.exampleSentence || '',
       novelId: null,
+      chapterId: data.chapterId ?? null,
       proficiency: data.proficiency || 'unknown',
       memoryTag: data.memoryTag || '',
     })
