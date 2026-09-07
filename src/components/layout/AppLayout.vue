@@ -1,12 +1,12 @@
 <template>
   <div class="app-layout">
-    <Sidebar />
+    <Sidebar v-if="!isReadingMode" />
     <div class="main-area">
-      <TopBar />
+      <TopBar v-if="!isReadingMode" />
       <main
         ref="mainContentRef"
         class="main-content"
-        :class="{ 'editor-mode': isEditorRoute, 'home-mode': isHomeRoute }"
+        :class="{ 'editor-mode': isEditorRoute, 'home-mode': isHomeRoute, 'reading-mode': isReadingMode }"
       >
         <RouterView v-slot="{ Component, route: r }">
           <Transition name="page-fade" mode="out-in">
@@ -28,6 +28,7 @@ const route = useRoute()
 const mainContentRef = ref<HTMLElement | null>(null)
 const isEditorRoute = computed(() => route.name === 'NovelEdit')
 const isHomeRoute = computed(() => route.name === 'Home')
+const isReadingMode = computed(() => route.name === 'NovelEdit' && route.query.mode === 'read')
 
 watch(
   () => route.name,
@@ -62,6 +63,10 @@ watch(
 .main-content.editor-mode {
   padding: 0;
   overflow: hidden;
+}
+
+.main-content.reading-mode {
+  background: var(--bg-primary);
 }
 
 .main-content.home-mode {

@@ -35,10 +35,21 @@
           v-for="n in recentNovels"
           :key="n.id"
           class="recent-item"
-          @click="$router.push(`/novels/${n.id}`)"
+          @click="$router.push(`/novels/${n.id}?mode=read`)"
         >
           <span class="recent-title">{{ n.title || t('home.unnamed') }}</span>
           <span class="recent-author">{{ n.author || t('home.unknownAuthor') }}</span>
+          <span v-if="readingProgress[n.id] != null" class="recent-progress">
+            {{ t('home.readingProgress', { n: readingProgress[n.id] }) }}
+          </span>
+          <el-button
+            class="continue-button"
+            text
+            type="primary"
+            @click.stop="$router.push(`/novels/${n.id}?mode=read`)"
+          >
+            {{ t('home.continueReading') }}
+          </el-button>
           <el-icon class="recent-arrow"><ArrowRight /></el-icon>
         </div>
       </div>
@@ -79,12 +90,26 @@ const bookCount = ref(0)
 const wordCount = ref(0)
 const dueCount = ref(0)
 const recentNovels = ref<Novel[]>([])
+const readingProgress = ref<Record<number, number>>({})
 
 onMounted(async () => {
   try {
     const novels = await invoke<Novel[]>('get_all_novels')
     novelCount.value = novels.length
     recentNovels.value = novels.slice(0, 3)
+    const progressEntries = await Promise.all(
+      recentNovels.value.map(async (novel) => {
+        try {
+          const raw = await invoke<string>('get_setting', { key: `reading_pos_${novel.id}` })
+          if (!raw) return [novel.id, 0] as const
+          const parsed = JSON.parse(raw) as { percent?: number }
+          return [novel.id, Math.round(Math.min(1, Math.max(0, parsed.percent || 0)) * 100)] as const
+        } catch {
+          return [novel.id, 0] as const
+        }
+      }),
+    )
+    readingProgress.value = Object.fromEntries(progressEntries)
   } catch { /* ignore */ }
 
   try {
@@ -247,6 +272,16 @@ onMounted(async () => {
   white-space: nowrap;
 }
 
+.recent-progress {
+  flex-shrink: 0;
+  color: var(--text-secondary, #909399);
+  font-size: 12px;
+}
+.continue-button {
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
 .recent-arrow {
   color: var(--text-placeholder, #c0c4cc);
 }
@@ -302,6 +337,13 @@ onMounted(async () => {
   }
   .recent-title {
     max-width: 55%;
+  }
+  .recent-author {
+    display: none;
+  }
+  .continue-button {
+    padding-right: 4px;
+    padding-left: 4px;
   }
   .actions-row {
     display: grid;

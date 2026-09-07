@@ -1,7 +1,7 @@
 <template>
   <div class="novel-editor-wrapper">
     <!-- Toolbar -->
-    <div class="editor-toolbar" v-if="editor">
+    <div class="editor-toolbar" v-if="editor && !props.readOnly">
       <el-select
         class="highlight-select"
         :model-value="highlightBookId"
@@ -106,6 +106,7 @@ const props = defineProps<{
   content: string
   highlightWords: HighlightWord[]
   highlightBookId: number | null
+  readOnly?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -219,6 +220,7 @@ onBeforeUnmount(() => {
 // thread on multi-megabyte HTML.
 const editor = useEditor({
   content: '',
+  editable: !props.readOnly,
   extensions: [
     StarterKit.configure({
       heading: { levels: [1, 2, 3] },
@@ -256,6 +258,14 @@ const editor = useEditor({
     }
   },
 })
+
+watch(
+  () => props.readOnly,
+  (readOnly) => {
+    editor.value?.setEditable(!readOnly)
+  },
+  { immediate: true },
+)
 
 // Explicit "have I loaded this novel's content?" flag — replaces the old
 // brittle 50-char length heuristic. Set true once we call setContent; reset

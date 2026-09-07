@@ -1,5 +1,5 @@
 <template>
-  <div class="editor-page">
+  <div class="editor-page" :class="{ 'reading-mode': readingMode }" :style="readingStyle">
     <div class="editor-topbar">
       <el-button link @click="goBack">
         <el-icon><ArrowLeft /></el-icon> {{ t('editor.back') }}
@@ -18,6 +18,7 @@
           {{ t('editor.save') }}
         </el-button>
       </span>
+      <template v-if="!readingMode">
       <el-dropdown
         v-if="loadState === 'loaded' && pdfTemplateType === 'intensive'"
         trigger="click"
@@ -106,11 +107,67 @@
       >
         <el-icon><Printer /></el-icon> {{ t('editor.exportPdf') }}
       </el-button>
+      <el-button
+        v-if="loadState === 'loaded'"
+        size="small"
+        type="primary"
+        plain
+        @click="enterReadingMode"
+      >
+        <el-icon><Reading /></el-icon> {{ t('reading.enter') }}
+      </el-button>
+      </template>
+      <template v-else>
+        <div class="reading-topbar-meta">
+          <span class="reading-chapter-label">{{ currentChapterTitle }}</span>
+          <span>{{ readingPercent }}%</span>
+          <span>{{ readingRemainingLabel }}</span>
+          <span class="reading-hotkey-hint">{{ t('reading.shortcutHint') }}</span>
+        </div>
+        <el-popover v-model:visible="readingSettingsOpen" placement="bottom-end" :width="320" trigger="click">
+          <template #reference>
+            <el-button size="small" circle :aria-label="t('reading.settings')" :title="t('reading.settings')">
+              <el-icon><Setting /></el-icon>
+            </el-button>
+          </template>
+          <div class="reading-settings-panel">
+            <div class="reading-settings-title">{{ t('reading.settings') }}</div>
+            <label class="reading-setting-row">
+              <span>{{ t('reading.font') }}</span>
+              <el-select v-model="readingFont" size="small" style="width: 180px">
+                <el-option value="system" :label="t('reading.fontSystem')" />
+                <el-option value="serif" :label="t('reading.fontSerif')" />
+                <el-option value="mono" :label="t('reading.fontMono')" />
+              </el-select>
+            </label>
+            <label class="reading-setting-row">
+              <span>{{ t('reading.fontSize') }} {{ readingFontSize }}px</span>
+              <el-slider v-model="readingFontSize" :min="15" :max="30" :step="1" style="width: 150px" />
+            </label>
+            <label class="reading-setting-row">
+              <span>{{ t('reading.lineHeight') }} {{ readingLineHeight.toFixed(1) }}</span>
+              <el-slider v-model="readingLineHeight" :min="1.4" :max="2.4" :step="0.1" style="width: 150px" />
+            </label>
+            <label class="reading-setting-row">
+              <span>{{ t('reading.width') }}</span>
+              <el-radio-group v-model="readingWidth" size="small">
+                <el-radio-button :value="620">窄</el-radio-button>
+                <el-radio-button :value="760">中</el-radio-button>
+                <el-radio-button :value="920">宽</el-radio-button>
+              </el-radio-group>
+            </label>
+          </div>
+        </el-popover>
+        <el-button size="small" @click="exitReadingMode">
+          <el-icon><Close /></el-icon> {{ t('reading.exit') }}
+        </el-button>
+      </template>
     </div>
 
     <!-- Loaded: three-column body with draggable splitters -->
-    <div class="editor-body" v-if="loadState === 'loaded'">
+    <div class="editor-body" :class="{ 'reading-body': readingMode }" v-if="loadState === 'loaded'">
       <div
+        v-if="!readingMode"
         class="editor-pane left-pane"
         :style="{ width: split.state.leftWidth + 'px' }"
         v-show="split.state.leftWidth > 0"
@@ -122,6 +179,7 @@
         />
       </div>
       <div
+        v-if="!readingMode"
         class="split-divider"
         :class="{ collapsed: split.state.leftWidth === 0 }"
         @mousedown="split.startLeftDrag"
@@ -140,11 +198,13 @@
           :content="editorContent"
           :highlight-words="highlightWords"
           :highlight-book-id="highlightBookId"
+          :read-only="readingMode"
           @update:content="onEditorContentChange"
           @update:highlight-book-id="highlightBookId = $event"
         />
       </div>
       <div
+        v-if="!readingMode"
         class="split-divider"
         :class="{ collapsed: split.state.rightWidth === 0 }"
         @mousedown="split.startRightDrag"
@@ -156,6 +216,7 @@
         </el-icon>
       </div>
       <div
+        v-if="!readingMode"
         class="editor-pane right-pane"
         :style="{ width: split.state.rightWidth + 'px' }"
         v-show="split.state.rightWidth > 0"
@@ -198,11 +259,34 @@
           :loaded-chapters="Math.min(allPreviewLimit, editorStore.chapterList.length)"
           :total-chapters="editorStore.chapterList.length"
           :fullscreen="previewFullscreen"
+          :reading-mode="previewReadingMode"
+          :chapter-title="currentChapterTitle"
+          :chapter-index="editorStore.activeChapterIndex"
+          :reading-overall-progress="previewOverallProgress"
+          :reading-remaining-minutes="previewRemainingMinutes"
           @toggle-fullscreen="togglePreviewFullscreen"
           @update:preview-scope="previewScope = $event"
           @load-more="loadMorePreviewChapters"
+          @enter-reading-mode="enterPreviewReadingMode"
+          @exit-reading-mode="exitPreviewReadingMode"
+          @previous-chapter="goToPreviousPreviewChapter"
+          @next-chapter="goToNextPreviewChapter"
+          @reading-progress="onPreviewReadingProgress"
         />
       </div>
+    </div>
+
+    <div v-if="readingMode && loadState === 'loaded'" class="reading-bottom-bar" role="navigation" :aria-label="t('reading.navigation')">
+      <el-button text :disabled="!hasPreviousChapter" @click="goToPreviousChapter">
+        <el-icon><ArrowLeft /></el-icon> {{ t('reading.previousChapter') }}
+      </el-button>
+      <div class="reading-progress-wrap" :title="t('reading.shortcutHint')">
+        <el-progress :percentage="readingPercent" :stroke-width="5" :show-text="false" />
+        <span>{{ currentChapterTitle }} · {{ readingPercent }}%</span>
+      </div>
+      <el-button text :disabled="!hasNextChapter" @click="goToNextChapter">
+        {{ t('reading.nextChapter') }} <el-icon><ArrowRight /></el-icon>
+      </el-button>
     </div>
 
     <!-- Loading -->
@@ -245,7 +329,17 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
-import { ArrowLeft, Loading, Printer, DArrowLeft, DArrowRight } from '@element-plus/icons-vue'
+import {
+  ArrowLeft,
+  ArrowRight,
+  Close,
+  Loading,
+  Printer,
+  Reading,
+  Setting,
+  DArrowLeft,
+  DArrowRight,
+} from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
@@ -290,6 +384,9 @@ const pdfMessage = ref('正在准备导出…')
 const previewFullscreen = ref(false)
 const previewScope = ref<'current' | 'all'>('all')
 const allPreviewLimit = ref(4)
+const previewReadingMode = ref(false)
+const previewReadingPreviousScope = ref<'current' | 'all'>('all')
+const previewChapterProgress = ref(0)
 const chapterPreviewCache = new Map<string, string>()
 let previewWordsVersion = 0
 const stepNums: StepNum[] = [1, 2, 3]
@@ -301,6 +398,134 @@ const pdfTemplateLabel = computed(() => TEMPLATE_TYPE_LABELS[pdfTemplateType.val
 const isEnglishMode = computed(() => store.currentNovel?.language === 'en')
 const coverEnabled = ref(false)
 const pageNumbersEnabled = ref(false)
+
+type ReadingFont = 'system' | 'serif' | 'mono'
+const readingMode = ref(route.query.mode === 'read')
+const readingSettingsOpen = ref(false)
+const readingFont = ref<ReadingFont>('system')
+const readingFontSize = ref(18)
+const readingLineHeight = ref(1.9)
+const readingWidth = ref(760)
+const readingProgress = ref(0)
+
+const readingStyle = computed(() => ({
+  '--reading-font-family':
+    readingFont.value === 'serif'
+      ? 'Georgia, "Songti SC", "STSong", serif'
+      : readingFont.value === 'mono'
+        ? 'ui-monospace, SFMono-Regular, Consolas, monospace'
+        : 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  '--reading-font-size': `${readingFontSize.value}px`,
+  '--reading-line-height': String(readingLineHeight.value),
+  '--reading-width': `${readingWidth.value}px`,
+}))
+
+const currentChapter = computed(() => editorStore.chapterList[editorStore.activeChapterIndex] ?? null)
+const currentChapterTitle = computed(() => currentChapter.value?.title || t('reading.fullText'))
+const hasPreviousChapter = computed(() => editorStore.activeChapterIndex > 0)
+const hasNextChapter = computed(
+  () => editorStore.activeChapterIndex < editorStore.chapterList.length - 1,
+)
+const readingPercent = computed(() => Math.round(readingProgress.value * 100))
+const readingRemainingMinutes = computed(() => {
+  const totalUnits = editorStore.chapterList.reduce(
+    (sum, chapter) => sum + Math.max(0, chapter.content?.length || 0),
+    0,
+  )
+  if (!totalUnits || readingProgress.value >= 0.999) return 0
+  const unitsPerMinute = store.currentNovel?.language === 'en' ? 220 : 360
+  return Math.max(1, Math.ceil((totalUnits * (1 - readingProgress.value)) / unitsPerMinute))
+})
+const readingRemainingLabel = computed(() =>
+  readingRemainingMinutes.value > 0
+    ? t('reading.remaining', { n: readingRemainingMinutes.value })
+    : t('reading.completed'),
+)
+
+const previewOverallProgress = computed(() => {
+  const chapters = editorStore.chapterList
+  if (!chapters.length) return previewChapterProgress.value
+  const total = chapters.reduce(
+    (sum, chapter) => sum + Math.max(1, chapter.content?.length || 0),
+    0,
+  )
+  const before = chapters
+    .slice(0, editorStore.activeChapterIndex)
+    .reduce((sum, chapter) => sum + Math.max(1, chapter.content?.length || 0), 0)
+  const currentLength = Math.max(
+    1,
+    chapters[editorStore.activeChapterIndex]?.content?.length || 0,
+  )
+  return Math.min(1, Math.max(0, (before + currentLength * previewChapterProgress.value) / total))
+})
+const previewRemainingMinutes = computed(() => {
+  const total = editorStore.chapterList.reduce(
+    (sum, chapter) => sum + Math.max(0, chapter.content?.length || 0),
+    0,
+  )
+  if (!total || previewOverallProgress.value >= 0.999) return 0
+  const speed = store.currentNovel?.language === 'en' ? 220 : 360
+  return Math.max(1, Math.ceil((total * (1 - previewOverallProgress.value)) / speed))
+})
+
+function loadReadingPreferences() {
+  try {
+    const raw = localStorage.getItem('reading-preferences')
+    if (!raw) return
+    const saved = JSON.parse(raw) as Partial<{
+      font: ReadingFont
+      fontSize: number
+      lineHeight: number
+      width: number
+    }>
+    if (saved.font === 'system' || saved.font === 'serif' || saved.font === 'mono') {
+      readingFont.value = saved.font
+    }
+    if (typeof saved.fontSize === 'number') {
+      readingFontSize.value = Math.min(30, Math.max(15, saved.fontSize))
+    }
+    if (typeof saved.lineHeight === 'number') {
+      readingLineHeight.value = Math.min(2.4, Math.max(1.4, saved.lineHeight))
+    }
+    if (saved.width === 620 || saved.width === 760 || saved.width === 920) {
+      readingWidth.value = saved.width
+    }
+  } catch {
+    /* ignore malformed local preferences */
+  }
+}
+
+watch(
+  [readingFont, readingFontSize, readingLineHeight, readingWidth],
+  () => {
+    localStorage.setItem(
+      'reading-preferences',
+      JSON.stringify({
+        font: readingFont.value,
+        fontSize: readingFontSize.value,
+        lineHeight: readingLineHeight.value,
+        width: readingWidth.value,
+      }),
+    )
+  },
+)
+
+function setReadingMode(enabled: boolean) {
+  readingMode.value = enabled
+  readingSettingsOpen.value = false
+  const query = { ...route.query }
+  if (enabled) query.mode = 'read'
+  else delete query.mode
+  void router.replace({ query })
+}
+
+function enterReadingMode() {
+  setReadingMode(true)
+}
+
+function exitReadingMode() {
+  setReadingMode(false)
+}
 
 function onTemplateSelect(cmd: TemplateType) {
   if (cmd === 'card' && !isEnglishMode.value) {
@@ -321,6 +546,39 @@ watch(
 
 function togglePreviewFullscreen() {
   previewFullscreen.value = !previewFullscreen.value
+}
+
+function enterPreviewReadingMode() {
+  previewReadingPreviousScope.value = previewScope.value
+  previewScope.value = 'current'
+  previewChapterProgress.value = 0
+  previewReadingMode.value = true
+}
+
+function exitPreviewReadingMode() {
+  previewReadingMode.value = false
+  previewScope.value = previewReadingPreviousScope.value
+}
+
+function onPreviewReadingProgress(percent: number) {
+  previewChapterProgress.value = Math.min(1, Math.max(0, percent))
+  scheduleSaveReadingPos(previewOverallProgress.value, editorStore.activeChapterIndex)
+}
+
+async function goToPreviewChapter(delta: -1 | 1) {
+  const nextIndex = editorStore.activeChapterIndex + delta
+  if (nextIndex < 0 || nextIndex >= editorStore.chapterList.length) return
+  editorStore.activeChapterIndex = nextIndex
+  previewChapterProgress.value = 0
+  await nextTick()
+}
+
+function goToPreviousPreviewChapter() {
+  void goToPreviewChapter(-1)
+}
+
+function goToNextPreviewChapter() {
+  void goToPreviewChapter(1)
 }
 
 function onStepsDropdownClick(_cmd: any) {
@@ -642,8 +900,16 @@ function retry() {
 }
 
 onMounted(async () => {
+  loadReadingPreferences()
   loadNovel()
 })
+
+watch(
+  () => route.query.mode,
+  (mode) => {
+    readingMode.value = mode === 'read'
+  },
+)
 
 watch(highlightBookId, async (bookId) => {
   const requestId = ++highlightRequestId
@@ -703,6 +969,33 @@ async function handleManualSave() {
 }
 
 function onKeyDown(e: KeyboardEvent) {
+  if (readingMode.value && loadState.value === 'loaded') {
+    if (e.altKey && e.key === 'ArrowLeft') {
+      e.preventDefault()
+      void goToPreviousChapter()
+      return
+    }
+    if (e.altKey && e.key === 'ArrowRight') {
+      e.preventDefault()
+      void goToNextChapter()
+      return
+    }
+    if (e.key === ' ' || e.key === 'PageDown') {
+      e.preventDefault()
+      scrollReadingBy(1)
+      return
+    }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+      e.preventDefault()
+      scrollReadingBy(1)
+      return
+    }
+    if (e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === 'PageUp') {
+      e.preventDefault()
+      scrollReadingBy(-1)
+      return
+    }
+  }
   const mod = e.ctrlKey || e.metaKey
   if (!mod) return
   const key = e.key.toLowerCase()
@@ -777,17 +1070,66 @@ async function scrollToChapter(index: number) {
   )
   editorRef.value?.scrollToText(ch.title)
   previewRef.value?.scrollToText(ch.title)
+  updateReadingState()
+  scheduleSaveReadingPos()
+}
+
+async function goToPreviousChapter() {
+  if (hasPreviousChapter.value) {
+    await scrollToChapter(editorStore.activeChapterIndex - 1)
+  }
+}
+
+async function goToNextChapter() {
+  if (hasNextChapter.value) {
+    await scrollToChapter(editorStore.activeChapterIndex + 1)
+  }
+}
+
+function updateActiveChapterFromProgress(percent: number) {
+  const chapters = editorStore.chapterList
+  if (chapters.length <= 1) {
+    editorStore.activeChapterIndex = 0
+    return
+  }
+  const total = chapters.reduce(
+    (sum, chapter) => sum + Math.max(1, chapter.content?.length || 0),
+    0,
+  )
+  const target = Math.min(total - 1, Math.max(0, percent * total))
+  let cursor = 0
+  let nextIndex = chapters.length - 1
+  for (let i = 0; i < chapters.length; i += 1) {
+    cursor += Math.max(1, chapters[i].content?.length || 0)
+    if (target < cursor) {
+      nextIndex = i
+      break
+    }
+  }
+  editorStore.activeChapterIndex = nextIndex
+}
+
+function updateReadingState() {
+  const percent = editorRef.value?.getScrollPercent() ?? 0
+  readingProgress.value = Math.min(1, Math.max(0, percent))
+  updateActiveChapterFromProgress(readingProgress.value)
+}
+
+function scrollReadingBy(direction: 1 | -1) {
+  const el = editorRef.value?.getScrollEl()
+  if (!el) return
+  el.scrollBy({ top: direction * Math.max(160, el.clientHeight * 0.82), behavior: 'smooth' })
 }
 
 // ===== 阅读进度记忆（存 app_settings: reading_pos_{novelId}） =====
 let posSaveTimer: number | null = null
 let scrollElCleanup: (() => void) | null = null
 
-async function saveReadingPos() {
+async function saveReadingPos(percentOverride?: number, chapterIndexOverride?: number) {
   const id = currentNovelId.value
   if (!id || loadState.value !== 'loaded') return
-  const percent = editorRef.value?.getScrollPercent() ?? 0
-  const chapterIndex = editorStore.activeChapterIndex
+  const percent = percentOverride ?? editorRef.value?.getScrollPercent() ?? 0
+  const chapterIndex = chapterIndexOverride ?? editorStore.activeChapterIndex
   try {
     await invoke('set_setting', {
       key: `reading_pos_${id}`,
@@ -798,9 +1140,12 @@ async function saveReadingPos() {
   }
 }
 
-function scheduleSaveReadingPos() {
+function scheduleSaveReadingPos(percentOverride?: number, chapterIndexOverride?: number) {
   if (posSaveTimer != null) window.clearTimeout(posSaveTimer)
-  posSaveTimer = window.setTimeout(() => void saveReadingPos(), 800)
+  posSaveTimer = window.setTimeout(
+    () => void saveReadingPos(percentOverride, chapterIndexOverride),
+    800,
+  )
 }
 
 async function restoreReadingPos() {
@@ -821,6 +1166,7 @@ async function restoreReadingPos() {
     if (typeof pos.percent === 'number') {
       editorRef.value?.setScrollPercent(pos.percent)
     }
+    updateReadingState()
   } catch {
     /* ignore */
   }
@@ -830,13 +1176,19 @@ function attachScrollListener() {
   scrollElCleanup?.()
   const el = editorRef.value?.getScrollEl()
   if (!el) return
-  el.addEventListener('scroll', scheduleSaveReadingPos, { passive: true })
-  scrollElCleanup = () => el.removeEventListener('scroll', scheduleSaveReadingPos)
+  const onScroll = () => {
+    updateReadingState()
+    scheduleSaveReadingPos()
+  }
+  el.addEventListener('scroll', onScroll, { passive: true })
+  updateReadingState()
+  scrollElCleanup = () => el.removeEventListener('scroll', onScroll)
 }
 </script>
 
 <style scoped>
 .editor-page {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -897,6 +1249,132 @@ function attachScrollListener() {
 .editor-pane.center-pane {
   flex: 1;
   min-width: 200px;
+}
+
+.editor-page.reading-mode {
+  background: var(--bg-primary, #fff);
+}
+.reading-mode .editor-topbar {
+  min-height: 48px;
+  padding: 8px clamp(14px, 4vw, 48px);
+  background: var(--bg-primary, #fff);
+  border-bottom-color: color-mix(in srgb, var(--border-color, #ebeef5) 70%, transparent);
+}
+.reading-mode .novel-title {
+  max-width: min(30vw, 360px);
+}
+.reading-topbar-meta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-left: auto;
+  color: var(--text-secondary, #909399);
+  font-size: 12px;
+}
+.reading-chapter-label {
+  max-width: min(28vw, 260px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-regular, #303133);
+  font-weight: 600;
+}
+.reading-hotkey-hint {
+  color: var(--text-placeholder, #c0c4cc);
+}
+.reading-body {
+  background: var(--bg-primary, #fff);
+}
+.reading-body .center-pane {
+  width: 100%;
+  min-width: 0;
+}
+.reading-mode :deep(.novel-editor-wrapper) {
+  background: var(--bg-primary, #fff);
+}
+.reading-mode :deep(.tiptap-editor) {
+  padding: clamp(28px, 5vw, 72px) 18px 110px;
+}
+.reading-mode :deep(.tiptap-editor .ProseMirror) {
+  max-width: var(--reading-width, 760px);
+  margin: 0 auto;
+  color: var(--text-primary, #1f2937);
+  font-family: var(--reading-font-family);
+  font-size: var(--reading-font-size);
+  line-height: var(--reading-line-height);
+  letter-spacing: 0.01em;
+}
+.reading-mode :deep(.tiptap-editor .ProseMirror p) {
+  margin-bottom: 1.1em;
+  text-indent: 2em;
+}
+.reading-mode :deep(.tiptap-editor .ProseMirror h1),
+.reading-mode :deep(.tiptap-editor .ProseMirror h2),
+.reading-mode :deep(.tiptap-editor .ProseMirror h3) {
+  text-indent: 0;
+  margin-top: 2em;
+  margin-bottom: 1em;
+}
+.reading-mode :deep(.tiptap-editor .ProseMirror h1) {
+  font-size: calc(var(--reading-font-size) * 1.65);
+}
+.reading-mode :deep(.tiptap-editor .ProseMirror h2) {
+  font-size: calc(var(--reading-font-size) * 1.4);
+}
+.reading-mode :deep(.tiptap-editor .ProseMirror h3) {
+  font-size: calc(var(--reading-font-size) * 1.2);
+}
+.reading-settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.reading-settings-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary, #303133);
+}
+.reading-setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-secondary, #606266);
+  font-size: 12px;
+}
+.reading-bottom-bar {
+  position: absolute;
+  right: 0;
+  bottom: 16px;
+  left: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(8px, 2vw, 24px);
+  pointer-events: none;
+}
+.reading-bottom-bar > * {
+  pointer-events: auto;
+}
+.reading-progress-wrap {
+  width: min(36vw, 420px);
+  padding: 8px 14px;
+  border: 1px solid var(--border-color, #ebeef5);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-primary, #fff) 92%, transparent);
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(8px);
+}
+.reading-progress-wrap span {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--text-secondary, #909399);
+  font-size: 11px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Draggable divider between panels */
@@ -1024,6 +1502,36 @@ function attachScrollListener() {
     width: 100%;
     margin-left: 0;
     order: 3;
+  }
+  .reading-mode .editor-topbar {
+    gap: 6px;
+    padding: 7px 10px;
+  }
+  .reading-mode .novel-title {
+    max-width: 40vw;
+  }
+  .reading-topbar-meta {
+    gap: 6px;
+    font-size: 11px;
+  }
+  .reading-chapter-label {
+    max-width: 24vw;
+  }
+  .reading-hotkey-hint {
+    display: none;
+  }
+  .reading-bottom-bar {
+    bottom: 8px;
+    gap: 2px;
+  }
+  .reading-bottom-bar :deep(.el-button) {
+    padding: 8px 5px;
+  }
+  .reading-bottom-bar :deep(.el-button > span) {
+    display: none;
+  }
+  .reading-progress-wrap {
+    width: min(48vw, 260px);
   }
   .pdf-export-dialog {
     width: calc(100vw - 28px);

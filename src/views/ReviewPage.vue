@@ -91,12 +91,13 @@
           </el-button>
         </template>
       </div>
+      <div class="keyboard-hint">{{ t('review.keyboardHint') }}</div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Loading } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
@@ -126,6 +127,7 @@ const revealed = ref(false)
 const reviewed = ref(0)
 const stats = ref({ again: 0, good: 0, easy: 0 })
 const progress = ref<ReviewProgress | null>(null)
+const answering = ref(false)
 
 const goalPercent = computed(() => {
   if (!progress.value) return 0
@@ -144,6 +146,7 @@ async function refreshProgress() {
 }
 
 onMounted(async () => {
+  window.addEventListener('keydown', onKeyDown)
   if (bookStore.books.length === 0) {
     await bookStore.fetchAll()
   }
@@ -160,9 +163,14 @@ onMounted(async () => {
   }
 })
 
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeyDown)
+})
+
 async function answer(rating: 'again' | 'good' | 'easy') {
   const card = current.value
-  if (!card) return
+  if (!card || answering.value) return
+  answering.value = true
   try {
     await invoke('review_vocab_word', { id: card.id, rating })
     stats.value[rating] += 1
@@ -172,7 +180,25 @@ async function answer(rating: 'again' | 'good' | 'easy') {
     await refreshProgress()
   } catch (e: any) {
     ElMessage.error(String(e?.message || e || '提交失败'))
+  } finally {
+    answering.value = false
   }
+}
+
+function onKeyDown(e: KeyboardEvent) {
+  const target = e.target as HTMLElement | null
+  if (target?.closest('input, textarea, select, [contenteditable="true"]')) return
+  if (e.code === 'Space') {
+    e.preventDefault()
+    if (!current.value) return
+    if (!revealed.value) revealed.value = true
+    else void answer('good')
+    return
+  }
+  if (!revealed.value) return
+  if (e.key === '1') void answer('again')
+  else if (e.key === '2') void answer('good')
+  else if (e.key === '3') void answer('easy')
 }
 
 function goBack() {
@@ -309,6 +335,12 @@ function goBack() {
   font-size: 11px;
   font-weight: normal;
   opacity: 0.85;
+}
+.keyboard-hint {
+  margin-top: 14px;
+  color: var(--text-placeholder, #c0c4cc);
+  font-size: 12px;
+  text-align: center;
 }
 
 @media (max-width: 640px) {

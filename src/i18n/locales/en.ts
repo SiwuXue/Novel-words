@@ -39,6 +39,8 @@ export default {
   'home.statWords': 'Words',
   'home.statDue': 'Due today',
   'home.recent': 'Recently read',
+  'home.continueReading': 'Continue reading',
+  'home.readingProgress': '{n}% read',
   'home.unknownAuthor': 'Unknown author',
   'home.unnamed': 'Unnamed',
   'home.quickActions': 'Quick actions',
@@ -182,6 +184,7 @@ export default {
   'review.goodSub': 'remembered',
   'review.easy': 'Easy',
   'review.easySub': 'too simple',
+  'review.keyboardHint': 'Space reveals / marks Good · then press 1 / 2 / 3 to rate',
 
   // ---- Editor ----
   'editor.back': 'Back to list',
@@ -198,6 +201,30 @@ export default {
   'editor.langLabel': 'English mode',
   'editor.langZh': 'Chinese novel (match by definition)',
   'editor.langEn': 'English novel (match by word)',
+
+  // ---- Reading mode ----
+  'reading.enter': 'Reading mode',
+  'reading.exit': 'Exit reading',
+  'reading.preview': 'Reading preview',
+  'reading.settings': 'Reading settings',
+  'reading.font': 'Font',
+  'reading.fontSystem': 'System sans',
+  'reading.fontSerif': 'Serif',
+  'reading.fontMono': 'Monospace',
+  'reading.fontSize': 'Font size',
+  'reading.lineHeight': 'Line height',
+  'reading.width': 'Paragraph width',
+  'reading.widthNarrow': 'Narrow',
+  'reading.widthMedium': 'Medium',
+  'reading.widthWide': 'Wide',
+  'reading.chapterProgress': 'Chapter {n}%',
+  'reading.fullText': 'Full text',
+  'reading.remaining': '{n} min left',
+  'reading.completed': 'Complete',
+  'reading.navigation': 'Chapter navigation',
+  'reading.previousChapter': 'Previous',
+  'reading.nextChapter': 'Next',
+  'reading.shortcutHint': 'Space pages · Alt + ←/→ changes chapters',
 
   // ---- Import dialog ----
   'import.title': 'Import novel file',

@@ -39,6 +39,8 @@ export default {
   'home.statWords': '生词',
   'home.statDue': '今日待复习',
   'home.recent': '最近阅读',
+  'home.continueReading': '继续阅读',
+  'home.readingProgress': '已读 {n}%',
   'home.unknownAuthor': '未知作者',
   'home.unnamed': '未命名',
   'home.quickActions': '快捷操作',
@@ -182,6 +184,7 @@ export default {
   'review.goodSub': '记住了',
   'review.easy': '掌握',
   'review.easySub': '很简单',
+  'review.keyboardHint': 'Space 显示答案 / 记为熟悉 · 显示答案后按 1 / 2 / 3 选择结果',
 
   // ---- Editor ----
   'editor.back': '返回列表',
@@ -198,6 +201,30 @@ export default {
   'editor.langLabel': '英文模式',
   'editor.langZh': '中文小说（按释义匹配）',
   'editor.langEn': '英文小说（按单词匹配）',
+
+  // ---- Reading mode ----
+  'reading.enter': '阅读模式',
+  'reading.exit': '退出阅读',
+  'reading.preview': '阅读预览',
+  'reading.settings': '阅读设置',
+  'reading.font': '字体',
+  'reading.fontSystem': '系统无衬线',
+  'reading.fontSerif': '衬线字体',
+  'reading.fontMono': '等宽字体',
+  'reading.fontSize': '字号',
+  'reading.lineHeight': '行距',
+  'reading.width': '段落宽度',
+  'reading.widthNarrow': '窄',
+  'reading.widthMedium': '中',
+  'reading.widthWide': '宽',
+  'reading.chapterProgress': '本章 {n}%',
+  'reading.fullText': '全文',
+  'reading.remaining': '约剩 {n} 分钟',
+  'reading.completed': '阅读完成',
+  'reading.navigation': '章节导航',
+  'reading.previousChapter': '上一章',
+  'reading.nextChapter': '下一章',
+  'reading.shortcutHint': 'Space 翻页 · Alt + ←/→ 切换章节',
 
   // ---- Import dialog ----
   'import.title': '导入小说文件',
