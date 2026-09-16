@@ -1,7 +1,7 @@
 use crate::db::DbState;
 use rusqlite::{Connection, DatabaseName};
 use std::path::Path;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_fs::FsExt;
 
 /// Back up the entire SQLite database into a single self-contained file.
@@ -39,10 +39,12 @@ pub fn backup_database(
     options.read(false).write(true).create(true).truncate(true);
     let mut dest = app
         .fs()
-        .open(dest_path.parse::<tauri_plugin_fs::FilePath>().unwrap(), options)
+        .open(
+            dest_path.parse::<tauri_plugin_fs::FilePath>().unwrap(),
+            options,
+        )
         .map_err(|e| format!("无法创建备份文件: {}", e))?;
-    std::io::Write::write_all(&mut dest, &bytes)
-        .map_err(|e| format!("写入备份文件失败: {}", e))?;
+    std::io::Write::write_all(&mut dest, &bytes).map_err(|e| format!("写入备份文件失败: {}", e))?;
     Ok(dest_path)
 }
 
@@ -55,43 +57,83 @@ pub fn restore_database(
     state: State<DbState>,
     src_path: String,
 ) -> Result<(), String> {
-    let tmp_path = std::env::temp_dir().join(format!(
-        "nw_restore_{}_{}.db",
-        std::process::id(),
-        chrono::Utc::now().timestamp_millis()
-    ));
     let bytes = app
         .fs()
-        .read(src_path.parse::<tauri_plugin_fs::FilePath>().unwrap())
+        .read(
+            src_path
+                .parse::<tauri_plugin_fs::FilePath>()
+                .map_err(|e| e.to_string())?,
+        )
         .map_err(|e| format!("无法读取备份文件: {}", e))?;
-    std::fs::write(&tmp_path, bytes).map_err(|e| format!("无法准备恢复文件: {}", e))?;
+    let mut guard = state.db.lock().map_err(|e| e.to_string())?;
+    let catalog = app.state::<crate::preset_catalog::PresetCatalog>();
+    restore_bytes(&mut guard, &bytes, Some(&catalog))
+}
 
-    // Validate the source before touching the live database.
-    {
-        let src = Connection::open(&tmp_path).map_err(|e| format!("无法打开备份文件: {}", e))?;
-        let is_novel_words: bool = src
-            .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='novel'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .map(|c| c > 0)
-            .unwrap_or(false);
-        if !is_novel_words {
-            let _ = std::fs::remove_file(&tmp_path);
-            return Err("所选文件不是有效的词阅数据库备份（缺少 novel 表）".into());
+struct RestoreFile(std::path::PathBuf);
+impl Drop for RestoreFile {
+    fn drop(&mut self) {
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{}", self.0.display(), suffix));
         }
     }
-
-    let mut guard = state.db.lock().map_err(|e| e.to_string())?;
-    guard
-        .restore(
-            DatabaseName::Main,
-            &tmp_path,
-            None::<fn(rusqlite::backup::Progress)>,
-        )
-        .map_err(|e| format!("恢复数据库失败: {}", e))?;
-    let _ = std::fs::remove_file(&tmp_path);
+}
+pub(crate) fn restore_bytes(
+    live: &mut Connection,
+    bytes: &[u8],
+    catalog: Option<&crate::preset_catalog::PresetCatalog>,
+) -> Result<(), String> {
+    let path = std::env::temp_dir().join(format!(
+        "nw_restore_{}_{}.db",
+        std::process::id(),
+        chrono::Utc::now().timestamp_nanos_opt().unwrap()
+    ));
+    let file = RestoreFile(path);
+    std::fs::write(&file.0, bytes).map_err(|e| e.to_string())?;
+    {
+        let mut source = Connection::open(&file.0).map_err(|e| format!("无法打开备份: {}", e))?;
+        for table in ["novel", "vocab_book", "vocab_word"] {
+            let exists: bool = source
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+                    [table],
+                    |r| r.get(0),
+                )
+                .map_err(|e| format!("无效备份: {}", e))?;
+            if !exists {
+                return Err(format!("所选文件不是词阅数据库备份（缺少 {} 表）", table));
+            }
+        }
+        let integrity: String = source
+            .query_row("PRAGMA integrity_check", [], |r| r.get(0))
+            .map_err(|e| e.to_string())?;
+        if integrity != "ok" {
+            return Err(format!("备份完整性检查失败: {}", integrity));
+        }
+        crate::db::migrate_connection(&mut source)?;
+        if let Some(catalog) = catalog {
+            catalog.register(&source)?;
+        }
+        let violations: i64 = source
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
+                r.get(0)
+            })
+            .map_err(|e| e.to_string())?;
+        if violations != 0 {
+            return Err("备份存在无效的关联数据，未恢复".into());
+        }
+        source
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+            .map_err(|e| e.to_string())?;
+    }
+    live.restore(
+        DatabaseName::Main,
+        &file.0,
+        None::<fn(rusqlite::backup::Progress)>,
+    )
+    .map_err(|e| format!("恢复失败: {}", e))?;
+    live.execute_batch("PRAGMA foreign_keys=ON;")
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -137,9 +179,7 @@ pub fn auto_backup(app_data_dir: &Path, state: &State<DbState>) {
             [],
             |row| row.get(0),
         );
-        val.ok()
-            .and_then(|s| s.trim().parse().ok())
-            .unwrap_or(0)
+        val.ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0)
     };
     if last > 0 && now.saturating_sub(last) < interval_secs {
         return;
@@ -161,8 +201,11 @@ pub fn auto_backup(app_data_dir: &Path, state: &State<DbState>) {
                 return;
             }
         };
-        if let Err(e) = db.backup(DatabaseName::Main, &dest, None::<fn(rusqlite::backup::Progress)>)
-        {
+        if let Err(e) = db.backup(
+            DatabaseName::Main,
+            &dest,
+            None::<fn(rusqlite::backup::Progress)>,
+        ) {
             eprintln!("[auto-backup] 备份失败: {}", e);
             return;
         }
@@ -200,4 +243,46 @@ pub fn auto_backup(app_data_dir: &Path, state: &State<DbState>) {
         );
     }
     println!("[auto-backup] 已生成自动备份: {}", dest.display());
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn restore_migrates_legacy_copy_and_invalid_restore_preserves_live_state() {
+        let dir = std::env::temp_dir().join(format!(
+            "nw-restore-test-{}",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("legacy.db");
+        let conn = rusqlite::Connection::open(&source).unwrap();
+        conn.execute_batch(crate::db::CREATE_TABLES_SQL).unwrap();
+        conn.execute_batch("INSERT INTO vocab_book(name) VALUES ('旧词汇本');INSERT INTO vocab_word(vocab_book_id,word,proficiency) VALUES (1,'garden','familiar');").unwrap();
+        drop(conn);
+        let bytes = std::fs::read(&source).unwrap();
+        let state = crate::db::init_db(&dir.join("live")).unwrap();
+        let mut live = state.db.lock().unwrap();
+        super::restore_bytes(&mut live, &bytes, None).unwrap();
+        assert_eq!(
+            live.query_row("SELECT proficiency FROM user_vocab", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            "familiar"
+        );
+        assert_eq!(
+            std::fs::read(&source).unwrap(),
+            bytes,
+            "The selected backup must remain unchanged"
+        );
+        assert!(super::restore_bytes(&mut live, b"not a database", None).is_err());
+        assert_eq!(
+            live.query_row("SELECT COUNT(*) FROM user_vocab", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        drop(live);
+        drop(state);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

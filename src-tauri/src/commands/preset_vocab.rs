@@ -16,7 +16,6 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::commands::ai_enhancer::{
     enhance_vocab_items, load_ai_config, AiWordDecision, AiWordInput,
 };
-use crate::commands::vocab_word::row_to_vocab_word;
 use crate::db::DbState;
 use crate::dictionary::DictDbState;
 use crate::models::VocabWord;
@@ -30,6 +29,8 @@ pub struct PresetVocabBook {
     pub description: String,
     pub preset_key: String,
     pub word_count: i64,
+    pub category: String,
+    pub sources: Vec<String>,
 }
 
 /// One tailored word in the preview/commit result.
@@ -71,42 +72,34 @@ pub struct PresetCloneProgress {
 
 /// List all bundled preset vocab books (read-only references).
 #[tauri::command]
-pub fn list_preset_vocab_books(state: State<DbState>) -> Result<Vec<PresetVocabBook>, String> {
+pub fn list_preset_vocab_books(
+    state: State<DbState>,
+    catalog: State<crate::preset_catalog::PresetCatalog>,
+) -> Result<Vec<PresetVocabBook>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    let mut stmt = db
-        .prepare(
-            "SELECT b.id, b.name, b.description, b.preset_key, COUNT(w.id)
-             FROM vocab_book b LEFT JOIN vocab_word w ON w.vocab_book_id = b.id
-             WHERE b.is_preset = 1
-             GROUP BY b.id, b.name, b.description, b.preset_key
-             ORDER BY CASE b.preset_key
-               WHEN 'cet4' THEN 1
-               WHEN 'CET6luan_1' THEN 2
-               WHEN 'KaoYanluan_1' THEN 3
-               WHEN 'Level4luan_1' THEN 4
-               WHEN 'Level8_1' THEN 5
-               WHEN 'CET4luan_2' THEN 6
-               WHEN 'CET6_2' THEN 7
-               WHEN 'KaoYan_2' THEN 8
-               WHEN 'Level4luan_2' THEN 9
-               WHEN 'Level8luan_2' THEN 10
-               WHEN 'ChuZhongluan_2' THEN 11
-               WHEN 'GaoZhongluan_2' THEN 12
-               ELSE 999 END, b.id",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |row| {
+    let manifest = catalog.register(&db)?;
+    manifest
+        .books
+        .into_iter()
+        .map(|book| {
+            let id = db
+                .query_row(
+                    "SELECT id FROM vocab_book WHERE is_preset=1 AND preset_key=?1",
+                    [&book.key],
+                    |r| r.get(0),
+                )
+                .map_err(|e| e.to_string())?;
             Ok(PresetVocabBook {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                description: row.get(2)?,
-                preset_key: row.get(3)?,
-                word_count: row.get(4)?,
+                id,
+                name: book.name,
+                description: book.description,
+                preset_key: book.key,
+                word_count: book.word_count as i64,
+                category: book.category,
+                sources: book.sources,
             })
         })
-        .map_err(|e| e.to_string())?;
-    Ok(rows.filter_map(|r| r.ok()).collect())
+        .collect()
 }
 
 fn extract_cjk_terms(text: &str) -> Vec<String> {
@@ -347,11 +340,8 @@ fn apply_ai_decisions(items: &mut Vec<PresetCloneItem>, decisions: Vec<AiWordDec
                 .iter()
                 .any(|term| definition.contains(term))
         {
-            item.definition = definition_with_part_of_speech(
-                &item.definition,
-                definition,
-                &item.matched_terms,
-            );
+            item.definition =
+                definition_with_part_of_speech(&item.definition, definition, &item.matched_terms);
         }
         let example = decision.example_sentence.trim();
         if !example.is_empty()
@@ -367,9 +357,7 @@ fn apply_ai_decisions(items: &mut Vec<PresetCloneItem>, decisions: Vec<AiWordDec
 /// Repair AI-enhanced clones created by older versions that replaced the
 /// source definition with a bare Chinese meaning. Preset books are available
 /// by this point, so the correct contextual POS can be recovered by word.
-pub fn repair_cloned_parts_of_speech(
-    conn: &mut rusqlite::Connection,
-) -> Result<usize, String> {
+pub fn repair_cloned_parts_of_speech(conn: &mut rusqlite::Connection) -> Result<usize, String> {
     let rows: Vec<(i64, String, String, String)> = {
         let mut stmt = conn
             .prepare(
@@ -438,6 +426,54 @@ mod tests {
     use std::sync::Mutex;
 
     #[test]
+    fn whole_preset_import_inherits_personal_state_and_preserves_word_sources() {
+        let dir = std::env::temp_dir().join(format!(
+            "nw-preset-import-{}",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap()
+        ));
+        let state = crate::db::init_db(&dir).unwrap();
+        let mut db = state.db.lock().unwrap();
+        let catalog = crate::preset_catalog::PresetCatalog {
+            path: std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/presets.zip"),
+        };
+        let id = catalog.ensure_loaded(&mut db, "cet6-all", None).unwrap();
+        let sample = crate::user_vocab::load_words(&db, id).unwrap().remove(0);
+        db.execute("INSERT INTO vocab_book(name) VALUES ('已有')", [])
+            .unwrap();
+        let existing = db.last_insert_rowid();
+        crate::user_vocab::insert_word(
+            &db,
+            existing,
+            &crate::user_vocab::NewWord::simple(&sample.word, "mastered"),
+        )
+        .unwrap();
+        let result = super::import_loaded_preset(&mut db, id, Some("六级个人词汇"), None).unwrap();
+        assert_eq!(result.counts.imported, 3992);
+        assert_eq!(result.counts.inherited, 1);
+        assert_eq!(result.counts.new_words, 3991);
+        let imported = crate::user_vocab::load_words(&db, result.book_id).unwrap();
+        assert_eq!(
+            imported
+                .iter()
+                .find(|w| w.word == sample.word)
+                .unwrap()
+                .proficiency,
+            "mastered"
+        );
+        let source: String = db
+            .query_row(
+                "SELECT source_keys FROM vocab_word WHERE vocab_book_id=?1 LIMIT 1",
+                [result.book_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_ne!(source, "[]");
+        drop(db);
+        drop(state);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn preset_payload_uses_frontend_camel_case_fields() {
         let book = PresetVocabBook {
             id: 1,
@@ -445,6 +481,8 @@ mod tests {
             description: String::new(),
             preset_key: "cet4".into(),
             word_count: 1162,
+            category: "university".into(),
+            sources: vec!["CET4luan_1".into()],
         };
         let item = PresetCloneItem {
             word: "novel".into(),
@@ -501,11 +539,7 @@ mod tests {
     fn ai_definition_keeps_contextual_part_of_speech() {
         let terms = vec!["没有".to_string()];
         assert_eq!(
-            definition_with_part_of_speech(
-                "adv. 不；并不\nadj. 没有",
-                "没有",
-                &terms,
-            ),
+            definition_with_part_of_speech("adv. 不；并不\nadj. 没有", "没有", &terms,),
             "adj. 没有"
         );
         assert_eq!(
@@ -526,6 +560,7 @@ mod tests {
             db: Mutex::new(dict),
         };
         let words = vec![VocabWord {
+            user_vocab_id: None,
             id: 1,
             vocab_book_id: 1,
             word: "novel".into(),
@@ -583,14 +618,34 @@ pub async fn preview_preset_clone(
     let mut preview = tokio::task::spawn_blocking(move || -> Result<PresetClonePreview, String> {
         let state = local_app.state::<DbState>();
         let dict_state = local_app.state::<DictDbState>();
+        let loaded_id = {
+            let mut db = state.db.lock().map_err(|e| e.to_string())?;
+            let catalog = local_app.state::<crate::preset_catalog::PresetCatalog>();
+            catalog.ensure_loaded(
+                &mut db,
+                &local_preset_key,
+                Some(&|current, total| {
+                    let _ = local_app.emit(
+                        "preset-clone-progress",
+                        PresetCloneProgress {
+                            request_id: local_request_id.clone(),
+                            processed: current as usize,
+                            total: total as usize,
+                            percent: if total == 0 { 20 } else { current * 20 / total },
+                            stage: "local".into(),
+                        },
+                    );
+                }),
+            )?
+        };
         let (_preset_id, preset_words, novel_text) =
-            load_preset_and_novel(&state, &local_preset_key, novel_id)?;
+            load_preset_and_novel(&state, loaded_id, novel_id)?;
         let total = preset_words.len() as i64;
         let progress = |processed: usize, total: usize| {
             let percent = if total == 0 {
                 local_progress_max
             } else {
-                ((processed * local_progress_max as usize) / total) as u32
+                20 + ((processed * (local_progress_max - 20) as usize) / total) as u32
             };
             let _ = local_app.emit(
                 "preset-clone-progress",
@@ -662,6 +717,234 @@ pub async fn preview_preset_clone(
 }
 
 /// Write the tailored subset into a NEW personal vocab book and return its id.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetImportResult {
+    pub book_id: i64,
+    #[serde(flatten)]
+    pub counts: crate::commands::vocab_word::ImportResult,
+}
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetImportProgress {
+    pub request_id: String,
+    pub processed: u32,
+    pub total: u32,
+    pub percent: u32,
+    pub stage: String,
+}
+
+pub(crate) fn import_loaded_preset(
+    db: &mut rusqlite::Connection,
+    preset_id: i64,
+    name: Option<&str>,
+    progress: Option<&dyn Fn(u32, u32)>,
+) -> Result<PresetImportResult, String> {
+    let (preset_name, key): (String, String) = db
+        .query_row(
+            "SELECT name,preset_key FROM vocab_book WHERE id=?1 AND is_preset=1",
+            [preset_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    let words = crate::user_vocab::load_words(db, preset_id)?;
+    let tx = db.transaction().map_err(|e| e.to_string())?;
+    let name = name
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or(&preset_name);
+    tx.execute(
+        "INSERT INTO vocab_book(name,description,cloned_from_preset_key) VALUES (?1,?2,?3)",
+        params![name.trim(), format!("从「{}」整套导入", preset_name), key],
+    )
+    .map_err(|e| e.to_string())?;
+    let book_id = tx.last_insert_rowid();
+    let mut counts = crate::commands::vocab_word::ImportResult::default();
+    for (index, word) in words.iter().enumerate() {
+        let sources: String = tx
+            .query_row(
+                "SELECT source_keys FROM vocab_word WHERE id=?1",
+                [word.id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        let inserted = crate::user_vocab::insert_word(
+            &tx,
+            book_id,
+            &crate::user_vocab::NewWord {
+                word: &word.word,
+                definition: &word.definition,
+                phonetic: &word.phonetic,
+                example: &word.example_sentence,
+                memory: &word.memory_tag,
+                source_keys: &sources,
+                ..crate::user_vocab::NewWord::simple(&word.word, "unknown")
+            },
+        )?;
+        counts.record(&inserted);
+        if index % 100 == 0 || index + 1 == words.len() {
+            if let Some(progress) = progress {
+                progress(index as u32 + 1, words.len() as u32);
+            }
+        }
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(PresetImportResult { book_id, counts })
+}
+#[tauri::command]
+pub async fn import_preset_vocab_book(
+    app: AppHandle,
+    preset_key: String,
+    new_book_name: Option<String>,
+    request_id: Option<String>,
+) -> Result<PresetImportResult, String> {
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<DbState>();
+        let catalog = app.state::<crate::preset_catalog::PresetCatalog>();
+        let mut db = state.db.lock().map_err(|e| e.to_string())?;
+        let request_id = request_id.unwrap_or_default();
+        let report = |stage: &str, current: u32, total: u32| {
+            let part = if total == 0 {
+                100
+            } else {
+                current * 100 / total
+            };
+            let percent = if stage == "loading" {
+                part * 40 / 100
+            } else {
+                40 + part * 60 / 100
+            };
+            let _ = app.emit(
+                "preset-import-progress",
+                PresetImportProgress {
+                    request_id: request_id.clone(),
+                    processed: current,
+                    total,
+                    percent,
+                    stage: stage.into(),
+                },
+            );
+        };
+        let id = catalog.ensure_loaded(
+            &mut db,
+            &preset_key,
+            Some(&|current, total| report("loading", current, total)),
+        )?;
+        report("importing", 0, 1);
+        import_loaded_preset(
+            &mut db,
+            id,
+            new_book_name.as_deref(),
+            Some(&|current, total| report("importing", current, total)),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn commit_items(
+    db: &mut rusqlite::Connection,
+    preset_id: i64,
+    novel_id: i64,
+    name: Option<&str>,
+    items: &[PresetCloneItem],
+) -> Result<PresetImportResult, String> {
+    if items.is_empty() {
+        return Err("没有匹配的单词，无法导入".into());
+    }
+    let (preset_name, key): (String, String) = db
+        .query_row(
+            "SELECT name,preset_key FROM vocab_book WHERE id=?1 AND is_preset=1",
+            [preset_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    let (novel_title,novel_text):(String,String)=db.query_row("SELECT title,CASE WHEN cleaned_text<>'' THEN cleaned_text ELSE raw_text END FROM novel WHERE id=?1",[novel_id],|r|Ok((r.get(0)?,r.get(1)?))).map_err(|e|e.to_string())?;
+    let source_words: HashMap<_, _> = crate::user_vocab::load_words(db, preset_id)?
+        .into_iter()
+        .map(|w| (crate::user_vocab::word_key(&w.word), w))
+        .collect();
+    let tx = db.transaction().map_err(|e| e.to_string())?;
+    let default_name = format!("{} · {}精选", preset_name, novel_title);
+    let name = name
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or(&default_name);
+    tx.execute(
+        "INSERT INTO vocab_book(name,description,cloned_from_preset_key) VALUES (?1,?2,?3)",
+        params![
+            name.trim(),
+            format!("从「{}」按当前小说裁剪", preset_name),
+            key
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    let book_id = tx.last_insert_rowid();
+    let mut counts = crate::commands::vocab_word::ImportResult::default();
+    for item in items {
+        let source = source_words
+            .get(&crate::user_vocab::word_key(&item.word))
+            .ok_or_else(|| format!("{} 不属于当前预设词表", item.word))?;
+        let primary = source
+            .definition
+            .split('【')
+            .next()
+            .unwrap_or(&source.definition);
+        let terms: Vec<_> = extract_cjk_terms(
+            item.definition
+                .split('【')
+                .next()
+                .unwrap_or(&item.definition),
+        )
+        .into_iter()
+        .filter(|term| primary.contains(term) && novel_text.contains(term))
+        .collect();
+        if terms.is_empty() {
+            return Err(format!("{} 的匹配依据已失效，请重新计算", item.word));
+        }
+        let sources: String = tx
+            .query_row(
+                "SELECT source_keys FROM vocab_word WHERE id=?1",
+                [source.id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        let terms = serde_json::to_string(&terms).map_err(|e| e.to_string())?;
+        let inserted = crate::user_vocab::insert_word(
+            &tx,
+            book_id,
+            &crate::user_vocab::NewWord {
+                word: &source.word,
+                definition: &item.definition,
+                phonetic: &item.phonetic,
+                example: &item.example_sentence,
+                novel_id: Some(novel_id),
+                match_terms: &terms,
+                source_keys: &sources,
+                ..crate::user_vocab::NewWord::simple(&source.word, "unknown")
+            },
+        )?;
+        counts.record(&inserted);
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(PresetImportResult { book_id, counts })
+}
+#[tauri::command]
+pub async fn commit_preset_clone_with_state(
+    app: AppHandle,
+    preset_key: String,
+    novel_id: i64,
+    new_book_name: Option<String>,
+    items: Vec<PresetCloneItem>,
+) -> Result<PresetImportResult, String> {
+    tokio::task::spawn_blocking(move || {
+        let state = app.state::<DbState>();
+        let catalog = app.state::<crate::preset_catalog::PresetCatalog>();
+        let mut db = state.db.lock().map_err(|e| e.to_string())?;
+        let id = catalog.ensure_loaded(&mut db, &preset_key, None)?;
+        commit_items(&mut db, id, novel_id, new_book_name.as_deref(), &items)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
 #[tauri::command]
 pub async fn commit_preset_clone(
     app: AppHandle,
@@ -670,105 +953,19 @@ pub async fn commit_preset_clone(
     new_book_name: Option<String>,
     items: Vec<PresetCloneItem>,
 ) -> Result<i64, String> {
-    tokio::task::spawn_blocking(move || {
-        let state = app.state::<DbState>();
-        if items.is_empty() {
-            return Err("没有匹配的单词，无法导入".into());
-        }
-        let mut db = state.db.lock().map_err(|e| e.to_string())?;
-
-        let (preset_id, preset_name): (i64, String) = db
-            .query_row(
-                "SELECT id, name FROM vocab_book WHERE is_preset = 1 AND preset_key = ?1 LIMIT 1",
-                params![&preset_key],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .map_err(|_| format!("未找到预设词表: {}", preset_key))?;
-
-        // Build a sensible default name.
-        let novel_title: String = db
-            .query_row(
-                "SELECT title FROM novel WHERE id=?1",
-                params![novel_id],
-                |row| row.get(0),
-            )
-            .unwrap_or_else(|_| "未知小说".to_string());
-        let name = new_book_name
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(|| format!("{} · {}精选", preset_name, novel_title));
-
-        let tx = db.transaction().map_err(|e| format!("开启导入事务失败: {}", e))?;
-        tx.execute(
-            "INSERT INTO vocab_book (name, description, is_preset, preset_key, cloned_from_preset_key) \
-             VALUES (?1, ?2, 0, '', ?3)",
-            params![
-                &name,
-                format!("从「{}」按当前小说裁剪", preset_name),
-                &preset_key,
-            ],
-        )
-        .map_err(|e| format!("创建词表失败: {}", e))?;
-        let new_book_id = tx.last_insert_rowid();
-
-        {
-            let mut stmt = tx
-                .prepare(
-                    "INSERT INTO vocab_word \
-                     (vocab_book_id, word, definition, phonetic, example_sentence, novel_id, proficiency, memory_tag, match_terms) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'unknown', '', ?7)",
-                )
-                .map_err(|e| format!("准备插入失败: {}", e))?;
-            for it in &items {
-                stmt.execute(params![
-                    new_book_id,
-                    &it.word,
-                    &it.definition,
-                    &it.phonetic,
-                    &it.example_sentence,
-                    novel_id,
-                    serde_json::to_string(&it.matched_terms).unwrap_or_default(),
-                ])
-                .map_err(|e| format!("插入单词 {} 失败: {}", it.word, e))?;
-            }
-        }
-        tx.commit().map_err(|e| format!("提交导入事务失败: {}", e))?;
-        let _ = preset_id;
-
-        Ok(new_book_id)
-    })
-    .await
-    .map_err(|e| format!("后台导入任务失败: {}", e))?
+    Ok(
+        commit_preset_clone_with_state(app, preset_key, novel_id, new_book_name, items)
+            .await?
+            .book_id,
+    )
 }
-
-/// Load the preset vocab_book (by preset_key), its vocab_words, and the
-/// novel's cleaned_text. Returns (preset_book_id, words, novel_text).
 fn load_preset_and_novel(
     state: &State<'_, DbState>,
-    preset_key: &str,
+    preset_id: i64,
     novel_id: i64,
 ) -> Result<(i64, Vec<VocabWord>, String), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    let preset_id: i64 = db
-        .query_row(
-            "SELECT id FROM vocab_book WHERE is_preset = 1 AND preset_key = ?1 LIMIT 1",
-            params![preset_key],
-            |row| row.get(0),
-        )
-        .map_err(|_| format!("未找到预设词表: {}", preset_key))?;
-    let mut stmt = db
-        .prepare("SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, chapter_id, proficiency, memory_tag, created_at, match_terms FROM vocab_word WHERE vocab_book_id = ?1")
-        .map_err(|e| e.to_string())?;
-    let preset_words: Vec<VocabWord> = stmt
-        .query_map(params![preset_id], row_to_vocab_word)
-        .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
-    let novel_text: String = db
-        .query_row(
-            "SELECT cleaned_text FROM novel WHERE id = ?1",
-            params![novel_id],
-            |row| row.get(0),
-        )
-        .map_err(|_| format!("未找到小说: id={}", novel_id))?;
-    Ok((preset_id, preset_words, novel_text))
+    let words = crate::user_vocab::load_words(&db, preset_id)?;
+    let text=db.query_row("SELECT CASE WHEN cleaned_text<>'' THEN cleaned_text ELSE raw_text END FROM novel WHERE id=?1",[novel_id],|r|r.get(0)).map_err(|e|e.to_string())?;
+    Ok((preset_id, words, text))
 }

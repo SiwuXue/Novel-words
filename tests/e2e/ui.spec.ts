@@ -1,12 +1,15 @@
 import { test, expect } from '@playwright/test'
 
-async function bridge(page: import('@playwright/test').Page, options: { empty?:boolean; failed?:boolean; dark?:boolean; english?:boolean; multipleChapters?:boolean; largeChapter?:boolean; savedReading?:boolean; largeLists?:boolean } = {}) {
+async function bridge(page: import('@playwright/test').Page, options: { empty?:boolean; failed?:boolean; dark?:boolean; english?:boolean; multipleChapters?:boolean; largeChapter?:boolean; savedReading?:boolean; largeLists?:boolean; multipleBooks?:boolean } = {}) {
   await page.addInitScript((options) => {
     localStorage.setItem('theme', options.dark ? 'dark' : 'light')
     localStorage.setItem('app_locale', options.english ? 'en' : 'zh')
     const novels = options.empty ? [] : [{ id:1,title:'The Secret Garden',author:'Frances Hodgson Burnett',category:'小说',language:'en',isFavorite:false,rawText:'',cleanedText:'',createdAt:'2026-09-16',updatedAt:'2026-09-16' }]
     const books = options.empty ? [] : [{ id:1,name:'阅读生词',description:'Words from reading',isPreset:false,createdAt:'2026-09-16',updatedAt:'2026-09-16' }]
+    if(options.multipleBooks)books.push({...books[0],id:2,name:'阅读词汇二'})
     const words = options.largeLists ? Array.from({length:1000}, (_,i) => ({id:i+1,vocabBookId:1,word:`garden-${i}`,definition:'A place where plants are grown.',phonetic:'/ˈɡɑːdn/',exampleSentence:'Mary opened the garden door.',novelId:1,chapterId:1,proficiency:'unknown',memoryTag:'',createdAt:'2026-09-16',matchTerms:''})) : []
+    const personalWords=words.map((word,i)=>({...word,id:i+1,userVocabId:i+1,lastReviewedAt:0,active:i%2===0,sourceBooks:i%2===0 ? [{id:1,name:'阅读生词'}] : []}))
+    const presets=Array.from({length:40},(_,i)=>({id:i+1,name:`考试合集与教材第 ${i+1} 册`,description:'离线词汇来源与完整释义',presetKey:i===0?'cet6-all':`fixture-${i}`,wordCount:i===0?3992:300,category:i<13?'university':'textbook',sources:[`Source_${i+1}`]}))
     if (options.largeLists) {
       novels[0].title = 'The Secret Garden: A Very Long Novel Title With Additional Notes for Language Learners '.repeat(3)
       books[0].name = '阅读词汇本与长期学习计划 '.repeat(8)
@@ -35,7 +38,15 @@ async function bridge(page: import('@playwright/test').Page, options: { empty?:b
         if (cmd === 'get_chapter_content') return chapters.find(ch => ch.id === args.chapterId)
         if (cmd === 'get_all_vocab_books') return books
         if (cmd === 'get_vocab_words') return words
-        if (cmd === 'get_highlight_words' || cmd === 'get_all_due_words' || cmd === 'get_due_words' || cmd === 'list_preset_vocab_books') return []
+        if (cmd === 'get_user_vocab_page') {
+          if(state.failRequests) throw new Error('Database unavailable')
+          const selected=personalWords.filter(w=>(!args.query || w.word.includes(args.query)) && (!args.proficiencies || args.proficiencies.includes(w.proficiency)))
+          return {total:selected.length,words:selected.slice(args.offset,args.offset+args.limit)}
+        }
+        if (cmd === 'set_user_vocab_proficiency') {personalWords.filter(w=>args.ids.includes(w.id)).forEach(w=>w.proficiency=args.proficiency);return args.ids.length}
+        if (cmd === 'list_preset_vocab_books') return presets
+        if (cmd === 'import_preset_vocab_book') {if(state.failImport) throw new Error('Resource unavailable');return {bookId:1,imported:3992,newWords:3000,inherited:992,skipped:0}}
+        if (cmd === 'get_highlight_words' || cmd === 'get_all_due_words' || cmd === 'get_due_words') return []
         if (cmd === 'get_vocab_words_page') return {total:words.length,words:words.slice(args.offset || 0,(args.offset || 0)+(args.limit || 50))}
         if (cmd === 'get_due_words_count') return 0
         if (cmd === 'get_review_progress') return { reviewed_today:0,goal:20,due_total:0 }
@@ -132,6 +143,7 @@ for (const options of [{dark:false,english:false},{dark:true,english:true},{dark
       for (const [route, root] of [
         ['/', '.home-page'], ['/novels', '.novel-list-page'],
         ['/vocabulary', '.vocab-book-list-page'], ['/vocabulary/1', '.vocab-book-detail-page'],
+        ['/vocabulary?tab=all', '.all-vocabulary-panel'],
         ['/presets', '.preset-page'], ['/stats', '.stats-page'],
         ['/settings', '.settings-page'], ['/review', '.review-page'],
         ['/novels/1?mode=read', '.editor-page'],
@@ -143,7 +155,7 @@ for (const options of [{dark:false,english:false},{dark:true,english:true},{dark
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
         expect(await page.locator('main').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
         if (size.width === 960 && options.dark === options.english) {
-          const name = route === '/' ? 'home' : route.includes('mode=read') ? 'reader' : route === '/vocabulary/1' ? 'vocabulary-detail' : route.split('/')[1]
+          const name = route === '/' ? 'home' : route.includes('mode=read') ? 'reader' : route.includes('tab=all') ? 'all-vocabulary' : route === '/vocabulary/1' ? 'vocabulary-detail' : route.split('/')[1]
           await page.screenshot({path:`.ui-preview/${name}-${options.dark ? 'dark' : 'light'}.png`,animations:'disabled'})
         }
       }
@@ -151,6 +163,54 @@ for (const options of [{dark:false,english:false},{dark:true,english:true},{dark
     })
   }
 }
+
+test('personal registry supports pagination, shared batch marking, search and retry',async({page})=>{
+  await bridge(page,{largeLists:true});await page.goto('/vocabulary?tab=all')
+  await expect(page.locator('.el-table__body-wrapper tbody tr')).toHaveCount(50)
+  await expect(page.getByText('复习暂停',{exact:true}).first()).toBeVisible()
+  await page.getByRole('button',{name:'下一页',exact:true}).click()
+  await expect(page.locator('.el-table__body-wrapper tbody tr').first()).toContainText('garden-50')
+  await page.locator('.el-table__body-wrapper tbody tr').first().locator('.el-checkbox').click()
+  await expect(page.locator('.el-table__body-wrapper tbody tr').first().getByRole('checkbox')).toBeChecked()
+  await page.getByRole('button',{name:'标为已掌握',exact:true}).click()
+  await expect.poll(()=>page.evaluate(()=>(window as any).testCalls.some((c:any)=>c.cmd==='set_user_vocab_proficiency'&&c.args.proficiency==='mastered'&&c.args.ids[0]===51))).toBe(true)
+  await page.getByRole('textbox',{name:'搜索全部单词和释义'}).fill('garden-999')
+  await expect(page.locator('.el-table__body-wrapper tbody tr')).toHaveCount(1)
+  await page.evaluate(()=>{(window as any).failRequests=true})
+  await page.getByRole('textbox',{name:'搜索全部单词和释义'}).fill('garden-998')
+  await expect(page.getByText('Database unavailable',{exact:true})).toBeVisible()
+  await page.evaluate(()=>{(window as any).failRequests=false})
+  await page.getByRole('button',{name:'重试',exact:true}).click()
+  await expect(page.locator('.el-table__body-wrapper tbody tr')).toContainText('garden-998')
+})
+
+test('forty preset entries import with failure retry and inherited-state feedback',async({page})=>{
+  await bridge(page);await page.goto('/presets')
+  await expect(page.locator('.preset-card')).toHaveCount(40)
+  await page.evaluate(()=>{(window as any).failImport=true})
+  await page.getByRole('button',{name:'整套导入',exact:true}).first().click()
+  const dialog=page.getByRole('dialog',{name:'整套导入词表'})
+  await dialog.getByRole('button',{name:'整套导入',exact:true}).click()
+  await expect(dialog.getByText('Resource unavailable',{exact:true})).toBeVisible()
+  await page.evaluate(()=>{(window as any).failImport=false})
+  await dialog.getByRole('button',{name:'重试',exact:true}).click()
+  await expect(dialog).toContainText('992')
+  await dialog.getByRole('button',{name:'打开词汇本',exact:true}).click()
+  await expect(page).toHaveURL('/vocabulary/1')
+})
+
+test('personal word status is fully reachable without horizontal scrolling at supported widths',async({page})=>{
+  await bridge(page,{largeLists:true})
+  for (const size of [{width:960,height:640},{width:800,height:500},{width:390,height:844}]) {
+    await page.setViewportSize(size);await page.goto('/vocabulary?tab=all')
+    await expect(page.locator('.el-table__body-wrapper tbody tr')).toHaveCount(50)
+    const control=page.getByRole('combobox',{name:'garden-0的熟练度',exact:true})
+    const bounds=await control.locator('..').boundingBox()
+    expect(bounds).not.toBeNull()
+    expect(bounds!.x).toBeGreaterThanOrEqual(0)
+    expect(bounds!.x+bounds!.width).toBeLessThanOrEqual(size.width)
+  }
+})
 
 test('multi-chapter reading keeps the selected chapter and usable mobile controls', async ({ page }) => {
   await bridge(page, {multipleChapters:true}); await page.goto('/novels/1?mode=read')
@@ -282,4 +342,23 @@ test('PDF export main action fits the minimum window and narrow screen', async (
     expect(bounds!.y+bounds!.height).toBeLessThanOrEqual(size.height)
     await page.screenshot({path:`.ui-preview/export-${size.width}.png`,animations:'disabled'})
   }
+})
+
+test('dictionary book dropdown remains open for cross-book collection',async({page})=>{
+  await bridge(page,{multipleBooks:true});await page.goto('/novels/1?mode=read')
+  await expect(page.locator('.ProseMirror')).toBeVisible()
+  await page.getByRole('button',{name:'学习工具',exact:true}).click()
+  await page.locator('.reading-tools-form .el-select').first().click();await page.getByRole('option',{name:/英文/}).click()
+  await page.getByRole('dialog',{name:'学习工具'}).getByRole('button',{name:'关闭',exact:true}).click()
+  await page.locator('.ProseMirror p').first().evaluate(el=>{
+    const node=el.firstChild!,offset=node.textContent!.indexOf('garden'),range=document.createRange()
+    range.setStart(node,offset);range.setEnd(node,offset+6);const selection=window.getSelection()!;selection.removeAllRanges();selection.addRange(range)
+  })
+  await page.locator('.ProseMirror').dispatchEvent('mouseup',{clientX:220,clientY:180})
+  const lookup=page.locator('.dict-lookup-popover');await expect(lookup.locator('.dict-word')).toHaveText('garden')
+  await lookup.locator('.el-select__wrapper').click();await page.getByRole('option',{name:'阅读词汇二',exact:true}).click()
+  await expect(lookup).toBeVisible()
+  await lookup.getByRole('button',{name:'加入词汇本',exact:true}).click();await expect(lookup.getByRole('button',{name:'已加入',exact:true})).toBeVisible()
+  await lookup.locator('.el-select__wrapper').click();await page.getByRole('option',{name:'阅读生词',exact:true}).click()
+  await expect(lookup.getByRole('button',{name:'加入词汇本',exact:true})).toBeEnabled()
 })

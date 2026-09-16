@@ -352,6 +352,7 @@ mod tests {
 
     fn word(definition: &str, example_sentence: &str, novel_id: Option<i64>) -> VocabWord {
         VocabWord {
+            user_vocab_id: None,
             id: 1,
             vocab_book_id: 1,
             word: "gift".into(),
@@ -391,7 +392,10 @@ mod tests {
 
         let matches = find_matches_in_line("他的修炼天赋十分出众。", &words, "zh");
         assert_eq!(matches.len(), 1);
-        assert_eq!(&"他的修炼天赋十分出众。"[matches[0].start..matches[0].end], "天赋");
+        assert_eq!(
+            &"他的修炼天赋十分出众。"[matches[0].start..matches[0].end],
+            "天赋"
+        );
     }
 
     #[test]

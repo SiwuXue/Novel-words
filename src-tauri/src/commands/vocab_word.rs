@@ -1,6 +1,8 @@
 use crate::db::DbState;
 use crate::models::{HighlightWord, VocabWord, VocabWordPage};
-use std::collections::HashMap;
+pub(crate) use crate::user_vocab::row_to_word as row_to_vocab_word;
+use crate::user_vocab::{self, NewWord, SELECT_WORDS};
+use rusqlite::params;
 use tauri::{AppHandle, State};
 use tauri_plugin_fs::FsExt;
 
@@ -17,51 +19,39 @@ pub fn create_vocab_word(
     proficiency: String,
     memory_tag: String,
 ) -> Result<VocabWord, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-
-    // Reject duplicates within the same book (case-insensitive on trimmed word)
-    let exists: bool = db
-        .prepare("SELECT COUNT(*) > 0 FROM vocab_word WHERE vocab_book_id = ?1 AND word = ?2")
-        .and_then(|mut s| s.query_row(rusqlite::params![vocab_book_id, word.trim()], |r| r.get(0)))
-        .unwrap_or(false);
-    if exists {
+    let mut db = state.db.lock().map_err(|e| e.to_string())?;
+    let tx = db.transaction().map_err(|e| e.to_string())?;
+    let result = user_vocab::insert_word(
+        &tx,
+        vocab_book_id,
+        &NewWord {
+            word: &word,
+            definition: &definition,
+            phonetic: &phonetic,
+            example: &example_sentence,
+            proficiency: &proficiency,
+            memory: &memory_tag,
+            novel_id,
+            chapter_id,
+            match_terms: "",
+            source_keys: "[]",
+        },
+    )?;
+    if result.skipped {
         return Err(format!("单词「{}」已存在", word.trim()));
     }
-
-    db.execute(
-        "INSERT INTO vocab_word (vocab_book_id, word, definition, phonetic, example_sentence, novel_id, chapter_id, proficiency, memory_tag) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        rusqlite::params![vocab_book_id, word.trim(), definition, phonetic, example_sentence, novel_id, chapter_id, proficiency, memory_tag],
-    )
-    .map_err(|e| format!("创建单词失败: {}", e))?;
-
-    let id = db.last_insert_rowid();
-    get_vocab_word_by_id(&db, id)
+    let word = get_vocab_word_by_id(&tx, result.id.unwrap())?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(word)
 }
-
 #[tauri::command]
 pub fn get_vocab_words(
     state: State<DbState>,
     vocab_book_id: i64,
 ) -> Result<Vec<VocabWord>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    let mut stmt = db
-        .prepare(
-            "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, chapter_id, proficiency, memory_tag, created_at, match_terms FROM vocab_word WHERE vocab_book_id=?1 ORDER BY created_at DESC",
-        )
-        .map_err(|e| e.to_string())?;
-
-    let words = stmt
-        .query_map(rusqlite::params![vocab_book_id], row_to_vocab_word)
-        .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
-
-    Ok(words)
+    user_vocab::load_words(&db, vocab_book_id)
 }
-
-/// Paginated + filterable vocab words for the detail page, so large books never
-/// render every row at once. `query` matches word/definition/phonetic,
-/// `proficiencies` filters by level (empty/None = all).
 #[tauri::command]
 pub fn get_vocab_words_page(
     state: State<DbState>,
@@ -72,66 +62,45 @@ pub fn get_vocab_words_page(
     limit: i64,
 ) -> Result<VocabWordPage, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-
-    let mut wheres: Vec<String> = vec!["vocab_book_id = ?".to_string()];
-    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(vocab_book_id)];
-
-    let q = query.map(|s| s.trim().to_string()).unwrap_or_default();
+    let mut wheres = vec!["w.vocab_book_id=?".to_string()];
+    let mut args: Vec<rusqlite::types::Value> = vec![vocab_book_id.into()];
+    let q = query.unwrap_or_default().trim().to_owned();
     if !q.is_empty() {
-        let pattern = format!("%{}%", q);
-        wheres.push("(word LIKE ? OR definition LIKE ? OR phonetic LIKE ?)".to_string());
-        params.push(Box::new(pattern.clone()));
-        params.push(Box::new(pattern.clone()));
-        params.push(Box::new(pattern));
-    }
-
-    if let Some(profs) = proficiencies {
-        let profs: Vec<String> = profs
-            .into_iter()
-            .filter(|p| matches!(p.as_str(), "unknown" | "familiar" | "mastered"))
-            .collect();
-        if !profs.is_empty() {
-            let placeholders = vec!["?"; profs.len()].join(", ");
-            wheres.push(format!("proficiency IN ({})", placeholders));
-            for p in profs {
-                params.push(Box::new(p));
-            }
+        wheres.push("(w.word LIKE ? OR w.definition LIKE ? OR w.phonetic LIKE ?)".into());
+        for _ in 0..3 {
+            args.push(format!("%{}%", q).into());
         }
     }
-
-    let where_sql = wheres.join(" AND ");
-
-    let count_sql = format!("SELECT COUNT(*) FROM vocab_word WHERE {}", where_sql);
-    let total: i64 = db
-        .query_row(
-            &count_sql,
-            rusqlite::params_from_iter(params.iter().map(|b| b.as_ref())),
-            |r| r.get(0),
-        )
-        .map_err(|e| format!("统计单词失败: {}", e))?;
-
-    let page_sql = format!(
-        "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, chapter_id, proficiency, memory_tag, created_at, match_terms \
-         FROM vocab_word WHERE {} ORDER BY created_at DESC LIMIT ? OFFSET ?",
-        where_sql
-    );
-    let mut page_params: Vec<Box<dyn rusqlite::ToSql>> = params;
-    page_params.push(Box::new(limit.max(1)));
-    page_params.push(Box::new(offset.max(0)));
-
-    let mut stmt = db.prepare(&page_sql).map_err(|e| e.to_string())?;
-    let words = stmt
-        .query_map(
-            rusqlite::params_from_iter(page_params.iter().map(|b| b.as_ref())),
-            row_to_vocab_word,
-        )
-        .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
+    let profs: Vec<_> = proficiencies
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|p| user_vocab::valid_proficiency(p).is_ok())
         .collect();
-
-    Ok(VocabWordPage { total, words })
+    if !profs.is_empty() {
+        wheres.push(format!(
+            "COALESCE(u.proficiency,w.proficiency) IN ({})",
+            vec!["?"; profs.len()].join(",")
+        ));
+        args.extend(profs.into_iter().map(Into::into));
+    }
+    let filter = wheres.join(" AND ");
+    let total=db.query_row(&format!("SELECT COUNT(*) FROM vocab_word w LEFT JOIN user_vocab u ON u.id=w.user_vocab_id WHERE {}",filter),rusqlite::params_from_iter(&args),|r|r.get(0)).map_err(|e|e.to_string())?;
+    args.push(limit.clamp(1, 500).into());
+    args.push(offset.max(0).into());
+    let mut stmt = db
+        .prepare(&format!(
+            "{} WHERE {} ORDER BY w.created_at DESC,w.id DESC LIMIT ? OFFSET ?",
+            SELECT_WORDS, filter
+        ))
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(&args), row_to_vocab_word)
+        .map_err(|e| e.to_string())?;
+    Ok(VocabWordPage {
+        total,
+        words: rows.collect::<Result<_, _>>().map_err(|e| e.to_string())?,
+    })
 }
-
 #[tauri::command]
 pub fn update_vocab_word(
     state: State<DbState>,
@@ -140,53 +109,59 @@ pub fn update_vocab_word(
     definition: String,
     phonetic: String,
     example_sentence: String,
-    proficiency: String,
+    proficiency: Option<String>,
     memory_tag: String,
 ) -> Result<(), String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    let affected = db
-        .execute(
-            "UPDATE vocab_word SET word=?1, definition=?2, phonetic=?3, example_sentence=?4, proficiency=?5, memory_tag=?6 WHERE id=?7",
-            rusqlite::params![word, definition, phonetic, example_sentence, proficiency, memory_tag, id],
-        )
-        .map_err(|e| format!("更新单词失败: {}", e))?;
-
-    if affected == 0 {
-        return Err("单词不存在".into());
-    }
-    Ok(())
+    let mut db = state.db.lock().map_err(|e| e.to_string())?;
+    let tx = db.transaction().map_err(|e| e.to_string())?;
+    user_vocab::edit_word(
+        &tx,
+        id,
+        &word,
+        &definition,
+        &phonetic,
+        &example_sentence,
+        &memory_tag,
+        proficiency.as_deref(),
+    )?;
+    tx.commit().map_err(|e| e.to_string())
 }
-
 #[tauri::command]
 pub fn delete_vocab_word(state: State<DbState>, id: i64) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.execute("DELETE FROM vocab_word WHERE id=?1", rusqlite::params![id])
-        .map_err(|e| format!("删除单词失败: {}", e))?;
+    let book: i64 = db
+        .query_row(
+            "SELECT vocab_book_id FROM vocab_word WHERE id=?1",
+            [id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    user_vocab::require_personal_book(&db, book)?;
+    db.execute("DELETE FROM vocab_word WHERE id=?1", [id])
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
-
 #[tauri::command]
 pub fn delete_vocab_words(state: State<DbState>, ids: Vec<i64>) -> Result<u32, String> {
-    if ids.is_empty() {
-        return Ok(0);
-    }
     let mut db = state.db.lock().map_err(|e| e.to_string())?;
     let tx = db.transaction().map_err(|e| e.to_string())?;
-    let mut count: u32 = 0;
-    {
-        let mut stmt = tx
-            .prepare("DELETE FROM vocab_word WHERE id = ?1")
+    let mut count = 0;
+    for id in ids {
+        let book: i64 = tx
+            .query_row(
+                "SELECT vocab_book_id FROM vocab_word WHERE id=?1",
+                [id],
+                |r| r.get(0),
+            )
             .map_err(|e| e.to_string())?;
-        for id in &ids {
-            count += stmt
-                .execute(rusqlite::params![id])
-                .map_err(|e| format!("批量删除失败: {}", e))? as u32;
-        }
+        user_vocab::require_personal_book(&tx, book)?;
+        count += tx
+            .execute("DELETE FROM vocab_word WHERE id=?1", [id])
+            .map_err(|e| e.to_string())? as u32;
     }
     tx.commit().map_err(|e| e.to_string())?;
     Ok(count)
 }
-
 #[tauri::command]
 pub fn search_vocab_words(
     state: State<DbState>,
@@ -194,84 +169,50 @@ pub fn search_vocab_words(
     query: String,
 ) -> Result<Vec<VocabWord>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    let pattern = format!("%{}%", query);
     let mut stmt = db
-        .prepare(
-            "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, chapter_id, proficiency, memory_tag, created_at, match_terms FROM vocab_word WHERE vocab_book_id=?1 AND word LIKE ?2 ORDER BY created_at DESC",
+        .prepare(&format!(
+            "{} WHERE w.vocab_book_id=?1 AND w.word LIKE ?2 ORDER BY w.created_at DESC,w.id DESC",
+            SELECT_WORDS
+        ))
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(
+            params![vocab_book_id, format!("%{}%", query)],
+            row_to_vocab_word,
         )
         .map_err(|e| e.to_string())?;
-
-    let words = stmt
-        .query_map(rusqlite::params![vocab_book_id, pattern], row_to_vocab_word)
-        .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
-
-    Ok(words)
+    rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
 }
-
-fn get_vocab_word_by_id(db: &rusqlite::Connection, id: i64) -> Result<VocabWord, String> {
+pub(crate) fn get_vocab_word_by_id(
+    db: &rusqlite::Connection,
+    id: i64,
+) -> Result<VocabWord, String> {
     db.query_row(
-        "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, chapter_id, proficiency, memory_tag, created_at, match_terms FROM vocab_word WHERE id=?1",
-        rusqlite::params![id],
+        &format!("{} WHERE w.id=?1", SELECT_WORDS),
+        [id],
         row_to_vocab_word,
     )
-    .map_err(|e| format!("未找到该单词: {}", e))
+    .map_err(|e| e.to_string())
 }
-
-pub(crate) fn row_to_vocab_word(row: &rusqlite::Row) -> rusqlite::Result<VocabWord> {
-    Ok(VocabWord {
-        id: row.get(0)?,
-        vocab_book_id: row.get(1)?,
-        word: row.get(2)?,
-        definition: row.get(3)?,
-        phonetic: row.get(4)?,
-        example_sentence: row.get(5)?,
-        novel_id: row.get(6)?,
-        chapter_id: row.get(7)?,
-        proficiency: row.get(8)?,
-        memory_tag: row.get(9)?,
-        created_at: row.get(10)?,
-        match_terms: row.get(11)?,
-    })
-}
-
 #[tauri::command]
 pub fn get_highlight_words(
     state: State<DbState>,
     vocab_book_id: i64,
 ) -> Result<Vec<HighlightWord>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    let mut stmt = db
-        .prepare(
-            "SELECT word, definition, phonetic, example_sentence, novel_id, proficiency, match_terms FROM vocab_word WHERE vocab_book_id=?1 ORDER BY created_at DESC",
-        )
-        .map_err(|e| e.to_string())?;
-
-    let rows: Vec<HighlightWord> = stmt
-        .query_map(rusqlite::params![vocab_book_id], |row| {
-            Ok(HighlightWord {
-                word: row.get(0)?,
-                definition: row.get(1)?,
-                phonetic: row.get(2)?,
-                example_sentence: row.get(3)?,
-                novel_id: row.get(4)?,
-                proficiency: row.get(5)?,
-                match_terms: row.get(6)?,
-            })
+    Ok(user_vocab::load_words(&db, vocab_book_id)?
+        .into_iter()
+        .map(|w| HighlightWord {
+            word: w.word,
+            definition: w.definition,
+            phonetic: w.phonetic,
+            example_sentence: w.example_sentence,
+            novel_id: w.novel_id,
+            proficiency: w.proficiency,
+            match_terms: w.match_terms,
         })
-        .map_err(|e| e.to_string())?
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|e| format!("读取高亮词汇失败: {}", e))?;
-
-    // Deduplicate by word, keeping the first occurrence
-    let mut seen: HashMap<String, HighlightWord> = HashMap::new();
-    for hw in rows {
-        seen.entry(hw.word.clone()).or_insert(hw);
-    }
-    Ok(seen.into_values().collect())
+        .collect())
 }
-
 #[tauri::command]
 pub fn export_vocab_words_csv(
     app: AppHandle,
@@ -280,53 +221,105 @@ pub fn export_vocab_words_csv(
     file_path: String,
 ) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    let mut stmt = db
-        .prepare(
-            "SELECT word, definition, phonetic, example_sentence, proficiency, memory_tag FROM vocab_word WHERE vocab_book_id=?1 ORDER BY created_at DESC",
-        )
-        .map_err(|e| e.to_string())?;
-
+    let words = user_vocab::load_words(&db, vocab_book_id)?;
+    drop(db);
     let mut options = tauri_plugin_fs::OpenOptions::new();
     options.read(false).write(true).create(true).truncate(true);
     let file = app
         .fs()
-        .open(file_path.parse::<tauri_plugin_fs::FilePath>().unwrap(), options)
-        .map_err(|e| format!("无法创建文件: {}", e))?;
-    let mut wtr = csv::Writer::from_writer(file);
-
-    wtr.write_record(&["word", "definition", "phonetic", "example_sentence", "proficiency", "memory_tag"])
-        .map_err(|e| format!("写入 CSV 失败: {}", e))?;
-
-    let rows = stmt
-        .query_map(rusqlite::params![vocab_book_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, String>(5)?,
-            ))
-        })
+        .open(
+            file_path
+                .parse::<tauri_plugin_fs::FilePath>()
+                .map_err(|e| e.to_string())?,
+            options,
+        )
         .map_err(|e| e.to_string())?;
-
-    for row in rows {
-        let (w, d, p, es, prof, mt) = row.map_err(|e| e.to_string())?;
-        wtr.write_record(&[&w, &d, &p, &es, &prof, &mt])
-            .map_err(|e| format!("写入 CSV 失败: {}", e))?;
+    let mut writer = csv::Writer::from_writer(file);
+    writer
+        .write_record([
+            "word",
+            "definition",
+            "phonetic",
+            "example_sentence",
+            "proficiency",
+            "memory_tag",
+        ])
+        .map_err(|e| e.to_string())?;
+    for w in words {
+        writer
+            .write_record([
+                w.word,
+                w.definition,
+                w.phonetic,
+                w.example_sentence,
+                w.proficiency,
+                w.memory_tag,
+            ])
+            .map_err(|e| e.to_string())?;
     }
-
-    wtr.flush().map_err(|e| format!("CSV flush 失败: {}", e))?;
-    Ok(())
+    writer.flush().map_err(|e| e.to_string())
 }
-
-#[derive(serde::Serialize)]
+#[derive(Default, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportResult {
     pub imported: u32,
+    pub inherited: u32,
     pub skipped: u32,
+    pub new_words: u32,
 }
-
+impl ImportResult {
+    pub fn record(&mut self, result: &user_vocab::InsertedWord) {
+        if result.skipped {
+            self.skipped += 1;
+        } else {
+            self.imported += 1;
+            if result.inherited {
+                self.inherited += 1;
+            } else {
+                self.new_words += 1;
+            }
+        }
+    }
+}
+pub fn import_csv(
+    db: &mut rusqlite::Connection,
+    book: i64,
+    bytes: &[u8],
+) -> Result<ImportResult, String> {
+    let mut reader = csv::Reader::from_reader(bytes);
+    let tx = db.transaction().map_err(|e| e.to_string())?;
+    user_vocab::require_personal_book(&tx, book)?;
+    let mut result = ImportResult::default();
+    for record in reader.records() {
+        let record = record.map_err(|e| format!("CSV 解析失败: {}", e))?;
+        let word = record.get(0).unwrap_or("").trim();
+        if word.is_empty() {
+            result.skipped += 1;
+            continue;
+        }
+        let raw = record.get(4).unwrap_or("");
+        let proficiency = if user_vocab::valid_proficiency(raw).is_ok() {
+            raw
+        } else {
+            "unknown"
+        };
+        let inserted = user_vocab::insert_word(
+            &tx,
+            book,
+            &NewWord {
+                word,
+                definition: record.get(1).unwrap_or(""),
+                phonetic: record.get(2).unwrap_or(""),
+                example: record.get(3).unwrap_or(""),
+                memory: record.get(5).unwrap_or(""),
+                ..NewWord::simple(word, proficiency)
+            },
+        )?;
+        result.record(&inserted);
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(result)
+}
 #[tauri::command]
 pub fn import_vocab_words_csv(
     app: AppHandle,
@@ -334,51 +327,67 @@ pub fn import_vocab_words_csv(
     vocab_book_id: i64,
     file_path: String,
 ) -> Result<ImportResult, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
     let bytes = app
         .fs()
-        .read(file_path.parse::<tauri_plugin_fs::FilePath>().unwrap())
-        .map_err(|e| format!("无法打开文件: {}", e))?;
-    let mut rdr = csv::Reader::from_reader(bytes.as_slice());
+        .read(
+            file_path
+                .parse::<tauri_plugin_fs::FilePath>()
+                .map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+    let mut db = state.db.lock().map_err(|e| e.to_string())?;
+    import_csv(&mut db, vocab_book_id, &bytes)
+}
 
-    let mut imported: u32 = 0;
-    let mut skipped: u32 = 0;
-
-    for result in rdr.records() {
-        let record = result.map_err(|e| format!("CSV 解析失败: {}", e))?;
-
-        let word = record.get(0).unwrap_or("").trim();
-        if word.is_empty() {
-            continue;
-        }
-
-        let definition = record.get(1).unwrap_or("").trim();
-        let phonetic = record.get(2).unwrap_or("").trim();
-        let example_sentence = record.get(3).unwrap_or("").trim();
-        let proficiency_raw = record.get(4).unwrap_or("").trim();
-        let memory_tag = record.get(5).unwrap_or("").trim();
-
-        let proficiency = match proficiency_raw {
-            "familiar" | "mastered" => proficiency_raw,
-            _ => "unknown",
-        };
-
-        // INSERT OR IGNORE relies on the unique (vocab_book_id, word) index to
-        // silently skip duplicates (both against existing rows and earlier rows
-        // in the same file).
-        let n = db
-            .execute(
-                "INSERT OR IGNORE INTO vocab_word (vocab_book_id, word, definition, phonetic, example_sentence, proficiency, memory_tag) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                rusqlite::params![vocab_book_id, word, definition, phonetic, example_sentence, proficiency, memory_tag],
-            )
-            .map_err(|e| format!("导入单词 '{}' 失败: {}", word, e))?;
-
-        if n > 0 {
-            imported += 1;
-        } else {
-            skipped += 1;
-        }
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn csv_inherits_state_normalizes_variants_and_rolls_back_malformed_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "nw-csv-{}",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap()
+        ));
+        let state = crate::db::init_db(&dir).unwrap();
+        let mut db = state.db.lock().unwrap();
+        db.execute_batch("INSERT INTO vocab_book(name) VALUES ('A'),('B');")
+            .unwrap();
+        crate::user_vocab::insert_word(
+            &db,
+            1,
+            &crate::user_vocab::NewWord::simple("don't stop", "mastered"),
+        )
+        .unwrap();
+        let bytes="word,definition,phonetic,example_sentence,proficiency,memory_tag\n  Don’t   Stop  ,继续,,,unknown,\nDON'T STOP,重复,,,familiar,\nrun,跑,,,familiar,\nrunning,正在跑,,,invalid,\n".as_bytes();
+        let result = super::import_csv(&mut db, 2, bytes).unwrap();
+        assert_eq!(
+            (result.new_words, result.inherited, result.skipped),
+            (2, 1, 1)
+        );
+        let words = crate::user_vocab::load_words(&db, 2).unwrap();
+        assert_eq!(
+            words
+                .iter()
+                .find(|w| crate::user_vocab::word_key(&w.word) == "don't stop")
+                .unwrap()
+                .proficiency,
+            "mastered"
+        );
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM user_vocab", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            3
+        );
+        let malformed = b"word,definition\nnewword,new definition\nbroken\n";
+        assert!(super::import_csv(&mut db, 2, malformed).is_err());
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM user_vocab", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            3
+        );
+        drop(db);
+        drop(state);
+        std::fs::remove_dir_all(dir).unwrap();
     }
-
-    Ok(ImportResult { imported, skipped })
 }

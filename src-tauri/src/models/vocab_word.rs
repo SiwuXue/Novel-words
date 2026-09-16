@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VocabWord {
+    #[serde(default)]
+    pub user_vocab_id: Option<i64>,
     pub id: i64,
     pub vocab_book_id: i64,
     pub word: String,

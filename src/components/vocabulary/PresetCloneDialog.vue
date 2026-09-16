@@ -71,7 +71,7 @@
 
       <el-form class="clone-form result-form" label-width="110px">
         <el-form-item :label="t('preset.newBookName')">
-          <el-input v-model="newBookName" placeholder="CET4 · {小说}精选" />
+          <el-input v-model="newBookName" :placeholder="t('preset.selectionNamePlaceholder')" />
         </el-form-item>
       </el-form>
     </div>
@@ -95,7 +95,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { ElMessage } from 'element-plus'
 import { t } from '@/i18n'
-import type { PresetClonePreview } from '@/types/vocabBook'
+import type { PresetClonePreview, VocabImportResult } from '@/types/vocabBook'
 import type { Novel } from '@/types/novel'
 
 const props = defineProps<{
@@ -124,6 +124,8 @@ const progressElapsedSeconds = ref(0)
 const activeRequestId = ref<string | null>(null)
 const busy = computed(() => computing.value || importing.value)
 let progressTimer: ReturnType<typeof setInterval> | null = null
+let unlistenProgress: UnlistenFn | null = null
+let disposed = false
 
 interface PresetCloneProgress {
   requestId: string
@@ -141,7 +143,7 @@ onMounted(async () => {
   }
 })
 
-onBeforeUnmount(() => stopProgressTimer())
+onBeforeUnmount(() => { disposed = true; activeRequestId.value = null; unlistenProgress?.(); unlistenProgress = null; stopProgressTimer() })
 
 watch(
   () => props.modelValue,
@@ -191,7 +193,6 @@ async function computePreview() {
 
   const requestedNovelId = novelId.value
   const requestId = createRequestId()
-  let unlistenProgress: UnlistenFn | null = null
 
   activeRequestId.value = requestId
   computing.value = true
@@ -204,7 +205,7 @@ async function computePreview() {
   try {
     try {
       unlistenProgress = await listen<PresetCloneProgress>('preset-clone-progress', (event) => {
-        if (event.payload.requestId !== activeRequestId.value) return
+        if (disposed || event.payload.requestId !== activeRequestId.value) return
         if (
           event.payload.stage === 'ai'
           && (progressStage.value !== 'ai' || event.payload.processed !== progressProcessed.value)
@@ -220,6 +221,8 @@ async function computePreview() {
       console.warn('[preset-clone-progress] listen failed:', e)
     }
 
+    if (disposed || activeRequestId.value !== requestId) { unlistenProgress?.(); unlistenProgress = null; return }
+
     const result = await invoke<PresetClonePreview>('preview_preset_clone', {
       presetKey: props.presetKey,
       novelId: requestedNovelId,
@@ -228,11 +231,12 @@ async function computePreview() {
     if (activeRequestId.value !== requestId) return
     preview.value = result
     progressPercent.value = 100
-    newBookName.value = `${props.presetName} · ${novels.value.find((n) => n.id === requestedNovelId)?.title || ''}精选`
+    newBookName.value = t('preset.selectionName', { preset: props.presetName, novel: novels.value.find((n) => n.id === requestedNovelId)?.title || '' })
   } catch (e: any) {
-    ElMessage.error(String(e?.message || e || '计算失败'))
+    if (!disposed) ElMessage.error(String(e?.message || e || t('ui.loadFailed')))
   } finally {
     unlistenProgress?.()
+    unlistenProgress = null
     stopProgressTimer()
     if (activeRequestId.value === requestId) {
       activeRequestId.value = null
@@ -245,17 +249,18 @@ async function doImport() {
   if (!preview.value || !novelId.value || busy.value) return
   importing.value = true
   try {
-    const bookId = await invoke<number>('commit_preset_clone', {
+    const result = await invoke<VocabImportResult>('commit_preset_clone_with_state', {
       presetKey: props.presetKey,
       novelId: novelId.value,
       newBookName: newBookName.value,
       items: preview.value.items,
     })
-    ElMessage.success(t('preset.imported', { n: preview.value.items.length }))
-    emit('imported', bookId)
+    if (disposed) return
+    ElMessage.success(t('vocabImport.summary', { newWords: result.newWords, inherited: result.inherited, skipped: result.skipped }))
+    emit('imported', result.bookId)
     emit('update:modelValue', false)
   } catch (e: any) {
-    ElMessage.error(String(e?.message || e || '导入失败'))
+    if (!disposed) ElMessage.error(String(e?.message || e || t('ui.loadFailed')))
   } finally {
     importing.value = false
   }

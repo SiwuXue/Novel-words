@@ -228,7 +228,7 @@ function handleMouseup(event: MouseEvent) {
 function onExternalClick(e: MouseEvent) {
   if (!popoverVisible.value) return
   const target = e.target as HTMLElement
-  if (!target.closest('.dict-lookup-popover')) {
+  if (!target.closest('.dict-lookup-popover, .dict-book-dropdown')) {
     closePopover()
   }
 }

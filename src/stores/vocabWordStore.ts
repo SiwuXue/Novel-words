@@ -2,27 +2,33 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { VocabWord, VocabWordFormData } from '@/types/vocabWord'
-import { encodeMemoryTag, parseMemoryTag } from '@/utils/srs'
 
 export const useVocabWordStore = defineStore('vocabWord', () => {
   const words = ref<VocabWord[]>([])
   const total = ref(0)
   const loading = ref(false)
   const error = ref('')
+  let generation = 0
+  let pageContext: { bookId: number; opts: Parameters<typeof fetchPage>[1] } | null = null
 
   async function fetchAll(bookId: number) {
+    const request = ++generation
+    pageContext = null
     loading.value = true
     error.value = ''
     try {
-      words.value = await invoke<VocabWord[]>('get_vocab_words', {
+      const result = await invoke<VocabWord[]>('get_vocab_words', {
         vocabBookId: bookId,
       })
+      if (request !== generation) return
+      words.value = result
       total.value = words.value.length
     } catch (e) {
+      if (request !== generation) return
       error.value = e instanceof Error ? e.message : String(e)
       console.error('[vocabWordStore] fetchAll failed:', e)
     } finally {
-      loading.value = false
+      if (request === generation) loading.value = false
     }
   }
 
@@ -35,6 +41,8 @@ export const useVocabWordStore = defineStore('vocabWord', () => {
       limit: number
     },
   ) {
+    const request = ++generation
+    pageContext = { bookId, opts: { ...opts } }
     loading.value = true
     error.value = ''
     try {
@@ -48,17 +56,20 @@ export const useVocabWordStore = defineStore('vocabWord', () => {
           limit: opts.limit,
         },
       )
+      if (request !== generation) return
       words.value = page.words
       total.value = page.total
     } catch (e) {
+      if (request !== generation) return
       error.value = e instanceof Error ? e.message : String(e)
       console.error('[vocabWordStore] fetchPage failed:', e)
     } finally {
-      loading.value = false
+      if (request === generation) loading.value = false
     }
   }
 
   async function create(bookId: number, data: VocabWordFormData) {
+    const request = generation
     const word = await invoke<VocabWord>('create_vocab_word', {
       vocabBookId: bookId,
       word: data.word,
@@ -70,15 +81,14 @@ export const useVocabWordStore = defineStore('vocabWord', () => {
       proficiency: data.proficiency || 'unknown',
       memoryTag: data.memoryTag || '',
     })
-    words.value.unshift(word)
+    if (request === generation) words.value.unshift(word)
     return word
   }
 
   async function update(id: number, data: VocabWordFormData) {
-    // Preserve any SRS state while allowing the user tag to be edited.
+    const request = generation
     const existing = words.value.find((w) => w.id === id)
-    const srs = existing ? parseMemoryTag(existing.memoryTag).srs : null
-    const memoryTag = encodeMemoryTag(data.memoryTag || '', srs)
+    const changed = data.proficiencyChanged ?? (existing !== undefined && data.proficiency !== existing.proficiency)
 
     await invoke('update_vocab_word', {
       id,
@@ -86,17 +96,13 @@ export const useVocabWordStore = defineStore('vocabWord', () => {
       definition: data.definition || '',
       phonetic: data.phonetic || '',
       exampleSentence: data.exampleSentence || '',
-      proficiency: data.proficiency || 'unknown',
-      memoryTag,
+      proficiency: changed ? data.proficiency : null,
+      memoryTag: data.memoryTag || '',
     })
-    const idx = words.value.findIndex((w) => w.id === id)
-    if (idx !== -1) {
-      words.value[idx] = {
-        ...words.value[idx],
-        ...data,
-        memoryTag,
-      }
-    }
+    if (request !== generation) return
+    // The backend may resolve a renamed word to a different shared record.
+    if (pageContext) await fetchPage(pageContext.bookId, pageContext.opts)
+    else if (existing) await fetchAll(existing.vocabBookId)
   }
 
   async function remove(id: number) {
@@ -113,18 +119,24 @@ export const useVocabWordStore = defineStore('vocabWord', () => {
   }
 
   async function search(bookId: number, query: string) {
+    const request = ++generation
+    pageContext = null
     loading.value = true
     error.value = ''
     try {
-      words.value = await invoke<VocabWord[]>('search_vocab_words', {
+      const result = await invoke<VocabWord[]>('search_vocab_words', {
         vocabBookId: bookId,
         query,
       })
+      if (request !== generation) return
+      words.value = result
+      total.value = result.length
     } catch (e) {
+      if (request !== generation) return
       error.value = e instanceof Error ? e.message : String(e)
       console.error('[vocabWordStore] search failed:', e)
     } finally {
-      loading.value = false
+      if (request === generation) loading.value = false
     }
   }
 

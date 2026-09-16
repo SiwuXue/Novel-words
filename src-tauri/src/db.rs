@@ -17,13 +17,45 @@ pub fn init_db(app_data_dir: &PathBuf) -> Result<DbState, String> {
     let db_path = app_data_dir.join("novel_words.db");
     let mut conn = Connection::open(&db_path).map_err(|e| format!("无法打开数据库: {}", e))?;
 
+    if db_path.exists() && crate::user_vocab::migration_needed(&conn) {
+        let populated: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='vocab_word')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(false);
+        if populated {
+            let backup_dir = app_data_dir.join("backups");
+            fs::create_dir_all(&backup_dir).map_err(|e| e.to_string())?;
+            conn.backup(
+                rusqlite::DatabaseName::Main,
+                &backup_dir.join(format!(
+                    "pre-user-vocab-{}.db",
+                    crate::utils::date::timestamp_compact()
+                )),
+                None::<fn(rusqlite::backup::Progress)>,
+            )
+            .map_err(|e| format!("迁移前备份失败: {}", e))?;
+        }
+    }
+    migrate_connection(&mut conn)?;
+    Ok(DbState {
+        db: Mutex::new(conn),
+    })
+}
+
+pub fn migrate_connection(conn: &mut Connection) -> Result<(), String> {
     // Enable WAL mode for concurrent reads during writes
-    conn.execute_batch("PRAGMA journal_mode=WAL;").map_err(|e| e.to_string())?;
+    conn.execute_batch("PRAGMA journal_mode=WAL;")
+        .map_err(|e| e.to_string())?;
     // Enable foreign key constraints
-    conn.execute_batch("PRAGMA foreign_keys=ON;").map_err(|e| e.to_string())?;
+    conn.execute_batch("PRAGMA foreign_keys=ON;")
+        .map_err(|e| e.to_string())?;
 
     // Run DDL
-    conn.execute_batch(CREATE_TABLES_SQL).map_err(|e| format!("建表失败: {}", e))?;
+    conn.execute_batch(CREATE_TABLES_SQL)
+        .map_err(|e| format!("建表失败: {}", e))?;
 
     // Migrations: only run when column doesn't exist yet
     {
@@ -49,10 +81,8 @@ pub fn init_db(app_data_dir: &PathBuf) -> Result<DbState, String> {
             .and_then(|mut s| s.query_row([], |r| r.get(0)))
             .unwrap_or(false);
         if !has_col {
-            conn.execute_batch(
-                "ALTER TABLE vocab_word ADD COLUMN chapter_id INTEGER;",
-            )
-            .map_err(|e| format!("迁移 vocab_word.chapter_id 失败: {}", e))?;
+            conn.execute_batch("ALTER TABLE vocab_word ADD COLUMN chapter_id INTEGER;")
+                .map_err(|e| format!("迁移 vocab_word.chapter_id 失败: {}", e))?;
         }
     }
 
@@ -149,25 +179,6 @@ pub fn init_db(app_data_dir: &PathBuf) -> Result<DbState, String> {
         }
     }
 
-    // Migration: enforce unique (vocab_book_id, word) — dedup existing rows first,
-    // keeping the earliest id, then create a unique index.
-    {
-        let has_index: bool = conn
-            .prepare("SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='index' AND name='idx_vocab_word_unique'")
-            .and_then(|mut s| s.query_row([], |r| r.get(0)))
-            .unwrap_or(false);
-        if !has_index {
-            conn.execute_batch(
-                "DELETE FROM vocab_word
-                 WHERE id NOT IN (
-                     SELECT MIN(id) FROM vocab_word GROUP BY vocab_book_id, word
-                 );
-                 CREATE UNIQUE INDEX idx_vocab_word_unique ON vocab_word (vocab_book_id, word);",
-            )
-            .map_err(|e| format!("迁移 vocab_word 唯一索引失败: {}", e))?;
-        }
-    }
-
     // Migration: add language to novel so each book can be tagged as 'zh' or 'en'
     // for matching mode (per-novel granularity).
     {
@@ -188,7 +199,9 @@ pub fn init_db(app_data_dir: &PathBuf) -> Result<DbState, String> {
     // plus a cloned_from_preset_key back-reference on the user clone.
     {
         let has_preset: bool = conn
-            .prepare("SELECT COUNT(*) > 0 FROM pragma_table_info('vocab_book') WHERE name = 'is_preset'")
+            .prepare(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info('vocab_book') WHERE name = 'is_preset'",
+            )
             .and_then(|mut s| s.query_row([], |r| r.get(0)))
             .unwrap_or(false);
         if !has_preset {
@@ -218,8 +231,9 @@ pub fn init_db(app_data_dir: &PathBuf) -> Result<DbState, String> {
     // versions only kept the last review timestamp inside vocab_word.memory_tag;
     // seed one best-effort legacy event for already-reviewed cards so existing
     // users do not start with an entirely empty history.
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS review_log (
+    if crate::user_vocab::migration_needed(conn) {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS review_log (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             vocab_word_id   INTEGER NOT NULL,
             vocab_book_id   INTEGER NOT NULL,
@@ -246,15 +260,15 @@ pub fn init_db(app_data_dir: &PathBuf) -> Result<DbState, String> {
           AND NOT EXISTS (
               SELECT 1 FROM review_log r WHERE r.vocab_word_id = w.id
           );",
-    )
-    .map_err(|e| format!("迁移复习历史失败: {}", e))?;
+        )
+        .map_err(|e| format!("迁移复习历史失败: {}", e))?;
+    }
 
-    Ok(DbState {
-        db: Mutex::new(conn),
-    })
+    crate::user_vocab::migrate(conn)?;
+    Ok(())
 }
 
-const CREATE_TABLES_SQL: &str = "
+pub(crate) const CREATE_TABLES_SQL: &str = "
 CREATE TABLE IF NOT EXISTS novel (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     title        TEXT    NOT NULL DEFAULT '',
@@ -354,6 +368,194 @@ INSERT OR IGNORE INTO app_settings (key, value) VALUES ('pdf_intensive_steps', '
 mod tests {
     use super::init_db;
 
+    fn legacy_database() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "nw-global-migration-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let conn = rusqlite::Connection::open(dir.join("novel_words.db")).unwrap();
+        conn.execute_batch(super::CREATE_TABLES_SQL).unwrap();
+        conn.execute_batch("INSERT INTO vocab_book (name) VALUES ('A'),('B'); INSERT INTO vocab_book (name,is_preset,preset_key) VALUES ('预设',1,'cet4');").unwrap();
+        conn.execute("INSERT INTO vocab_word (vocab_book_id,word,definition,proficiency,memory_tag) VALUES (1,'garden','花园','mastered',?1)", [r#"{"tag":"A标签","srs":{"due":"2099-01-01","interval":30,"reps":4,"ease":2.5},"last_reviewed_at":1700000000}"#]).unwrap();
+        conn.execute("INSERT INTO vocab_word (vocab_book_id,word,definition,proficiency,memory_tag) VALUES (2,'Garden','园圃','unknown',?1)", [r#"{"tag":"B标签","srs":{"due":"2020-01-01","interval":1,"reps":0,"ease":2.3},"last_reviewed_at":1800000000}"#]).unwrap();
+        conn.execute_batch("INSERT INTO vocab_word (vocab_book_id,word,phonetic) VALUES (1,' garden ','phonetic'),(3,'unused',''); INSERT INTO review_log (vocab_word_id,vocab_book_id,rating,reviewed_at,proficiency) VALUES (1,1,'easy',1700000000,'mastered'),(2,2,'again',1800000000,'unknown');").unwrap();
+        dir
+    }
+
+    #[test]
+    fn global_migration_merges_latest_state_and_preserves_sources_and_events() {
+        let dir = legacy_database();
+        let state = init_db(&dir).unwrap();
+        let db = state.db.lock().unwrap();
+        let (count, proficiency): (i64, String) = db
+            .query_row("SELECT COUNT(*),proficiency FROM user_vocab", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(
+            count, 1,
+            "Unused presets must not become personal vocabulary"
+        );
+        assert_eq!(proficiency, "unknown", "Most recent forgetting must win");
+        let memberships: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM vocab_word WHERE vocab_book_id=1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(memberships, 1);
+        let phonetic: String = db
+            .query_row(
+                "SELECT phonetic FROM vocab_word WHERE vocab_book_id=1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(phonetic, "phonetic");
+        let logs: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM review_log WHERE user_vocab_id IS NOT NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(logs, 2);
+        db.execute("DELETE FROM vocab_book WHERE is_preset=0", [])
+            .unwrap();
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM review_log", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM user_vocab", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        drop(db);
+        drop(state);
+        let state = init_db(&dir).unwrap();
+        assert_eq!(
+            state
+                .db
+                .lock()
+                .unwrap()
+                .query_row("SELECT COUNT(*) FROM user_vocab", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert!(std::fs::read_dir(dir.join("backups")).unwrap().any(|e| e
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with("pre-user-vocab-")));
+        drop(state);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn global_migration_uses_highest_proficiency_when_no_reliable_time() {
+        let dir = legacy_database();
+        let conn = rusqlite::Connection::open(dir.join("novel_words.db")).unwrap();
+        conn.execute_batch(
+            "DELETE FROM review_log; UPDATE vocab_word SET memory_tag='自定义标签';",
+        )
+        .unwrap();
+        drop(conn);
+        let state = init_db(&dir).unwrap();
+        assert_eq!(
+            state
+                .db
+                .lock()
+                .unwrap()
+                .query_row("SELECT proficiency FROM user_vocab", [], |r| r
+                    .get::<_, String>(0))
+                .unwrap(),
+            "mastered"
+        );
+        drop(state);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn duplicate_migration_keeps_missing_local_tag_and_novel_context() {
+        let dir = legacy_database();
+        let conn = rusqlite::Connection::open(dir.join("novel_words.db")).unwrap();
+        conn.execute_batch("INSERT INTO novel(title) VALUES ('Context'); UPDATE vocab_word SET memory_tag='' WHERE id=1; UPDATE vocab_word SET memory_tag='duplicate tag',novel_id=1 WHERE id=3;").unwrap();
+        drop(conn);
+        let state = init_db(&dir).unwrap();
+        let db = state.db.lock().unwrap();
+        let (tag, novel): (String, Option<i64>) = db
+            .query_row(
+                "SELECT memory_tag,novel_id FROM vocab_word WHERE vocab_book_id=1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(tag, "duplicate tag");
+        assert_eq!(novel, Some(1));
+        drop(db);
+        drop(state);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn migration_breaks_equal_review_timestamps_by_event_order() {
+        let dir = legacy_database();
+        let conn = rusqlite::Connection::open(dir.join("novel_words.db")).unwrap();
+        conn.execute_batch(
+            "UPDATE review_log SET reviewed_at=1800000000; UPDATE vocab_word SET memory_tag='';",
+        )
+        .unwrap();
+        drop(conn);
+        let state = init_db(&dir).unwrap();
+        assert_eq!(
+            state
+                .db
+                .lock()
+                .unwrap()
+                .query_row("SELECT proficiency FROM user_vocab", [], |r| r
+                    .get::<_, String>(0))
+                .unwrap(),
+            "unknown"
+        );
+        drop(state);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn repeating_migration_does_not_treat_json_local_tags_as_review_events() {
+        let dir = std::env::temp_dir().join(format!(
+            "nw-json-tag-{}",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap()
+        ));
+        let state = init_db(&dir).unwrap();
+        let mut db = state.db.lock().unwrap();
+        db.execute("INSERT INTO vocab_book(name) VALUES ('A')", [])
+            .unwrap();
+        let mut input = crate::user_vocab::NewWord::simple("garden", "unknown");
+        input.memory = r#"{"tag":"{\"last_reviewed_at\":1700000000}"}"#;
+        crate::user_vocab::insert_word(&db, 1, &input).unwrap();
+        for _ in 0..3 {
+            super::migrate_connection(&mut db).unwrap();
+        }
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM review_log", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        drop(db);
+        drop(state);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn backfills_reliable_terms_for_existing_tailored_words() {
         let unique = format!(
@@ -387,11 +589,16 @@ mod tests {
             .db
             .lock()
             .unwrap()
-            .query_row("SELECT match_terms FROM vocab_word WHERE word='gift'", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT match_terms FROM vocab_word WHERE word='gift'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
-        assert_eq!(serde_json::from_str::<Vec<String>>(&encoded).unwrap(), vec!["天赋"]);
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(&encoded).unwrap(),
+            vec!["天赋"]
+        );
 
         drop(state);
         std::fs::remove_dir_all(&dir).unwrap();
@@ -411,8 +618,9 @@ mod tests {
         let reviewed_at = 1_700_000_000_u64;
 
         {
-            let state = init_db(&dir).unwrap();
-            let db = state.db.lock().unwrap();
+            std::fs::create_dir_all(&dir).unwrap();
+            let db = rusqlite::Connection::open(dir.join("novel_words.db")).unwrap();
+            db.execute_batch(super::CREATE_TABLES_SQL).unwrap();
             db.execute("INSERT INTO vocab_book (name) VALUES ('测试词汇本')", [])
                 .unwrap();
             let memory_tag = format!(

@@ -21,6 +21,16 @@ export interface PresetVocabBook {
   description: string
   presetKey: string
   wordCount: number
+  category: 'university' | 'international' | 'school' | 'textbook'
+  sources: string[]
+}
+
+export interface VocabImportResult {
+  bookId: number
+  imported: number
+  inherited: number
+  skipped: number
+  newWords: number
 }
 
 /** One tailored word in the clone preview. */

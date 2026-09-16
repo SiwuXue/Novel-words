@@ -1,5 +1,4 @@
 use crate::db::DbState;
-use std::collections::HashSet;
 use std::io::Write;
 use tauri::{AppHandle, State};
 use tauri_plugin_fs::FsExt;
@@ -17,29 +16,19 @@ fn load_word_rows(
     db: &rusqlite::Connection,
     vocab_book_id: i64,
 ) -> Result<Vec<(String, String, String, String, String, String)>, String> {
-    let mut stmt = db
-        .prepare(
-            "SELECT word, definition, phonetic, example_sentence, proficiency, memory_tag \
-             FROM vocab_word WHERE vocab_book_id=?1 ORDER BY created_at DESC",
-        )
-        .map_err(|e| e.to_string())?;
-
-    let rows = stmt
-        .query_map(rusqlite::params![vocab_book_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, String>(5)?,
-            ))
+    Ok(crate::user_vocab::load_words(db, vocab_book_id)?
+        .into_iter()
+        .map(|w| {
+            (
+                w.word,
+                w.definition,
+                w.phonetic,
+                w.example_sentence,
+                w.proficiency,
+                w.memory_tag,
+            )
         })
-        .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
-
-    Ok(rows)
+        .collect())
 }
 
 /// Export a vocab book as an Excel (.xlsx) spreadsheet.
@@ -82,7 +71,10 @@ pub fn export_vocab_words_xlsx(
     options.read(false).write(true).create(true).truncate(true);
     let mut file = app
         .fs()
-        .open(file_path.parse::<tauri_plugin_fs::FilePath>().unwrap(), options)
+        .open(
+            file_path.parse::<tauri_plugin_fs::FilePath>().unwrap(),
+            options,
+        )
         .map_err(|e| format!("创建 Excel 文件失败: {}", e))?;
     file.write_all(&bytes)
         .map_err(|e| format!("保存 Excel 失败: {}", e))?;
@@ -253,8 +245,10 @@ pub fn export_vocab_words_apkg(
     let _ = std::fs::remove_file(&tmp_db);
 
     {
-        let conn = rusqlite::Connection::open(&tmp_db).map_err(|e| format!("创建 Anki 数据库失败: {}", e))?;
-        conn.execute_batch(ANKI_SCHEMA).map_err(|e| format!("建表失败: {}", e))?;
+        let conn = rusqlite::Connection::open(&tmp_db)
+            .map_err(|e| format!("创建 Anki 数据库失败: {}", e))?;
+        conn.execute_batch(ANKI_SCHEMA)
+            .map_err(|e| format!("建表失败: {}", e))?;
 
         let now_sec = chrono::Utc::now().timestamp();
         conn.execute(
@@ -290,10 +284,14 @@ pub fn export_vocab_words_apkg(
             let flds = format!("{}\u{1f}{}", word, definition);
 
             note_stmt
-                .execute(rusqlite::params![note_id, guid, MODEL_ID, now_sec, flds, word])
+                .execute(rusqlite::params![
+                    note_id, guid, MODEL_ID, now_sec, flds, word
+                ])
                 .map_err(|e| format!("写入 Anki 笔记失败: {}", e))?;
             card_stmt
-                .execute(rusqlite::params![card_id, note_id, DECK_ID, now_sec, note_id])
+                .execute(rusqlite::params![
+                    card_id, note_id, DECK_ID, now_sec, note_id
+                ])
                 .map_err(|e| format!("写入 Anki 卡片失败: {}", e))?;
         }
     }
@@ -306,7 +304,10 @@ pub fn export_vocab_words_apkg(
     options.read(false).write(true).create(true).truncate(true);
     let file = app
         .fs()
-        .open(file_path.parse::<tauri_plugin_fs::FilePath>().unwrap(), options)
+        .open(
+            file_path.parse::<tauri_plugin_fs::FilePath>().unwrap(),
+            options,
+        )
         .map_err(|e| format!("创建 apkg 文件失败: {}", e))?;
     let mut zip = zip::ZipWriter::new(file);
     let options = zip::write::SimpleFileOptions::default()
@@ -332,25 +333,7 @@ pub fn export_vocab_words_apkg(
 #[tauri::command]
 pub fn export_vocab_book_json(state: State<DbState>, vocab_book_id: i64) -> Result<String, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    let mut stmt = db
-        .prepare(
-            "SELECT word, definition, phonetic, example_sentence, proficiency \
-             FROM vocab_word WHERE vocab_book_id=?1 ORDER BY created_at DESC",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(rusqlite::params![vocab_book_id], |row| {
-            Ok(serde_json::json!({
-                "word": row.get::<_, String>(0)?,
-                "definition": row.get::<_, String>(1)?,
-                "phonetic": row.get::<_, String>(2)?,
-                "example_sentence": row.get::<_, String>(3)?,
-                "proficiency": row.get::<_, String>(4)?,
-            }))
-        })
-        .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect::<Vec<_>>();
+    let rows=crate::user_vocab::load_words(&db,vocab_book_id)?.into_iter().map(|w|serde_json::json!({"word":w.word,"definition":w.definition,"phonetic":w.phonetic,"example_sentence":w.example_sentence,"proficiency":w.proficiency,"memory_tag":w.memory_tag})).collect::<Vec<_>>();
 
     serde_json::to_string_pretty(&serde_json::json!({ "words": rows }))
         .map_err(|e| format!("序列化 JSON 失败: {}", e))
@@ -372,48 +355,37 @@ pub fn import_vocab_book_json(
         .and_then(|v| v.as_array())
         .ok_or_else(|| "缺少 words 数组".to_string())?;
 
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-
-    // Existing words in the book (case-insensitive) to skip duplicates.
-    let mut existing: HashSet<String> = {
-        let mut stmt = db
-            .prepare("SELECT word FROM vocab_word WHERE vocab_book_id=?1")
-            .map_err(|e| e.to_string())?;
-        let values = stmt
-            .query_map(rusqlite::params![vocab_book_id], |row| row.get::<_, String>(0))
-            .map_err(|e| e.to_string())?
-            .filter_map(|r| r.ok())
-            .map(|w| w.to_lowercase())
-            .collect();
-        values
-    };
-
-    let mut inserted: i64 = 0;
+    let mut db = state.db.lock().map_err(|e| e.to_string())?;
+    let tx = db.transaction().map_err(|e| e.to_string())?;
+    crate::user_vocab::require_personal_book(&tx, vocab_book_id)?;
+    let mut inserted = 0;
     for w in words {
-        let word = w.get("word").and_then(|v| v.as_str()).unwrap_or("").trim();
-        if word.is_empty() {
+        let word = w["word"].as_str().unwrap_or("");
+        if word.trim().is_empty() {
             continue;
         }
-        if existing.contains(&word.to_lowercase()) {
-            continue;
-        }
-        let definition = w.get("definition").and_then(|v| v.as_str()).unwrap_or("");
-        let phonetic = w.get("phonetic").and_then(|v| v.as_str()).unwrap_or("");
-        let example = w.get("example_sentence").and_then(|v| v.as_str()).unwrap_or("");
-        let proficiency = w.get("proficiency").and_then(|v| v.as_str()).unwrap_or("unknown");
-        let prof = if proficiency == "familiar" || proficiency == "mastered" {
-            proficiency
+        let raw = w["proficiency"].as_str().unwrap_or("unknown");
+        let prof = if crate::user_vocab::valid_proficiency(raw).is_ok() {
+            raw
         } else {
             "unknown"
         };
-        db.execute(
-            "INSERT INTO vocab_word (vocab_book_id, word, definition, phonetic, example_sentence, proficiency, memory_tag, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, '', datetime('now'))",
-            rusqlite::params![vocab_book_id, word, definition, phonetic, example, prof],
-        )
-        .map_err(|e| format!("写入单词失败: {}", e))?;
-        existing.insert(word.to_lowercase());
-        inserted += 1;
+        let result = crate::user_vocab::insert_word(
+            &tx,
+            vocab_book_id,
+            &crate::user_vocab::NewWord {
+                word,
+                definition: w["definition"].as_str().unwrap_or(""),
+                phonetic: w["phonetic"].as_str().unwrap_or(""),
+                example: w["example_sentence"].as_str().unwrap_or(""),
+                memory: w["memory_tag"].as_str().unwrap_or(""),
+                ..crate::user_vocab::NewWord::simple(word, prof)
+            },
+        )?;
+        if !result.skipped {
+            inserted += 1;
+        }
     }
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(inserted)
 }

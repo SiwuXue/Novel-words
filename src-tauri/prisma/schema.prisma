@@ -13,39 +13,99 @@ model Novel {
     title        String      @default("")
     author       String      @default("")
     category     String      @default("")
-    rawText      String      @default("")
-    cleanedText  String      @default("")
-    isFavorite   Boolean     @default(false)
-    createdAt    DateTime    @default(now())
-    updatedAt    DateTime    @updatedAt
+    rawText      String      @default("") @map("raw_text")
+    cleanedText  String      @default("") @map("cleaned_text")
+    isFavorite   Boolean     @default(false) @map("is_favorite")
+    createdAt    DateTime    @default(now()) @map("created_at")
+    updatedAt    DateTime    @updatedAt @map("updated_at")
     vocabWords   VocabWord[]
+    @@map("novel")
 }
 
 model VocabBook {
     id          Int         @id @default(autoincrement())
     name        String
     description String      @default("")
-    createdAt   DateTime    @default(now())
-    updatedAt   DateTime    @updatedAt
+    isPreset    Boolean     @default(false) @map("is_preset")
+    presetKey   String      @default("") @map("preset_key")
+    createdAt   DateTime    @default(now()) @map("created_at")
+    updatedAt   DateTime    @updatedAt @map("updated_at")
     words       VocabWord[]
+    reviewLogs  ReviewLog[]
+    @@map("vocab_book")
 }
 
 model VocabWord {
     id              Int        @id @default(autoincrement())
-    vocabBookId     Int
+    vocabBookId     Int        @map("vocab_book_id")
     vocabBook       VocabBook  @relation(fields: [vocabBookId], references: [id], onDelete: Cascade)
     word            String
+    wordKey         String     @default("") @map("word_key")
+    userVocabId     Int?       @map("user_vocab_id")
+    userVocab       UserVocab? @relation(fields: [userVocabId], references: [id])
     definition      String     @default("")
     phonetic        String     @default("")
-    exampleSentence String     @default("")
-    novelId         Int?
+    exampleSentence String     @default("") @map("example_sentence")
+    novelId         Int?       @map("novel_id")
     novel           Novel?     @relation(fields: [novelId], references: [id], onDelete: SetNull)
+    chapterId       Int?       @map("chapter_id")
+    // Compatibility fallback only. Personal learning state belongs to UserVocab.
     proficiency     String     @default("unknown")
-    memoryTag       String     @default("")
-    createdAt       DateTime   @default(now())
+    memoryTag       String     @default("") @map("memory_tag")
+    matchTerms      String     @default("") @map("match_terms")
+    sourceKeys      String     @default("[]") @map("source_keys")
+    createdAt       DateTime   @default(now()) @map("created_at")
+    reviewLogs      ReviewLog[]
 
     @@index([vocabBookId])
     @@index([novelId])
+    @@index([userVocabId])
+    @@unique([vocabBookId, wordKey])
+    @@map("vocab_word")
+}
+
+// SQLite stores the SRS JSON and Unix-second learning timestamps directly.
+// Only personal additions create records; removing memberships pauses review.
+model UserVocab {
+    id              Int         @id @default(autoincrement())
+    wordKey         String      @unique @map("word_key")
+    word            String
+    definition      String      @default("")
+    phonetic        String      @default("")
+    exampleSentence String      @default("") @map("example_sentence")
+    proficiency     String      @default("unknown")
+    srsState        String      @default("{}") @map("srs_state")
+    lastReviewedAt  BigInt      @default(0) @map("last_reviewed_at")
+    stateUpdatedAt  BigInt      @default(0) @map("state_updated_at")
+    createdAt       DateTime    @default(now()) @map("created_at")
+    updatedAt       DateTime    @updatedAt @map("updated_at")
+    memberships     VocabWord[]
+    reviewLogs      ReviewLog[]
+
+    @@index([proficiency])
+    @@map("user_vocab")
+}
+
+model ReviewLog {
+    id               Int        @id @default(autoincrement())
+    vocabWordId      Int?       @map("vocab_word_id")
+    vocabWord        VocabWord? @relation(fields: [vocabWordId], references: [id], onDelete: SetNull)
+    vocabBookId      Int?       @map("vocab_book_id")
+    vocabBook        VocabBook? @relation(fields: [vocabBookId], references: [id], onDelete: SetNull)
+    userVocabId      Int?       @map("user_vocab_id")
+    userVocab        UserVocab? @relation(fields: [userVocabId], references: [id])
+    wordSnapshot     String     @default("") @map("word_snapshot")
+    bookNameSnapshot String     @default("") @map("book_name_snapshot")
+    rating           String     @default("legacy")
+    reviewedAt       BigInt     @map("reviewed_at")
+    dueBefore        String     @default("") @map("due_before")
+    dueAfter         String     @default("") @map("due_after")
+    proficiency      String     @default("")
+
+    @@index([reviewedAt])
+    @@index([vocabWordId])
+    @@index([userVocabId])
+    @@map("review_log")
 }
 
 model PdfTemplate {

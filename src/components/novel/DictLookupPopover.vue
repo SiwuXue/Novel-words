@@ -1,4 +1,4 @@
-dan'cidanci<template>
+<template>
   <div
     ref="popoverRef"
     class="dict-lookup-popover"
@@ -8,7 +8,7 @@ dan'cidanci<template>
     <!-- Loading -->
     <div v-if="store.looking" class="dict-state">
       <el-icon class="is-loading"><Loading /></el-icon>
-      <span>查询中...</span>
+      <span>{{ t('dict.checking') }}</span>
     </div>
 
     <!-- Error -->
@@ -27,18 +27,24 @@ dan'cidanci<template>
             link
             size="small"
             class="dict-speak-btn"
-            title="朗读"
+            :title="t('dict.pronounce', { word: store.currentWord.word })"
+            :aria-label="t('dict.pronounce', { word: store.currentWord.word })"
             @click="speak(store.currentWord!.word)"
           >
             <el-icon><Microphone /></el-icon>
           </el-button>
         </div>
-        <div class="dict-translation">{{ store.currentWord.translation || '（无释义）' }}</div>
+        <div class="dict-translation">{{ store.currentWord.translation || t('dict.noDefinition') }}</div>
+        <p v-if="learningState" class="dict-learning-state" role="status">{{ t('wordForm.inherited', { status: t(`vocabDetail.${learningState.proficiency}`) }) }}</p>
+        <p v-else-if="checkingLearningState" class="dict-learning-state" role="status">{{ t('wordForm.checking') }}</p>
         <div class="dict-footer">
           <el-select
+            popper-class="dict-book-dropdown"
             v-model="selectedBookId"
             size="small"
-            placeholder="选择词汇本"
+            :placeholder="t('dict.chooseBook')"
+            :aria-label="t('dict.chooseBook')"
+            :disabled="!!addingWord"
             style="flex: 1; min-width: 120px"
           >
             <el-option
@@ -51,17 +57,17 @@ dan'cidanci<template>
           <el-button
             size="small"
             type="primary"
-            :disabled="!selectedBookId || addedWords.has(store.currentWord.word)"
-            :loading="addingWord === store.currentWord.word"
+            :disabled="!selectedBookId || hasCollected(store.currentWord.word) || !!addingWord"
+            :loading="addingWord === collectionKey(selectedBookId, store.currentWord.word)"
             @click="addEnglishWord(store.currentWord)"
           >
-            {{ addedWords.has(store.currentWord.word) ? '已加入' : '加入词汇本' }}
+            {{ hasCollected(store.currentWord.word) ? t('dict.added') : t('dict.addToBook') }}
           </el-button>
         </div>
       </template>
       <div v-else class="dict-state dict-empty">
         <el-icon><Search /></el-icon>
-        <span>词典中无此词</span>
+        <span>{{ t('dict.notFound') }}</span>
       </div>
     </template>
 
@@ -70,12 +76,12 @@ dan'cidanci<template>
       <div class="dict-header">
         <span class="dict-word cn">{{ store.keyword }}</span>
         <span class="dict-count" v-if="!store.looking">
-          找到 {{ store.chineseResults.length }} 个匹配
+          {{ t('dict.matchCount', { n: store.chineseResults.length }) }}
         </span>
       </div>
       <div v-if="store.chineseResults.length === 0" class="dict-state dict-empty">
         <el-icon><Search /></el-icon>
-        <span>未找到对应英文单词</span>
+        <span>{{ t('dict.noEnglishMatches') }}</span>
       </div>
       <div v-else class="dict-list">
         <div
@@ -87,9 +93,7 @@ dan'cidanci<template>
             <div class="dict-list-word">
               {{ w.word }}
               <span v-if="w.phonetic_us" class="dict-list-phonetic">/{{ w.phonetic_us }}/</span>
-              <el-icon class="dict-list-speak" title="朗读" @click="speak(w.word)">
-                <Microphone />
-              </el-icon>
+              <el-button link size="small" class="dict-list-speak" :title="t('dict.pronounce', { word: w.word })" :aria-label="t('dict.pronounce', { word: w.word })" @click="speak(w.word)"><el-icon><Microphone /></el-icon></el-button>
             </div>
             <div class="dict-list-translation">{{ w.translation }}</div>
           </div>
@@ -97,19 +101,22 @@ dan'cidanci<template>
             size="small"
             link
             type="primary"
-            :disabled="!selectedBookId || addedWords.has(w.word)"
-            :loading="addingWord === w.word"
+            :disabled="!selectedBookId || hasCollected(w.word) || !!addingWord"
+            :loading="addingWord === collectionKey(selectedBookId, w.word)"
             @click="addEnglishWord(w)"
           >
-            {{ addedWords.has(w.word) ? '已加入' : '加入' }}
+            {{ hasCollected(w.word) ? t('dict.added') : t('dict.add') }}
           </el-button>
         </div>
       </div>
       <div class="dict-footer" v-if="store.chineseResults.length > 0">
         <el-select
+          popper-class="dict-book-dropdown"
           v-model="selectedBookId"
           size="small"
-          placeholder="选择词汇本"
+          :placeholder="t('dict.chooseBook')"
+          :aria-label="t('dict.chooseBook')"
+          :disabled="!!addingWord"
           style="flex: 1; min-width: 120px"
         >
           <el-option
@@ -125,7 +132,7 @@ dan'cidanci<template>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { Loading, WarningFilled, Search, Microphone } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
@@ -133,7 +140,8 @@ import { useDictionaryStore, type DictWord } from '@/stores/dictionaryStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { speakWord } from '@/utils/speech'
-import type { VocabWord } from '@/types/vocabWord'
+import type { UserVocabEntry, VocabWord } from '@/types/vocabWord'
+import { t } from '@/i18n'
 
 const props = defineProps<{
   text: string
@@ -154,8 +162,39 @@ const popoverRef = ref<HTMLElement | null>(null)
 const selectedBookId = ref<number | null>(null)
 const addingWord = ref<string | null>(null)
 const addedWords = ref<Set<string>>(new Set())
+const learningState = ref<UserVocabEntry | null>(null)
+const checkingLearningState = ref(false)
+let learningRequest = 0
+let disposed = false
 const posX = ref(0)
 const posY = ref(0)
+
+function collectionKey(bookId: number | null, word: string): string {
+  return `${bookId}:${word.replace(/[‘’]/g, "'").trim().replace(/\s+/g, ' ').toLowerCase()}`
+}
+function hasCollected(word: string): boolean {
+  return selectedBookId.value !== null && addedWords.value.has(collectionKey(selectedBookId.value, word))
+}
+
+watch(() => store.direction === 'english' && !store.looking ? store.currentWord?.word : null, async word => {
+  const request = ++learningRequest
+  learningState.value = null
+  checkingLearningState.value = false
+  if (!word?.trim()) return
+  checkingLearningState.value = true
+  try {
+    const state = await invoke<UserVocabEntry | null>('lookup_user_vocab', { word: word.trim() })
+    if (!disposed && request === learningRequest) learningState.value = state
+  } catch {
+    // Collection still resolves shared state atomically in the backend.
+  } finally { if (!disposed && request === learningRequest) checkingLearningState.value = false }
+}, { immediate: true })
+
+watch(() => vocabBookStore.books.map(book => book.id), ids => {
+  if (selectedBookId.value && ids.includes(selectedBookId.value)) return
+  const preferred = settingsStore.defaultVocabBookId
+  selectedBookId.value = preferred && ids.includes(preferred) ? preferred : ids[0] ?? null
+})
 
 const preferredPhonetic = computed(() => {
   if (!store.currentWord) return ''
@@ -191,16 +230,18 @@ function adjustPosition() {
 }
 
 async function addEnglishWord(w: DictWord) {
-  if (!selectedBookId.value) {
-    ElMessage.warning('请先选择词汇本')
+  const bookId = selectedBookId.value
+  if (!bookId || !vocabBookStore.books.some(book => book.id === bookId)) {
+    ElMessage.warning(t('dict.chooseBookFirst'))
     return
   }
-  if (addedWords.value.has(w.word)) return
-  addingWord.value = w.word
+  const key = collectionKey(bookId, w.word)
+  if (addedWords.value.has(key) || addingWord.value) return
+  addingWord.value = key
   try {
     await invoke<VocabWord>('create_vocab_word', {
-      vocabBookId: selectedBookId.value,
-      word: w.word,
+      vocabBookId: bookId,
+      word: w.word.trim(),
       definition: w.translation,
       phonetic: w.phonetic_us || w.phonetic_uk,
       exampleSentence: '',
@@ -209,13 +250,15 @@ async function addEnglishWord(w: DictWord) {
       proficiency: 'unknown',
       memoryTag: '',
     })
-    addedWords.value.add(w.word)
-    ElMessage.success(`「${w.word}」已加入词汇本`)
+    if (disposed) return
+    addedWords.value.add(key)
+    ElMessage.success(t('dict.collected', { word: w.word }))
   } catch (e: any) {
     const msg = String(e?.message || e)
+    if (disposed) return
     if (msg.includes('已存在')) {
-      addedWords.value.add(w.word)
-      ElMessage.info(`「${w.word}」已在词汇本中`)
+      addedWords.value.add(key)
+      ElMessage.info(t('dict.alreadyInBook', { word: w.word }))
     } else {
       ElMessage.error(msg)
     }
@@ -233,19 +276,24 @@ function onKeydown(e: KeyboardEvent) {
 
 onMounted(async () => {
   await vocabBookStore.fetchAll()
-  // Use default vocab book from settings if set
-  if (settingsStore.defaultVocabBookId) {
-    selectedBookId.value = settingsStore.defaultVocabBookId
-  } else if (vocabBookStore.books.length > 0) {
-    selectedBookId.value = vocabBookStore.books[0].id
+  if (disposed) return
+  // Preserve a selection made from cached books while the refresh was pending.
+  if (!selectedBookId.value || !vocabBookStore.books.some(book => book.id === selectedBookId.value)) {
+    if (settingsStore.defaultVocabBookId && vocabBookStore.books.some(book => book.id === settingsStore.defaultVocabBookId)) {
+      selectedBookId.value = settingsStore.defaultVocabBookId
+    } else if (vocabBookStore.books.length > 0) {
+      selectedBookId.value = vocabBookStore.books[0].id
+    }
   }
   document.addEventListener('keydown', onKeydown)
   // Wait for DOM to render then adjust
   await nextTick()
-  adjustPosition()
+  if (!disposed) adjustPosition()
 })
 
 onBeforeUnmount(() => {
+  disposed = true
+  ++learningRequest
   document.removeEventListener('keydown', onKeydown)
 })
 </script>
@@ -322,6 +370,7 @@ onBeforeUnmount(() => {
   overflow-y: auto;
   padding: 4px 0;
 }
+.dict-learning-state { color: var(--text-secondary); font-size: 12px; line-height: 1.6; margin: 0; }
 
 .dict-list {
   max-height: 280px;

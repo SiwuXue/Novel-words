@@ -7,7 +7,8 @@ use std::path::PathBuf;
 use tauri::{Manager, State};
 
 pub const CET4_BOOK_NAME: &str = "四级真题核心词";
-pub const CET4_BOOK_DESC: &str = "1162 条四级考试高频核心词，含真题例句、记忆法和常见搭配。数据来源：四级词汇乱序版。";
+pub const CET4_BOOK_DESC: &str =
+    "1162 条四级考试高频核心词，含真题例句、记忆法和常见搭配。数据来源：四级词汇乱序版。";
 
 #[derive(Clone, Copy)]
 pub struct BundledPreset {
@@ -232,6 +233,7 @@ pub fn update_vocab_book(
     description: String,
 ) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
+    crate::user_vocab::require_personal_book(&db, id)?;
     let affected = db
         .execute(
             "UPDATE vocab_book SET name=?1, description=?2, updated_at=datetime('now','localtime') WHERE id=?3",
@@ -248,6 +250,7 @@ pub fn update_vocab_book(
 #[tauri::command]
 pub fn delete_vocab_book(state: State<DbState>, id: i64) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
+    crate::user_vocab::require_personal_book(&db, id)?;
     db.execute("DELETE FROM vocab_book WHERE id=?1", rusqlite::params![id])
         .map_err(|e| format!("删除词汇本失败: {}", e))?;
     Ok(())
@@ -435,8 +438,8 @@ pub fn ensure_preset_book_populated(
     }
 
     // 读取并解析 NDJSON
-    let file = std::fs::File::open(json_path)
-        .map_err(|e| format!("打开预设词汇文件失败: {}", e))?;
+    let file =
+        std::fs::File::open(json_path).map_err(|e| format!("打开预设词汇文件失败: {}", e))?;
     let reader = BufReader::new(file);
     let mut entries: Vec<Cet4Entry> = Vec::with_capacity(5000);
     for (idx, line) in reader.lines().enumerate() {
@@ -451,7 +454,9 @@ pub fn ensure_preset_book_populated(
     }
     let total_in_file = entries.len() as u32;
 
-    let tx = conn.transaction().map_err(|e| format!("开启事务失败: {}", e))?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("开启事务失败: {}", e))?;
 
     // 优先按稳定的预设 ID 复用；仅 CET4 兼容旧版本按名称创建的记录。
     let existing_id = tx
@@ -500,8 +505,8 @@ pub fn ensure_preset_book_populated(
         let mut stmt = tx
             .prepare(
                 "INSERT OR IGNORE INTO vocab_word
-                 (vocab_book_id, word, definition, phonetic, example_sentence, proficiency, memory_tag)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                 (vocab_book_id, word, definition, phonetic, example_sentence, proficiency, memory_tag,word_key)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7,?8)",
             )
             .map_err(|e| format!("准备插入语句失败: {}", e))?;
         for entry in &entries {
@@ -519,6 +524,7 @@ pub fn ensure_preset_book_populated(
                     build_example(entry),
                     "unknown",
                     build_memory_tag(entry),
+                    crate::user_vocab::word_key(&entry.head_word),
                 ])
                 .map_err(|e| format!("写入单词 '{}' 失败: {}", word, e))?;
             if n > 0 {
@@ -571,7 +577,7 @@ mod tests {
         let expected = [
             (1162_u32, 1162_u32),
             (1228, 1228),
-            (1341, 1341),
+            (1341, 1340),
             (595, 595),
             (684, 684),
             (3739, 3739),
@@ -579,8 +585,8 @@ mod tests {
             (4533, 4533),
             (4025, 4025),
             (12197, 12197),
-            (1420, 1420),
-            (3668, 3668),
+            (1420, 1418),
+            (3668, 3665),
         ];
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
@@ -595,6 +601,7 @@ mod tests {
                id INTEGER PRIMARY KEY AUTOINCREMENT,
                vocab_book_id INTEGER NOT NULL,
                word TEXT NOT NULL,
+               word_key TEXT NOT NULL,
                definition TEXT NOT NULL DEFAULT '',
                phonetic TEXT NOT NULL DEFAULT '',
                example_sentence TEXT NOT NULL DEFAULT '',
@@ -602,7 +609,7 @@ mod tests {
                memory_tag TEXT NOT NULL DEFAULT ''
              );
              CREATE UNIQUE INDEX idx_vocab_word_unique
-               ON vocab_word (vocab_book_id, word);",
+               ON vocab_word (vocab_book_id, word_key);",
         )
         .unwrap();
         let resources = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources");
@@ -619,9 +626,11 @@ mod tests {
         }
 
         let preset_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM vocab_book WHERE is_preset = 1", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT COUNT(*) FROM vocab_book WHERE is_preset = 1",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(preset_count, BUNDLED_PRESETS.len() as i64);
     }

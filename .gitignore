@@ -33,3 +33,4 @@ test-data
 /playwright-report/
 
 /.ui-preview/
+__pycache__/

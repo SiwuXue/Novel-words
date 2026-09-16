@@ -11,9 +11,15 @@ use tauri_plugin_fs::FsExt;
 
 fn steps_label(steps: IntensiveSteps) -> String {
     let mut parts = Vec::new();
-    if steps.step1 { parts.push("Step 1") }
-    if steps.step2 { parts.push("Step 2") }
-    if steps.step3 { parts.push("Step 3") }
+    if steps.step1 {
+        parts.push("Step 1")
+    }
+    if steps.step2 {
+        parts.push("Step 2")
+    }
+    if steps.step3 {
+        parts.push("Step 3")
+    }
     parts.join(" + ")
 }
 
@@ -67,31 +73,7 @@ pub async fn export_pdf(
 
         // Load vocab words if a book is selected
         let vocabs: Vec<VocabWord> = if let Some(book_id) = vocab_book_id {
-            let mut stmt = db
-                .prepare(
-                    "SELECT id, vocab_book_id, word, definition, phonetic, example_sentence, novel_id, chapter_id, proficiency, memory_tag, created_at, match_terms
-                     FROM vocab_word WHERE vocab_book_id = ?1",
-                )
-                .map_err(|e| format!("查询生词失败: {}", e))?;
-            let rows = stmt
-                .query_map(rusqlite::params![book_id], |row| {
-                    Ok(VocabWord {
-                        id: row.get(0)?,
-                        vocab_book_id: row.get(1)?,
-                        word: row.get(2)?,
-                        definition: row.get(3)?,
-                        phonetic: row.get(4)?,
-                        example_sentence: row.get(5)?,
-                        novel_id: row.get(6)?,
-                        chapter_id: row.get(7)?,
-                        proficiency: row.get(8)?,
-                        memory_tag: row.get(9)?,
-                        created_at: row.get(10)?,
-                        match_terms: row.get(11)?,
-                    })
-                })
-                .map_err(|e| format!("查询生词失败: {}", e))?;
-            rows.filter_map(|r| r.ok()).collect()
+            crate::user_vocab::load_words(&db, book_id)?
         } else {
             Vec::new()
         };
@@ -217,7 +199,8 @@ pub async fn export_pdf(
                 percent: 5,
                 message: format!(
                     "已匹配 {} 词（{} 本章节，待排版……）",
-                    matched_words, chapters.len()
+                    matched_words,
+                    chapters.len()
                 ),
             },
         );
@@ -239,7 +222,10 @@ pub async fn export_pdf(
         options.read(false).write(true).create(true).truncate(true);
         let mut file = app
             .fs()
-            .open(output_path.parse::<tauri_plugin_fs::FilePath>().unwrap(), options)
+            .open(
+                output_path.parse::<tauri_plugin_fs::FilePath>().unwrap(),
+                options,
+            )
             .map_err(|e| format!("创建 PDF 文件失败: {}", e))?;
         std::io::Write::write_all(&mut file, &pdf_bytes)
             .map_err(|e| format!("写入 PDF 失败: {}", e))?;

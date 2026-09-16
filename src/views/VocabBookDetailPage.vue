@@ -159,6 +159,7 @@ import { useVocabWordStore } from '@/stores/vocabWordStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
 import type { VocabWord, VocabWordFormData } from '@/types/vocabWord'
 import type { Chapter } from '@/types/novel'
+import type { VocabImportResult } from '@/types/vocabBook'
 import VocabWordFormDialog from '@/components/vocabulary/VocabWordFormDialog.vue'
 import { t } from '@/i18n'
 
@@ -433,17 +434,14 @@ async function handleImportCsv() {
     })
     if (!filePath) return // user cancelled
 
-    const result = await invoke<{ imported: number; skipped: number }>(
+    const result = await invoke<VocabImportResult>(
       'import_vocab_words_csv',
       {
         vocabBookId: bookId.value,
         filePath,
       },
     )
-    const msg = result.skipped > 0
-      ? `已导入 ${result.imported} 个单词，跳过 ${result.skipped} 个重复`
-      : `已导入 ${result.imported} 个单词`
-    ElMessage.success(msg)
+    ElMessage.success(t('vocabImport.summary', { newWords: result.newWords, inherited: result.inherited, skipped: result.skipped }))
     await load()
   } catch (e: any) {
     ElMessage.error(String(e?.message || e || '导入失败'))

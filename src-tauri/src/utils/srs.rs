@@ -1,9 +1,5 @@
-//! Spaced-repetition (SM-2) scheduling stored inside the existing
-//! `vocab_word.memory_tag` column, so no schema change is required.
-//!
-//! `memory_tag` doubles as the SRS state container: when a card has scheduling
-//! data it is serialized as `{"tag":"<user tag>","srs":{...}}`; legacy plain-text
-//! tags are preserved and treated as cards with no SRS state yet.
+//! Existing SM-2 scheduling and the compatible memory-tag wire envelope.
+//! Personal schedules live in `user_vocab`; each membership keeps its local tag.
 
 use serde::{Deserialize, Serialize};
 
@@ -14,7 +10,7 @@ const MIN_EASE: f64 = 1.3;
 const MAX_EASE: f64 = 3.5;
 const DEFAULT_EASE: f64 = 2.5;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SrsState {
     #[serde(default = "default_ease")]
     pub ease: f64,
@@ -30,6 +26,18 @@ pub struct SrsState {
 
 fn default_ease() -> f64 {
     DEFAULT_EASE
+}
+
+impl Default for SrsState {
+    fn default() -> Self {
+        Self {
+            ease: DEFAULT_EASE,
+            interval: 0,
+            reps: 0,
+            lapses: 0,
+            due: String::new(),
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -61,11 +69,7 @@ pub fn parse_memory_tag(raw: &str) -> (String, SrsState) {
 /// Serialize with an explicit `last_reviewed_at` timestamp (Unix seconds).
 /// Used by the review command to record when the card was last studied, so
 /// the frontend can compute "reviewed today" progress.
-pub fn serialize_memory_tag_reviewed(
-    tag: &str,
-    srs: &SrsState,
-    last_reviewed_at: u64,
-) -> String {
+pub fn serialize_memory_tag_reviewed(tag: &str, srs: &SrsState, last_reviewed_at: u64) -> String {
     if srs.reps == 0 && srs.interval == 0 && srs.due.is_empty() && last_reviewed_at == 0 {
         return tag.to_string();
     }
@@ -105,7 +109,9 @@ pub fn apply_rating(state: &mut SrsState, rating: &str) -> String {
             state.interval = if state.reps == 1 {
                 4
             } else {
-                ((state.interval as f64) * state.ease * 1.3).round().max(1.0) as u32
+                ((state.interval as f64) * state.ease * 1.3)
+                    .round()
+                    .max(1.0) as u32
             };
             state.ease = (state.ease + 0.15).min(MAX_EASE);
             state.due = (today + chrono::Duration::days(state.interval as i64)).to_string();
@@ -126,5 +132,17 @@ pub fn apply_rating(state: &mut SrsState, rating: &str) -> String {
                 "familiar".to_string()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn unscheduled_cards_use_the_algorithm_default_ease() {
+        let (_, mut state) = super::parse_memory_tag("custom");
+        assert_eq!(state.ease, 2.5);
+        super::apply_rating(&mut state, "easy");
+        assert!((state.ease - 2.65).abs() < 0.0001);
+        assert_eq!(state.interval, 4);
     }
 }

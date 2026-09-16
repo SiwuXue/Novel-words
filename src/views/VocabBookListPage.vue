@@ -7,6 +7,12 @@
         </el-button>
 
     </PageHeader>
+    <el-tabs v-model="activeTab" :aria-label="t('vocabList.title')">
+      <el-tab-pane :label="t('vocabList.booksTab')" name="books" />
+      <el-tab-pane :label="t('allVocab.title')" name="all" />
+    </el-tabs>
+    <AllVocabularyPanel v-if="activeTab === 'all'" />
+    <template v-else>
     <div class="page-toolbar" :aria-label="t('ui.search')">
         <el-input
           class="header-search"
@@ -57,6 +63,7 @@
         </template>
       </el-table-column>
     </el-table>
+    </template>
 
     <VocabBookFormDialog
       v-model="dialogVisible"
@@ -70,6 +77,7 @@
 import PageState from '@/components/common/PageState.vue'
 import PageHeader from '@/components/common/PageHeader.vue'
 import { ref, computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { Search, Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
@@ -77,9 +85,21 @@ import { open, save } from '@tauri-apps/plugin-dialog'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
 import type { VocabBook, VocabBookFormData } from '@/types/vocabBook'
 import VocabBookFormDialog from '@/components/vocabulary/VocabBookFormDialog.vue'
+import AllVocabularyPanel from '@/components/vocabulary/AllVocabularyPanel.vue'
 import { t } from '@/i18n'
 
 const store = useVocabBookStore()
+const route = useRoute()
+const router = useRouter()
+const activeTab = computed({
+  get: () => route.query.tab === 'all' ? 'all' : 'books',
+  set: (value: string) => {
+    const query = { ...route.query }
+    if (value === 'all') query.tab = 'all'
+    else delete query.tab
+    void router.replace({ path: '/vocabulary', query })
+  },
+})
 
 const searchQuery = ref('')
 const dialogVisible = ref(false)

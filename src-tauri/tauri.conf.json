@@ -36,6 +36,7 @@
       "icons/icon.ico"
     ],
     "resources": [
+      "resources/presets.zip",
       "resources/dictionary.db",
       "resources/CET4luan_1.json",
       "resources/CET4luan_2.json",
