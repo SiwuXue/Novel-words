@@ -1,0 +1,59 @@
+
+:root, html.dark {
+  --el-color-primary:var(--accent-color);
+  --el-color-success:var(--success-color); --el-color-warning:var(--warning-color); --el-color-danger:var(--danger-color);
+  --el-color-primary-light-3:color-mix(in srgb,var(--accent-color) 70%,var(--bg-primary));
+  --el-color-primary-light-5:color-mix(in srgb,var(--accent-color) 50%,var(--bg-primary));
+  --el-color-primary-light-7:color-mix(in srgb,var(--accent-color) 30%,var(--bg-primary));
+  --el-color-primary-light-8:color-mix(in srgb,var(--accent-color) 20%,var(--bg-primary));
+  --el-color-primary-light-9:var(--accent-light);
+  --el-color-primary-dark-2:color-mix(in srgb,var(--accent-color) 80%,#000);
+  --el-bg-color:var(--bg-primary); --el-bg-color-overlay:var(--bg-primary); --el-bg-color-page:var(--bg-secondary);
+  --el-text-color-primary:var(--text-primary); --el-text-color-regular:var(--text-primary); --el-text-color-secondary:var(--text-secondary); --el-text-color-placeholder:var(--text-placeholder);
+  --el-border-color:var(--border-color); --el-border-color-light:var(--border-color); --el-border-color-lighter:var(--border-color); --el-border-color-extra-light:var(--border-color);
+  --el-fill-color-blank:var(--bg-primary); --el-fill-color-light:var(--bg-secondary); --el-fill-color-lighter:var(--bg-secondary); --el-fill-color-extra-light:var(--bg-secondary);
+  --el-border-radius-base:8px; --el-box-shadow-light:var(--shadow); --el-font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',sans-serif;
+}
+button, input, select, textarea { font:inherit; }
+button, a, [role="button"] { touch-action:manipulation; }
+:focus-visible { outline:2px solid var(--accent-color); outline-offset:3px; }
+::selection { color:var(--on-accent); }
+.el-button + .el-button { margin-left:0; }
+.el-button--primary:not(.is-plain):not(.is-link):not(.is-text) { --el-button-text-color:var(--on-accent); --el-button-hover-text-color:var(--on-accent); }
+.el-button--primary.is-plain { --el-button-text-color:var(--accent-color); --el-button-hover-text-color:var(--on-accent); }
+.el-radio-button { --el-radio-button-checked-text-color:var(--on-accent); }
+.el-checkbox { --el-checkbox-checked-icon-color:var(--on-accent); }
+.el-checkbox-button { --el-checkbox-button-checked-text-color:var(--on-accent); }
+.el-table { border:1px solid var(--border-color); border-radius:8px; --el-table-header-bg-color:var(--bg-secondary); --el-table-row-hover-bg-color:var(--accent-light); }
+.el-table th.el-table__cell { font-weight:600; }
+.el-table .el-table__cell { padding:12px 0; }
+.el-table .cell { overflow-wrap:anywhere; }
+.el-dialog { border:1px solid var(--border-color); border-radius:8px; max-width:calc(100vw - 24px); }
+html .el-dialog { --el-dialog-margin-top:min(8dvh,48px); }
+.el-dialog__body { max-height:min(70dvh,calc(100dvh - 180px)); overflow-y:auto; }
+.el-card { box-shadow:none !important; border-radius:8px; }
+.page-header { display:flex; flex-wrap:wrap; gap:16px; align-items:center; margin-bottom:24px; }
+.page-header h2, .stats-page > h2, .settings-page > h2 { font-size:24px; font-weight:650; line-height:1.4; }
+.novel-list-page, .vocab-book-list-page, .vocab-book-detail-page, .preset-page, .stats-page, .settings-page { width:100%; max-width:1280px; margin-inline:auto; }
+.page-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px; }
+.page-toolbar .header-search { width:min(320px,100%); }
+.page-toolbar .filter-tabs { margin:0; }
+.page-toolbar .el-checkbox-group { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.header-actions, .header-right { display:flex; flex-wrap:wrap; gap:8px; }
+.preset-card, .stat-card { box-shadow:none !important; border:1px solid var(--border-color); border-radius:8px !important; }
+.preset-card:hover { transform:none !important; }
+.navigation-dialog .el-dialog__body { padding:0; max-height:75dvh; }
+.navigation-dialog .sidebar { width:100%; min-height:420px; }
+.review-header { flex-wrap:wrap; gap:12px !important; }
+.review-header h2 { overflow-wrap:anywhere; min-width:0; }
+.review-card { border-radius:8px !important; box-shadow:none !important; }
+.settings-section-title { font-size:14px; font-weight:600; color:var(--accent-color); border-top:1px solid var(--border-color); padding-top:20px; margin:20px 0 16px; }
+.settings-section-title:first-child { border-top:0; padding-top:0; margin-top:8px; }
+.settings-form { padding:20px; border:1px solid var(--border-color); border-radius:8px; background:var(--bg-primary); }
+.row-more { letter-spacing:2px; }
+@media(max-width:760px) { .page-header { margin-bottom:16px; }.page-toolbar { align-items:stretch; }.el-dialog__body { max-height:min(75dvh,calc(100dvh - 180px)); }.settings-form { padding:14px; }.el-pagination { flex-wrap:wrap; gap:8px; } }
+@media(prefers-reduced-motion:reduce) { *, *::before, *::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; scroll-behavior:auto !important; } }
+
+.library-title { color:var(--accent-color); font-weight:600; cursor:pointer; }.library-title:hover { text-decoration:underline; }
+
+.el-button--success:not(.is-plain):not(.is-link):not(.is-text), .el-button--warning:not(.is-plain):not(.is-link):not(.is-text), .el-button--danger:not(.is-plain):not(.is-link):not(.is-text) { --el-button-text-color:var(--on-accent); --el-button-hover-text-color:var(--on-accent); }

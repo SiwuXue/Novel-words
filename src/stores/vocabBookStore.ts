@@ -6,15 +6,18 @@ import type { VocabBook, VocabBookFormData } from '@/types/vocabBook'
 export const useVocabBookStore = defineStore('vocabBook', () => {
   const books = ref<VocabBook[]>([])
   const loading = ref(false)
+  const error = ref('')
 
   async function fetchAll() {
     loading.value = true
+    error.value = ''
     try {
       const all = await invoke<VocabBook[]>('get_all_vocab_books')
       // Preset (bundled) books live on the /presets page; keep them out of the
       // user-facing lists/selectors everywhere.
       books.value = all.filter((b) => !b.isPreset)
     } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
       console.error('[vocabBookStore] fetchAll failed:', e)
     } finally {
       loading.value = false
@@ -52,5 +55,5 @@ export const useVocabBookStore = defineStore('vocabBook', () => {
     books.value = books.value.filter((b) => b.id !== id)
   }
 
-  return { books, loading, fetchAll, create, update, remove }
+  return { error, books, loading, fetchAll, create, update, remove }
 })

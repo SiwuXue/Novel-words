@@ -1,6 +1,7 @@
 <template>
   <div class="stats-page">
-    <h2>{{ t('stats.title') }}</h2>
+    <PageHeader :title="t('stats.title')" />
+    <PageState v-if="error" :title="t('ui.loadFailed')" :description="error" error @retry="load" />
 
     <div v-if="loading" class="stats-loading">
       <el-icon class="is-loading" :size="28"><Loading /></el-icon>
@@ -44,7 +45,7 @@
               class="prof-progress"
               :percentage="profPercent('unknown')"
               :stroke-width="14"
-              :color="'#f56c6c'"
+              color="var(--danger-color)"
               :format="(v: number) => `${v}`"
             />
             <span class="prof-count">{{ stats.by_proficiency.unknown || 0 }}</span>
@@ -55,7 +56,7 @@
               class="prof-progress"
               :percentage="profPercent('familiar')"
               :stroke-width="14"
-              :color="'#e6a23c'"
+              color="var(--warning-color)"
               :format="(v: number) => `${v}`"
             />
             <span class="prof-count">{{ stats.by_proficiency.familiar || 0 }}</span>
@@ -66,7 +67,7 @@
               class="prof-progress"
               :percentage="profPercent('mastered')"
               :stroke-width="14"
-              :color="'#67c23a'"
+              color="var(--success-color)"
               :format="(v: number) => `${v}`"
             />
             <span class="prof-count">{{ stats.by_proficiency.mastered || 0 }}</span>
@@ -97,6 +98,8 @@
 </template>
 
 <script setup lang="ts">
+import PageState from '@/components/common/PageState.vue'
+import PageHeader from '@/components/common/PageHeader.vue'
 import { ref, computed, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { Loading } from '@element-plus/icons-vue'
@@ -118,6 +121,7 @@ interface LearningStats {
 }
 
 const loading = ref(true)
+const error = ref('')
 const stats = ref<LearningStats | null>(null)
 
 function profPercent(key: string): number {
@@ -145,15 +149,18 @@ function formatShortDate(iso: string): string {
   return `${parseInt(parts[1], 10)}/${parseInt(parts[2], 10)}`
 }
 
-onMounted(async () => {
+async function load() {
+  loading.value = true; error.value = ''
   try {
     stats.value = await invoke<LearningStats>('get_learning_stats')
   } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
     console.error('[stats] get_learning_stats failed:', e)
   } finally {
     loading.value = false
   }
-})
+}
+onMounted(load)
 </script>
 
 <style scoped>

@@ -1,11 +1,12 @@
 <template>
   <div class="settings-page">
-    <h2>设置</h2>
+    <PageHeader :title="t('nav.settings')" />
 
     <el-tabs v-model="activeTab" class="settings-tabs">
       <!-- General tab -->
       <el-tab-pane :label="t('settings.general')" name="general">
         <el-form class="settings-form" label-width="130px">
+          <h3 class="settings-section-title">{{ t('ui.appearance') }}</h3>
           <el-form-item :label="t('settings.theme')">
             <el-radio-group
               :model-value="settingsStore.theme"
@@ -23,6 +24,7 @@
             </el-radio-group>
           </el-form-item>
 
+          <h3 class="settings-section-title">{{ t('ui.exportSettings') }}</h3>
           <el-form-item v-if="!isAndroid" :label="t('settings.exportFolder')">
             <div class="inline-field">
               <el-input
@@ -60,7 +62,7 @@
                 :label="n"
                 :value="n"
               >
-                {{ STEP_LABELS[n] }}
+                {{ t('ui.pdfStep' + n) }}
               </el-checkbox>
             </el-checkbox-group>
           </el-form-item>
@@ -77,6 +79,7 @@
             <span class="backup-hint inline-hint">{{ t('settings.pdfBackgroundHint') }}</span>
           </el-form-item>
 
+          <h3 class="settings-section-title">{{ t('ui.backupSettings') }}</h3>
           <el-form-item :label="t('settings.autoBackup')">
             <el-radio-group v-model="autoBackupLocal" @change="onAutoBackupChange">
               <el-radio-button value="off">{{ t('settings.off') }}</el-radio-button>
@@ -87,6 +90,7 @@
             <span class="backup-hint inline-hint">{{ t('settings.autoBackupHint') }}</span>
           </el-form-item>
 
+          <h3 class="settings-section-title">{{ t('ui.reading') }}</h3>
           <el-form-item :label="t('settings.accent')">
             <el-radio-group
               :model-value="settingsStore.speechAccent"
@@ -98,6 +102,7 @@
             <el-button class="inline-hint" link type="primary" size="small" @click="onTestAccent">{{ t('settings.listen') }}</el-button>
           </el-form-item>
 
+          <h3 class="settings-section-title">{{ t('ui.reviewSettings') }}</h3>
           <el-form-item :label="t('settings.reviewGoal')">
             <el-input-number
               :model-value="settingsStore.reviewDailyGoal"
@@ -259,6 +264,7 @@
 </template>
 
 <script setup lang="ts">
+import PageHeader from '@/components/common/PageHeader.vue'
 import { computed, ref, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
@@ -266,7 +272,7 @@ import { open, save } from '@tauri-apps/plugin-dialog'
 import { useSettingsStore } from '@/stores/settingsStore'
 import type { PdfBackground, AutoBackup } from '@/stores/settingsStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
-import { STEP_LABELS, type StepNum } from '@/types/pdfSteps'
+import { type StepNum } from '@/types/pdfSteps'
 import { speakWord, type SpeechAccent } from '@/utils/speech'
 import { isAndroid } from '@/utils/platform'
 import { currentLocale, t, setLocale, type Locale } from '@/i18n'

@@ -5,14 +5,14 @@
         <el-icon><ArrowLeft /></el-icon> {{ t('review.back') }}
       </el-button>
       <h2>{{ book?.name || t('review.allBooks') }}</h2>
-      <el-select v-if="queue.length" v-model="reviewMode" class="review-mode-select" size="small">
+      <el-popover v-if="queue.length" trigger="click" placement="bottom-end" :width="240"><template #reference><el-button size="small" plain>{{ t('ui.reviewOptions') }}</el-button></template>      <el-select v-if="queue.length" v-model="reviewMode" class="review-mode-select" size="small">
         <el-option
           v-for="option in reviewModeOptions"
           :key="option.value"
           :value="option.value"
           :label="option.label"
         />
-      </el-select>
+      </el-select></el-popover>
       <span class="review-progress" v-if="progress">
         {{ t('review.today') }} <strong>{{ progress.reviewed_today }}</strong> / {{ progress.goal }} ·
         {{ t('review.due') }} <strong>{{ progress.due_total }}</strong>
@@ -31,16 +31,18 @@
       <span>…</span>
     </div>
 
+    <PageState v-else-if="error" :title="t('ui.loadFailed')" :description="error" error @retry="loadReview" />
+
     <!-- Empty state -->
     <div v-else-if="!queue.length && !reviewed" class="review-state">
-      <div class="review-done-icon">🎉</div>
+      <el-icon class="review-done-icon"><Reading /></el-icon>
       <h3>{{ t('review.noDueTitle') }}</h3>
-      <p>{{ t('review.noDueDesc') }}</p>
+      <p>{{ t('review.noDueDesc') }}</p><el-button @click="goBack">{{ t('review.back') }}</el-button>
     </div>
 
     <!-- Finished state -->
     <div v-else-if="!queue.length" class="review-state">
-      <div class="review-done-icon">✅</div>
+      <el-icon class="review-done-icon"><Reading /></el-icon>
       <h3>{{ t('review.doneTitle') }}</h3>
       <div class="review-summary">
         <div class="summary-item">
@@ -191,6 +193,8 @@
 </template>
 
 <script setup lang="ts">
+import PageState from '@/components/common/PageState.vue'
+import { Reading } from '@element-plus/icons-vue'
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Loading } from '@element-plus/icons-vue'
@@ -227,6 +231,7 @@ const bookId = computed(() => Number(route.params.id))
 const book = computed(() => bookStore.books.find((b) => b.id === bookId.value) || null)
 
 const loading = ref(false)
+const error = ref('')
 const queue = ref<VocabWord[]>([])
 const current = computed(() => queue.value[0] ?? null)
 const revealed = ref(false)
@@ -523,12 +528,12 @@ async function loadDistractors() {
   }
 }
 
-onMounted(async () => {
-  window.addEventListener('keydown', onKeyDown)
+async function loadReview() {
+
   if (bookStore.books.length === 0) {
     await bookStore.fetchAll()
   }
-  loading.value = true
+  loading.value = true; error.value = ''
   try {
     queue.value = bookId.value
       ? await invoke<VocabWord[]>('get_due_words', { vocabBookId: bookId.value })
@@ -536,11 +541,13 @@ onMounted(async () => {
     void loadDistractors()
     await refreshProgress()
   } catch (e: any) {
+    error.value = String(e?.message || e)
     ElMessage.error(String(e?.message || e || '加载复习队列失败'))
   } finally {
     loading.value = false
   }
-})
+}
+onMounted(() => { window.addEventListener('keydown', onKeyDown); void loadReview() })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeyDown)

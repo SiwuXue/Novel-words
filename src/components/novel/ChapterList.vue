@@ -1,26 +1,28 @@
 <template>
   <div class="chapter-list-panel">
     <div class="panel-header">
-      <h4>章节目录</h4>
-      <span class="ch-count">{{ chapters.length }} 章</span>
+      <h4>{{ t('ui.directory') }}</h4>
+      <span class="ch-count">{{ t('ui.chapterCount', { n:chapters.length }) }}</span>
     </div>
     <div class="chapter-list" v-if="chapters.length > 0">
-      <div
+      <button type="button"
         v-for="(ch, i) in chapters"
         :key="i"
         class="chapter-item"
         :class="{ active: i === activeIndex }"
+        :aria-current="i === activeIndex ? 'true' : undefined"
         @click="$emit('select', i)"
       >
         <span class="ch-index">{{ i + 1 }}</span>
         <span class="ch-label">{{ ch.title }}</span>
-      </div>
+      </button>
     </div>
-    <el-empty v-else description="暂无章节数据" :image-size="60" />
+    <el-empty v-else :description="t('ui.noChapters')" :image-size="60" />
   </div>
 </template>
 
 <script setup lang="ts">
+import { t } from '@/i18n'
 import type { Chapter } from '@/types/novel'
 
 defineProps<{
@@ -68,6 +70,7 @@ defineEmits<{
 }
 
 .chapter-item {
+  width:100%; text-align:left; border:0; background:transparent; color:var(--text-primary);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -101,7 +104,7 @@ defineEmits<{
 
 .chapter-item.active .ch-index {
   background: var(--accent-color, #409eff);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .ch-label {

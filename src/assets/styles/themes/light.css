@@ -1,26 +1,27 @@
 :root {
+  --on-accent: #ffffff;
   --bg-primary: #ffffff;
-  --bg-secondary: #f5f7fa;
-  --bg-sidebar: #f0f2f5;
-  --text-primary: #303133;
-  --text-secondary: #909399;
-  --border-color: #e4e7ed;
-  --accent-color: #409eff;
+  --bg-secondary: #F7F6F2;
+  --bg-sidebar: #F1F2ED;
+  --text-primary: #26332F;
+  --text-secondary: #63716B;
+  --border-color: #E0E5DE;
+  --accent-color: #287568;
   --editor-bg: #ffffff;
-  --preview-bg: #f9f9f9;
-  --danger-color: #f56c6c;
-  --success-color: #67c23a;
-  --warning-color: #e6a23c;
+  --preview-bg: #F7F6F2;
+  --danger-color: #B34744;
+  --success-color: #477A54;
+  --warning-color: #96651D;
   --highlight-color: #e74c3c;
   --highlight-mastered: #67c23a;
-  --shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  --shadow: 0 2px 8px rgba(28, 48, 37, 0.04);
 
   /* Aliases used by components (kept in sync with the tokens above). */
-  --text-regular: #303133;
-  --text-placeholder: #c0c4cc;
+  --text-regular: #26332F;
+  --text-placeholder: #63716B;
   --bg-color: #ffffff;
-  --hover-bg: #f0f2f5;
-  --accent-light: #ecf5ff;
+  --hover-bg: #F1F2ED;
+  --accent-light: #E6EFEB;
 
   /* Editor vocab-highlight colors — red / orange / gray (match PDF preview). */
   --editor-hl-unknown: #cc0000;

@@ -1,12 +1,12 @@
 <template>
   <div v-if="!isMobile" class="window-controls">
-    <button class="ctrl-btn" @click="minimize" title="最小化">
+    <button class="ctrl-btn" @click="minimize" :title="t('ui.minimize')" :aria-label="t('ui.minimize')">
       <svg width="12" height="12" viewBox="0 0 12 12"><rect y="5" width="12" height="1.5" fill="currentColor"/></svg>
     </button>
-    <button class="ctrl-btn" @click="toggleMaximize" title="最大化">
+    <button class="ctrl-btn" @click="toggleMaximize" :title="t('ui.maximize')" :aria-label="t('ui.maximize')">
       <svg width="12" height="12" viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
     </button>
-    <button class="ctrl-btn ctrl-close" @click="closeWindow" title="关闭">
+    <button class="ctrl-btn ctrl-close" @click="closeWindow" :title="t('ui.close')" :aria-label="t('ui.close')">
       <svg width="12" height="12" viewBox="0 0 12 12">
         <line x1="1" y1="1" x2="11" y2="11" stroke="currentColor" stroke-width="1.5"/>
         <line x1="11" y1="1" x2="1" y2="11" stroke="currentColor" stroke-width="1.5"/>
@@ -16,6 +16,7 @@
 </template>
 
 <script setup lang="ts">
+import { t } from '@/i18n'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { isMobile } from '@/utils/platform'
 

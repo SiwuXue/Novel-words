@@ -143,6 +143,14 @@ vocabBookStore.fetchAll()
 const contentReady = ref(false)
 const contentProgress = ref(0)
 let contentLoadToken = 0
+const readyWaiters = new Set<() => void>()
+function waitUntilReady(): Promise<void> {
+  if (contentReady.value) return Promise.resolve()
+  return new Promise(resolve => readyWaiters.add(resolve))
+}
+function settleReadyWaiters() { for (const resolve of readyWaiters) resolve(); readyWaiters.clear() }
+function isContentReady() { return contentReady.value }
+
 
 // ===== Dict lookup state =====
 const editorContentRef = ref<InstanceType<typeof EditorContent> | null>(null)
@@ -273,6 +281,7 @@ const editor = useEditor({
     },
   },
   onUpdate({ editor }) {
+    if (props.readOnly || !contentReady.value) return
     try {
       const html = editor.getHTML()
       emit('update:content', html)
@@ -286,7 +295,7 @@ const editor = useEditor({
 watch(
   () => props.readOnly,
   (readOnly) => {
-    editor.value?.setEditable(!readOnly)
+    editor.value?.setEditable(!readOnly, false)
   },
   { immediate: true },
 )
@@ -355,7 +364,7 @@ async function loadContent(raw: string) {
   try {
     const chunks = splitEditorContent(raw)
     if (chunks.length === 0) {
-      editor.value.commands.clearContent(true)
+      editor.value.commands.clearContent(false)
     } else {
       editor.value.commands.setContent(plainTextToHtml(chunks[0]), { emitUpdate: false })
       contentProgress.value = chunks.length === 1 ? 100 : Math.round(100 / chunks.length)
@@ -371,8 +380,10 @@ async function loadContent(raw: string) {
       }
     }
     contentReady.value = true
+    settleReadyWaiters()
     emit('ready')
   } catch (e) {
+    settleReadyWaiters()
     console.error('[NovelEditor] setContent failed:', e)
   }
 }
@@ -408,6 +419,8 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  ++contentLoadToken
+  settleReadyWaiters()
   if (!editor.value) return
   // HMR may trigger unmount after the editor has already been partially torn
   // down (schema destroyed). Guard isDestroyed to avoid getHTML failures.
@@ -513,7 +526,7 @@ function setScrollPercent(p: number) {
   el.scrollTop = max * Math.min(1, Math.max(0, p))
 }
 
-defineExpose({ scrollToText, highlightText, getScrollEl, getScrollPercent, setScrollPercent })
+defineExpose({ waitUntilReady, isContentReady, scrollToText, highlightText, getScrollEl, getScrollPercent, setScrollPercent })
 </script>
 
 <style scoped>

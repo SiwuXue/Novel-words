@@ -18,8 +18,8 @@ const router = createRouter({
     {
       path: '/novels/new',
       name: 'NovelCreate',
-      component: () => import('@/views/NovelEditorPage.vue'),
-      meta: { title: '导入小说' },
+      redirect: { path: '/novels', query: { create: '1' } },
+      meta: { title: '新建小说' },
     },
     {
       path: '/novels/:id',

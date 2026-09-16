@@ -197,7 +197,7 @@ async function openDataDir() {
   border: 1px solid rgba(64, 158, 255, 0.28);
   border-radius: 999px;
   color: var(--accent-color, #409eff);
-  background: rgba(64, 158, 255, 0.09);
+  background:var(--accent-light);
   font-size: 11px;
   font-weight: 600;
 }
@@ -241,9 +241,9 @@ async function openDataDir() {
   font-size: 17px;
 }
 
-.feature-reading { --feature-color: #409eff; }
-.feature-vocabulary { --feature-color: #67c23a; }
-.feature-export { --feature-color: #9b6cff; }
+.feature-reading { --feature-color: var(--accent-color); }
+.feature-vocabulary { --feature-color: var(--success-color); }
+.feature-export { --feature-color: var(--accent-color); }
 
 .feature-card h3 {
   margin: 0;

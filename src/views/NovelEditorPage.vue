@@ -1,11 +1,11 @@
 <template>
   <div class="editor-page" :class="{ 'reading-mode': readingMode }" :style="readingStyle">
-    <div class="editor-topbar">
+    <div class="editor-topbar" :data-tauri-drag-region="readingMode && !isMobile ? '' : undefined">
       <el-button link @click="goBack">
         <el-icon><ArrowLeft /></el-icon> {{ t('editor.back') }}
       </el-button>
-      <span class="novel-title">{{ topbarTitle }}</span>
-      <span class="save-status">
+      <span class="novel-title" :data-tauri-drag-region="readingMode && !isMobile ? '' : undefined">{{ topbarTitle }}</span>
+      <span v-if="!readingMode" class="save-status">
         <el-icon v-if="editorStore.saving" class="is-loading"><Loading /></el-icon>
         <template v-else>{{ editorStore.isDirty ? t('editor.unsaved') : t('editor.saved') }}</template>
         <el-button
@@ -19,103 +19,9 @@
         </el-button>
       </span>
       <template v-if="!readingMode">
-      <el-dropdown
-        v-if="loadState === 'loaded' && pdfTemplateType === 'intensive'"
-        trigger="click"
-        @change="onStepsDropdownClick"
-      >
-        <el-button size="small" link>
-          ⚙ {{ t('editor.exportSteps', { n: pdfSteps.length }) }}
-        </el-button>
-        <template #dropdown>
-          <div class="pdf-steps-dropdown">
-            <div class="pdf-steps-dropdown-title">本次导出包含（不影响默认设置）</div>
-            <el-checkbox-group
-              v-model="pdfSteps"
-              @change="onPdfStepsChange"
-              style="display:flex;flex-direction:column;gap:6px;padding:6px 4px 2px;"
-            >
-              <el-checkbox v-for="n in stepNums" :key="n" :label="n" :value="n">
-                {{ STEP_LABELS[n] }}
-              </el-checkbox>
-            </el-checkbox-group>
-          </div>
-        </template>
-      </el-dropdown>
-      <el-dropdown
-        v-if="loadState === 'loaded'"
-        trigger="click"
-        @command="onLanguageChange"
-      >
-        <el-button size="small" link>
-          🌐 {{ novelLanguageLabel }}
-        </el-button>
-        <template #dropdown>
-          <el-dropdown-menu>
-            <el-dropdown-item command="zh" :disabled="store.currentNovel?.language === 'zh'">
-              {{ t('editor.langZh') }}
-            </el-dropdown-item>
-            <el-dropdown-item command="en" :disabled="store.currentNovel?.language === 'en'">
-              {{ t('editor.langEn') }}
-            </el-dropdown-item>
-          </el-dropdown-menu>
-        </template>
-      </el-dropdown>
-      <el-dropdown
-        v-if="loadState === 'loaded'"
-        trigger="click"
-        @command="onTemplateSelect"
-      >
-        <el-button size="small" link>
-          🗂 {{ t('editor.template', { name: pdfTemplateLabel }) }}
-        </el-button>
-        <template #dropdown>
-          <el-dropdown-menu>
-            <el-dropdown-item command="intensive" :disabled="pdfTemplateType === 'intensive'">
-              {{ t('editor.templateIntensive') }}
-            </el-dropdown-item>
-            <el-dropdown-item
-              command="card"
-              :disabled="pdfTemplateType === 'card' || !isEnglishMode"
-            >
-              {{ t('editor.templateCard') }}
-            </el-dropdown-item>
-          </el-dropdown-menu>
-        </template>
-      </el-dropdown>
-      <el-checkbox
-        v-if="loadState === 'loaded'"
-        v-model="coverEnabled"
-        size="small"
-        style="margin-right: 2px;"
-      >
-        {{ t('editor.cover') }}
-      </el-checkbox>
-      <el-checkbox
-        v-if="loadState === 'loaded' && pdfTemplateType === 'card'"
-        v-model="pageNumbersEnabled"
-        size="small"
-        style="margin-right: 2px;"
-      >
-        {{ t('editor.pageNumbers') }}
-      </el-checkbox>
-      <el-button
-        v-if="loadState === 'loaded'"
-        size="small"
-        @click="handleExportPdf"
-        :loading="exportingPdf"
-      >
-        <el-icon><Printer /></el-icon> {{ t('editor.exportPdf') }}
-      </el-button>
-      <el-button
-        v-if="loadState === 'loaded'"
-        size="small"
-        type="primary"
-        plain
-        @click="enterReadingMode"
-      >
-        <el-icon><Reading /></el-icon> {{ t('reading.enter') }}
-      </el-button>
+        <el-select v-if="loadState === 'loaded'" :model-value="store.currentNovel?.language" size="small" style="width:110px" :aria-label="t('settings.language')" @change="onLanguageChange"><el-option value="zh" :label="t('editor.langZh')" /><el-option value="en" :label="t('editor.langEn')" /></el-select>
+        <el-button v-if="loadState === 'loaded'" size="small" @click="openExportConfig"><el-icon><Printer /></el-icon>{{ t('editor.exportPdf') }}</el-button>
+        <el-button v-if="loadState === 'loaded'" size="small" type="primary" plain @click="enterReadingMode"><el-icon><Reading /></el-icon>{{ t('reading.enter') }}</el-button>
       </template>
       <template v-else>
         <div class="reading-topbar-meta">
@@ -151,18 +57,49 @@
             <label class="reading-setting-row">
               <span>{{ t('reading.width') }}</span>
               <el-radio-group v-model="readingWidth" size="small">
-                <el-radio-button :value="620">窄</el-radio-button>
-                <el-radio-button :value="760">中</el-radio-button>
-                <el-radio-button :value="920">宽</el-radio-button>
+                <el-radio-button :value="620">{{ t('ui.widthNarrow') }}</el-radio-button>
+                <el-radio-button :value="760">{{ t('ui.widthMedium') }}</el-radio-button>
+                <el-radio-button :value="920">{{ t('ui.widthWide') }}</el-radio-button>
               </el-radio-group>
             </label>
           </div>
         </el-popover>
+        <ReadingPanels teleport>
+          <template #directory="{ close }"><ChapterList :chapters="editorStore.chapterList" :active-index="editorStore.activeChapterIndex" @select="index => { scrollToChapter(index); close() }" /></template>
+          <template #tools>
+            <div class="reading-tools-form">
+              <p>{{ t('ui.learningHint') }}</p>
+              <label>{{ t('settings.language') }}</label><el-select :model-value="store.currentNovel?.language" @change="onLanguageChange"><el-option value="zh" :label="t('editor.langZh')" /><el-option value="en" :label="t('editor.langEn')" /></el-select>
+              <label>{{ t('ui.selectBook') }}</label>
+              <el-select v-model="highlightBookId" clearable :placeholder="t('ui.noHighlight')" :aria-label="t('ui.selectBook')"><el-option v-for="book in vocabBookStore.books" :key="book.id" :label="book.name" :value="book.id" /></el-select>
+              <el-alert v-if="highlightLoadState === 'loading'" :title="t('ui.loading')" :closable="false" />
+              <el-alert v-if="highlightLoadState === 'error'" :title="highlightLoadError" type="error" :closable="false" />
+              <el-button @click="openExportConfig"><el-icon><Printer /></el-icon>{{ t('editor.exportPdf') }}</el-button>
+            </div>
+          </template>
+        </ReadingPanels>
+        <el-button size="small" @click="openExportConfig" :aria-label="t('editor.exportPdf')"><el-icon><Printer /></el-icon></el-button>
         <el-button size="small" @click="exitReadingMode">
-          <el-icon><Close /></el-icon> {{ t('reading.exit') }}
+          {{ t('ui.editContent') }}
         </el-button>
       </template>
+      <WindowControls v-if="readingMode" />
     </div>
+
+    <el-dialog v-model="exportConfigOpen" :title="t('ui.exportConfig')" width="520px" append-to-body :close-on-click-modal="!exportingPdf" :close-on-press-escape="!exportingPdf" :show-close="!exportingPdf">
+      <p class="export-config-hint">{{ t('ui.exportHint') }}</p>
+      <el-form label-position="top" :disabled="exportingPdf">
+        <el-form-item :label="t('ui.selectBook')"><el-select v-model="highlightBookId" clearable :placeholder="t('ui.noHighlight')"><el-option v-for="book in vocabBookStore.books" :key="book.id" :label="book.name" :value="book.id" /></el-select></el-form-item>
+        <el-form-item :label="t('editor.template', { name:pdfTemplateLabel })"><el-radio-group :model-value="pdfTemplateType" @change="(value: string | number | boolean | undefined) => onTemplateSelect(value as TemplateType)"><el-radio-button value="intensive">{{ t('editor.templateIntensive') }}</el-radio-button><el-radio-button value="card" :disabled="!isEnglishMode">{{ t('editor.templateCard') }}</el-radio-button></el-radio-group></el-form-item>
+        <el-form-item v-if="pdfTemplateType === 'intensive'" :label="t('editor.exportSteps', { n:pdfSteps.length })"><el-checkbox-group v-model="pdfSteps" @change="onPdfStepsChange"><el-checkbox v-for="n in stepNums" :key="n" :value="n">{{ t('ui.pdfStep' + n) }}</el-checkbox></el-checkbox-group></el-form-item>
+        <el-checkbox v-model="coverEnabled">{{ t('editor.cover') }}</el-checkbox>
+        <el-checkbox v-if="pdfTemplateType === 'card'" v-model="pageNumbersEnabled">{{ t('editor.pageNumbers') }}</el-checkbox>
+      </el-form>
+      <div v-if="exportingPdf" role="status" aria-live="polite" class="export-config-progress"><el-progress :percentage="pdfPercent" /><p>{{ pdfMessage }}</p></div>
+      <el-alert v-if="exportError" :title="exportError" type="error" :closable="false" show-icon />
+      <el-alert v-if="exportResult" :title="t('ui.exportDone', { path:exportResult })" type="success" :closable="false" show-icon />
+      <template #footer><el-button :disabled="exportingPdf" @click="exportConfigOpen = false">{{ t('ui.close') }}</el-button><el-button type="primary" :loading="exportingPdf" @click="handleExportPdf">{{ t(exportError ? 'ui.retry' : 'ui.exportStart') }}</el-button></template>
+    </el-dialog>
 
     <!-- Loaded: three-column body with draggable splitters -->
     <div class="editor-body" :class="{ 'reading-body': readingMode }" v-if="loadState === 'loaded'">
@@ -279,14 +216,14 @@
     </div>
 
     <div v-if="readingMode && loadState === 'loaded'" class="reading-bottom-bar" role="navigation" :aria-label="t('reading.navigation')">
-      <el-button text :disabled="!hasPreviousChapter" @click="goToPreviousChapter">
+      <el-button text :aria-label="t('reading.previousChapter')" :disabled="!hasPreviousChapter" @click="goToPreviousChapter">
         <el-icon><ArrowLeft /></el-icon> {{ t('reading.previousChapter') }}
       </el-button>
       <div class="reading-progress-wrap" :title="t('reading.shortcutHint')">
         <el-progress :percentage="readingPercent" :stroke-width="5" :show-text="false" />
         <span>{{ currentChapterTitle }} · {{ readingPercent }}%</span>
       </div>
-      <el-button text :disabled="!hasNextChapter" @click="goToNextChapter">
+      <el-button text :aria-label="t('reading.nextChapter')" :disabled="!hasNextChapter" @click="goToNextChapter">
         {{ t('reading.nextChapter') }} <el-icon><ArrowRight /></el-icon>
       </el-button>
     </div>
@@ -320,34 +257,22 @@
       </el-result>
     </div>
 
-    <!-- PDF export progress overlay -->
-    <Teleport to="body">
-      <div v-if="exportingPdf" class="pdf-export-overlay">
-        <div class="pdf-export-dialog">
-          <div class="pdf-export-dialog-title">
-            <el-icon class="is-loading" :size="18"><Loading /></el-icon>
-            正在导出 PDF
-          </div>
-          <el-progress
-            :percentage="pdfPercent"
-            :stroke-width="12"
-            color="#409eff"
-          />
-          <div class="pdf-export-dialog-msg">{{ pdfMessage }}</div>
-          <div class="pdf-export-dialog-tip">章节较多时可能需要十几秒，请勿关闭窗口</div>
-        </div>
-      </div>
-    </Teleport>
+
   </div>
 </template>
 
 <script setup lang="ts">
+import { readingProgressForChapters } from '@/utils/workspace'
+import ReadingPanels from '@/components/novel/ReadingPanels.vue'
+import WindowControls from '@/components/layout/WindowControls.vue'
+import { useVocabBookStore } from '@/stores/vocabBookStore'
+import { isMobile } from '@/utils/platform'
+
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import {
   ArrowLeft,
   ArrowRight,
-  Close,
   Loading,
   Printer,
   Reading,
@@ -363,8 +288,7 @@ import { useNovelStore } from '@/stores/novelStore'
 import { useEditorStore } from '@/stores/editorStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import type { HighlightWord } from '@/types/vocabWord'
-import { normalizeSteps, STEP_LABELS, type StepNum } from '@/types/pdfSteps'
-import { TEMPLATE_TYPE_LABELS } from '@/types/pdf'
+import { normalizeSteps, type StepNum } from '@/types/pdfSteps'
 // Keep the editor implementation out of the page shell. The editor pulls in
 // Tiptap/ProseMirror and is only needed after this route has rendered.
 const NovelEditor = defineAsyncComponent(() => import('@/components/novel/NovelEditor.vue'))
@@ -375,6 +299,12 @@ import { useSplitLayout } from '@/composables/useSplitLayout'
 import { t } from '@/i18n'
 
 const settingsStore = useSettingsStore()
+const vocabBookStore = useVocabBookStore()
+const exportConfigOpen = ref(false)
+const exportError = ref('')
+const exportResult = ref('')
+function openExportConfig() { exportError.value = ''; exportResult.value = ''; exportConfigOpen.value = true }
+
 
 const split = useSplitLayout({
   left: 200,
@@ -411,7 +341,7 @@ const pdfSteps = ref<StepNum[]>([...settingsStore.pdfIntensiveSteps])
 
 type TemplateType = 'intensive' | 'card'
 const pdfTemplateType = ref<TemplateType>('intensive')
-const pdfTemplateLabel = computed(() => TEMPLATE_TYPE_LABELS[pdfTemplateType.value] ?? pdfTemplateType.value)
+const pdfTemplateLabel = computed(() => t(pdfTemplateType.value === 'card' ? 'editor.templateCard' : 'editor.templateIntensive'))
 const isEnglishMode = computed(() => store.currentNovel?.language === 'en')
 const coverEnabled = ref(false)
 const pageNumbersEnabled = ref(false)
@@ -443,15 +373,16 @@ const hasPreviousChapter = computed(() => editorStore.activeChapterIndex > 0)
 const hasNextChapter = computed(
   () => editorStore.activeChapterIndex < editorStore.chapterList.length - 1,
 )
-const readingPercent = computed(() => Math.round(readingProgress.value * 100))
+const readingOverallProgress = computed(() => readingProgressForChapters(editorStore.chapterList, editorStore.activeChapterIndex, readingProgress.value))
+const readingPercent = computed(() => Math.round(readingOverallProgress.value * 100))
 const readingRemainingMinutes = computed(() => {
   const totalUnits = editorStore.chapterList.reduce(
     (sum, chapter) => sum + Math.max(0, chapter.content?.length || chapter.contentLength || 0),
     0,
   )
-  if (!totalUnits || readingProgress.value >= 0.999) return 0
+  if (!totalUnits || readingOverallProgress.value >= 0.999) return 0
   const unitsPerMinute = store.currentNovel?.language === 'en' ? 220 : 360
-  return Math.max(1, Math.ceil((totalUnits * (1 - readingProgress.value)) / unitsPerMinute))
+  return Math.max(1, Math.ceil((totalUnits * (1 - readingOverallProgress.value)) / unitsPerMinute))
 })
 const readingRemainingLabel = computed(() =>
   readingRemainingMinutes.value > 0
@@ -528,13 +459,16 @@ watch(
   },
 )
 
-function setReadingMode(enabled: boolean) {
+async function setReadingMode(enabled: boolean) {
+  const position = editorRef.value?.getScrollPercent() ?? 0
   readingMode.value = enabled
   readingSettingsOpen.value = false
   const query = { ...route.query }
   if (enabled) query.mode = 'read'
   else delete query.mode
-  void router.replace({ query })
+  await router.replace({ query })
+  await nextTick()
+  editorRef.value?.setScrollPercent(position)
 }
 
 function enterReadingMode() {
@@ -580,7 +514,7 @@ function exitPreviewReadingMode() {
 
 function onPreviewReadingProgress(percent: number) {
   previewChapterProgress.value = Math.min(1, Math.max(0, percent))
-  scheduleSaveReadingPos(previewOverallProgress.value, editorStore.activeChapterIndex)
+  scheduleSaveReadingPos(previewChapterProgress.value, editorStore.activeChapterIndex)
 }
 
 async function goToPreviewChapter(delta: -1 | 1) {
@@ -599,9 +533,7 @@ function goToNextPreviewChapter() {
   void goToPreviewChapter(1)
 }
 
-function onStepsDropdownClick(_cmd: any) {
-  // Checkbox group is handled by v-model on pdfSteps directly.
-}
+
 
 function onPdfStepsChange(next: StepNum[]) {
   if (next.length === 0) {
@@ -613,9 +545,6 @@ function onPdfStepsChange(next: StepNum[]) {
   pdfSteps.value = next
 }
 
-const novelLanguageLabel = computed(() =>
-  store.currentNovel?.language === 'en' ? t('editor.langLabel') : '中文模式',
-)
 
 async function onLanguageChange(lang: string) {
   const novel = store.currentNovel
@@ -787,6 +716,7 @@ function dateStamp(): string {
 }
 
 async function handleExportPdf() {
+  exportError.value = ''; exportResult.value = ''
   const novel = store.currentNovel
   if (!novel) {
     ElMessage.error('请先打开小说')
@@ -801,7 +731,7 @@ async function handleExportPdf() {
     })
   } catch (e: any) {
     console.error('[PdfExport] save dialog failed:', e)
-    ElMessage.error('打开保存对话框失败: ' + String(e?.message || e))
+    exportError.value = t('ui.exportError', { message:String(e?.message || e) }); exportConfigOpen.value = true
     return
   }
   if (!filePath) return
@@ -812,18 +742,18 @@ async function handleExportPdf() {
     try {
       await editorStore.flushSave(novel.id, editorContent.value, currentChapter.value?.id || null)
     } catch (e: any) {
-      ElMessage.error('导出前保存失败：' + String(e?.message || e || '未知错误'))
+      exportError.value = t('ui.exportError', { message:String(e?.message || e) }); exportConfigOpen.value = true
       return
     }
     if (editorStore.isDirty) {
-      ElMessage.error('导出前保存失败，请重试')
+      exportError.value = t('ui.exportError', { message:t('editor.unsaved') }); exportConfigOpen.value = true
       return
     }
   }
 
   exportingPdf.value = true
   pdfPercent.value = 0
-  pdfMessage.value = '正在准备导出…'
+  pdfMessage.value = t('ui.loading')
 
   // Listen for progress events emitted by the Rust backend during generation.
   let unlisten: UnlistenFn | null = null
@@ -855,26 +785,10 @@ async function handleExportPdf() {
       pageNumbers: pageNumbersEnabled.value,
       outputPath: filePath,
     })
-    const pct =
-      resp.total_vocab > 0
-        ? ((resp.matched_words / resp.total_vocab) * 100).toFixed(1)
-        : '0.0'
-    const low =
-      resp.total_vocab > 0 && resp.matched_words / resp.total_vocab < 0.5
-        ? '\n\n💡 覆盖率较低，建议检查词汇本中文释义是否与小说用词一致。'
-        : ''
-    ElMessageBox.alert(
-      `已导出至：${resp.path}\n\n` +
-        `📚 小说章节：${resp.chapter_count} 章\n` +
-        `📖 词汇本：${resp.total_vocab} 词\n` +
-        `✅ 已匹配：${resp.matched_words} 词（覆盖率 ${pct}%）\n` +
-        `🔧 包含步骤：${resp.steps_used}${low}`,
-      'PDF 导出成功',
-      { confirmButtonText: '好的', type: 'success' },
-    )
+    exportResult.value = resp.path
   } catch (e: any) {
     console.error('[PdfExport] export_pdf failed:', e)
-    ElMessage.error(String(e?.message || e || '导出失败'))
+    exportError.value = t('ui.exportError', { message:String(e?.message || e) }); exportConfigOpen.value = true
   } finally {
     exportingPdf.value = false
     pdfPercent.value = 0
@@ -887,6 +801,7 @@ async function loadNovel() {
   loadStartedAt = Date.now()
   elapsedSeconds.value = 0
   readingPosRestored = false
+  restoringReadingPos = true
   loadStage.value = 'reading'
   loadStageProgressOverride.value = null
   errorMessage.value = ''
@@ -981,6 +896,7 @@ function retry() {
 }
 
 onMounted(async () => {
+  void vocabBookStore.fetchAll()
   loadReadingPreferences()
   loadNovel()
 })
@@ -1090,7 +1006,12 @@ function handleEditorReady() {
 }
 
 function onKeyDown(e: KeyboardEvent) {
-  if (readingMode.value && loadState.value === 'loaded') {
+  if (e.defaultPrevented) return
+  const target = e.target instanceof Element ? e.target : null
+  const interactive = !!target?.closest('input, textarea, select, button, a, [role="combobox"], [role="dialog"], .el-popper, .dict-lookup-popover')
+  const overlayOpen = exportConfigOpen.value || readingSettingsOpen.value || !!document.querySelector('.reading-side-panel, .dict-lookup-popover')
+
+  if (readingMode.value && loadState.value === 'loaded' && !interactive && !overlayOpen) {
     if (e.altKey && e.key === 'ArrowLeft') {
       e.preventDefault()
       void goToPreviousChapter()
@@ -1117,6 +1038,7 @@ function onKeyDown(e: KeyboardEvent) {
       return
     }
   }
+  if (overlayOpen) return
   const mod = e.ctrlKey || e.metaKey
   if (!mod) return
   const key = e.key.toLowerCase()
@@ -1125,7 +1047,7 @@ function onKeyDown(e: KeyboardEvent) {
     void handleManualSave()
   } else if (key === 'p') {
     e.preventDefault()
-    if (loadState.value === 'loaded') void handleExportPdf()
+    if (loadState.value === 'loaded') openExportConfig()
   } else if (key === 'w') {
     e.preventDefault()
     if (loadState.value === 'loaded') togglePreviewFullscreen()
@@ -1185,23 +1107,26 @@ onBeforeRouteLeave(async (_to, _from, next) => {
 })
 
 async function scrollToChapter(index: number) {
-  const previousChapter = currentChapter.value
-  if (editorStore.isDirty) {
-    await editorStore.flushSave(
-      currentNovelId.value,
-      editorContent.value,
-      previousChapter?.id || null,
-    )
+  if (changingChapter) return
+  changingChapter = true
+  try {
+    const previousChapter = currentChapter.value
+    if (editorStore.isDirty) await editorStore.flushSave(currentNovelId.value, editorContent.value, previousChapter?.id || null)
+    const ch = editorStore.chapterList[index]
+    if (!ch) return
+    if (ch.id) await editorStore.loadChapterContent(ch.id)
+    editorStore.activeChapterIndex = index
+    editorContentOverride.value = editorStore.chapterList[index]?.content || ch.content || ''
+    await nextTick()
+    const target = editorRef.value
+    await target?.waitUntilReady()
+    if (editorRef.value !== target || !target?.isContentReady()) return
+    target?.setScrollPercent(0)
+    previewRef.value?.scrollToText(ch.title)
+    updateReadingState()
+  } finally {
+    changingChapter = false
   }
-  const ch = editorStore.chapterList[index]
-  if (!ch) return
-  if (ch.id) await editorStore.loadChapterContent(ch.id)
-  editorStore.activeChapterIndex = index
-  editorContentOverride.value = editorStore.chapterList[index]?.content || ch.content || ''
-  await nextTick()
-  editorRef.value?.setScrollPercent(0)
-  previewRef.value?.scrollToText(ch.title)
-  updateReadingState()
   scheduleSaveReadingPos()
 }
 
@@ -1217,33 +1142,9 @@ async function goToNextChapter() {
   }
 }
 
-function updateActiveChapterFromProgress(percent: number) {
-  const chapters = editorStore.chapterList
-  if (chapters.length <= 1) {
-    editorStore.activeChapterIndex = 0
-    return
-  }
-  const total = chapters.reduce(
-    (sum, chapter) => sum + Math.max(1, chapter.content?.length || chapter.contentLength || 0),
-    0,
-  )
-  const target = Math.min(total - 1, Math.max(0, percent * total))
-  let cursor = 0
-  let nextIndex = chapters.length - 1
-  for (let i = 0; i < chapters.length; i += 1) {
-    cursor += Math.max(1, chapters[i].content?.length || chapters[i].contentLength || 0)
-    if (target < cursor) {
-      nextIndex = i
-      break
-    }
-  }
-  editorStore.activeChapterIndex = nextIndex
-}
-
 function updateReadingState() {
   const percent = editorRef.value?.getScrollPercent() ?? 0
   readingProgress.value = Math.min(1, Math.max(0, percent))
-  updateActiveChapterFromProgress(readingProgress.value)
 }
 
 function scrollReadingBy(direction: 1 | -1) {
@@ -1256,10 +1157,12 @@ function scrollReadingBy(direction: 1 | -1) {
 let posSaveTimer: number | null = null
 let scrollElCleanup: (() => void) | null = null
 let readingPosRestored = false
+let restoringReadingPos = true
+let changingChapter = false
 
 async function saveReadingPos(percentOverride?: number, chapterIndexOverride?: number) {
   const id = currentNovelId.value
-  if (!id || loadState.value !== 'loaded') return
+  if (!id || loadState.value !== 'loaded' || restoringReadingPos || changingChapter || !editorRef.value?.isContentReady()) return
   const percent = percentOverride ?? editorRef.value?.getScrollPercent() ?? 0
   const chapterIndex = chapterIndexOverride ?? editorStore.activeChapterIndex
   try {
@@ -1273,6 +1176,7 @@ async function saveReadingPos(percentOverride?: number, chapterIndexOverride?: n
 }
 
 function scheduleSaveReadingPos(percentOverride?: number, chapterIndexOverride?: number) {
+  if (restoringReadingPos || changingChapter || !editorRef.value?.isContentReady()) return
   if (posSaveTimer != null) window.clearTimeout(posSaveTimer)
   posSaveTimer = window.setTimeout(
     () => void saveReadingPos(percentOverride, chapterIndexOverride),
@@ -1283,24 +1187,22 @@ function scheduleSaveReadingPos(percentOverride?: number, chapterIndexOverride?:
 async function restoreReadingPos() {
   const id = currentNovelId.value
   if (!id || loadState.value !== 'loaded') return
+  restoringReadingPos = true
   try {
     const raw = await invoke<string>('get_setting', { key: `reading_pos_${id}` })
     if (!raw) return
     const pos = JSON.parse(raw) as { chapterIndex?: number; percent?: number }
-    const idx = Math.max(
-      0,
-      Math.min(editorStore.chapterList.length - 1, pos.chapterIndex ?? 0),
-    )
-    if (idx > 0) await scrollToChapter(idx)
-    await new Promise<void>((r) =>
-      requestAnimationFrame(() => requestAnimationFrame(() => r())),
-    )
-    if (typeof pos.percent === 'number') {
-      editorRef.value?.setScrollPercent(pos.percent)
-    }
+    const idx = Math.max(0, Math.min(editorStore.chapterList.length - 1, pos.chapterIndex ?? 0))
+    if (idx !== editorStore.activeChapterIndex) await scrollToChapter(idx)
+    const target = editorRef.value
+    await target?.waitUntilReady()
+    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+    if (editorRef.value === target && target?.isContentReady() && typeof pos.percent === 'number') target?.setScrollPercent(pos.percent)
     updateReadingState()
   } catch {
-    /* ignore */
+    /* A malformed position must not prevent reading. */
+  } finally {
+    restoringReadingPos = false
   }
 }
 
@@ -1425,7 +1327,7 @@ function attachScrollListener() {
   background: var(--bg-primary, #fff);
 }
 .reading-mode :deep(.tiptap-editor) {
-  padding: clamp(28px, 5vw, 72px) 18px 110px;
+  padding: 28px 24px 110px;
 }
 .reading-mode :deep(.tiptap-editor .ProseMirror) {
   max-width: var(--reading-width, 760px);
@@ -1493,10 +1395,9 @@ function attachScrollListener() {
   width: min(36vw, 420px);
   padding: 8px 14px;
   border: 1px solid var(--border-color, #ebeef5);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--bg-primary, #fff) 92%, transparent);
-  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.08);
-  backdrop-filter: blur(8px);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  box-shadow: none;
 }
 .reading-progress-wrap span {
   display: block;
@@ -1578,47 +1479,6 @@ function attachScrollListener() {
   }
 }
 
-/* PDF export progress overlay */
-.pdf-export-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 3000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(2px);
-}
-.pdf-export-dialog {
-  width: 380px;
-  max-width: 90vw;
-  padding: 24px 28px;
-  border-radius: 12px;
-  background: var(--bg-primary, #ffffff);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.pdf-export-dialog-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-primary, #303133);
-}
-.pdf-export-dialog-msg {
-  font-size: 13px;
-  color: var(--text-secondary, #606266);
-  min-height: 20px;
-  word-break: break-all;
-}
-.pdf-export-dialog-tip {
-  font-size: 12px;
-  color: var(--text-placeholder, #a8abb2);
-}
-
 @media (max-width: 900px) {
   .editor-topbar {
     max-height: 34vh;
@@ -1686,9 +1546,7 @@ function attachScrollListener() {
   .reading-bottom-bar :deep(.el-button) {
     padding: 8px 5px;
   }
-  .reading-bottom-bar :deep(.el-button > span) {
-    display: none;
-  }
+
   .reading-progress-wrap {
     width: min(48vw, 260px);
   }
@@ -1698,4 +1556,11 @@ function attachScrollListener() {
     padding: 20px 18px;
   }
 }
+
+.export-config-hint { color:var(--text-secondary); margin-bottom:20px; line-height:1.7; }
+.export-config-progress { margin:20px 0; }
+.editor-topbar { min-height:48px; height:auto; flex-wrap:wrap; gap:8px; }
+.editor-topbar .novel-title { flex:1; min-width:80px; }
+.reading-topbar-meta { display:none; }
+@media(max-width:600px) { .editor-topbar { padding:8px; }.reading-mode .save-status { display:none; } }
 </style>

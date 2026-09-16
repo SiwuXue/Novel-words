@@ -15,15 +15,18 @@
       @dragover.prevent="onDragOver"
       @drop.prevent="onDrop"
     >
-      <div
+      <button
+        type="button"
         class="drop-zone"
+        :aria-label="t('import.clickSelect')"
+        :disabled="analyzing"
         :class="{ 'is-drag-over': isDragOver }"
         @click="selectFile"
       >
         <el-icon :size="48" color="var(--text-secondary)"><FolderOpened /></el-icon>
-        <p>{{ t('import.clickSelect') }}</p>
-        <p class="hint">{{ t('import.dragHere') }}</p>
-      </div>
+        <span class="file-select-label">{{ t('import.clickSelect') }}</span>
+        <span class="hint">{{ t('import.dragHere') }}</span>
+      </button>
       <div v-if="filePath" class="selected-file">
         <el-tag type="info" size="small">{{ fileName }}</el-tag>
       </div>
@@ -217,6 +220,9 @@ async function handleImport() {
   padding: 20px 0;
 }
 .drop-zone {
+  width: 100%;
+  background: transparent;
+  color: inherit;
   border: 2px dashed var(--border-color, #dcdfe6);
   border-radius: 8px;
   padding: 48px;
@@ -236,7 +242,8 @@ async function handleImport() {
 .drop-step {
   position: relative;
 }
-.drop-zone p {
+.drop-zone .file-select-label, .drop-zone .hint {
+  display: block;
   margin: 8px 0 0;
   color: var(--text-regular);
 }

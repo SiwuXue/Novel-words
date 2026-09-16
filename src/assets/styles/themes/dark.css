@@ -1,26 +1,27 @@
 html.dark {
-  --bg-primary: #1a1a2e;
-  --bg-secondary: #16213e;
-  --bg-sidebar: #0f1629;
-  --text-primary: #e0e0e0;
-  --text-secondary: #909399;
-  --border-color: #2c3e50;
-  --accent-color: #409eff;
-  --editor-bg: #1e2a3a;
-  --preview-bg: #16213e;
-  --danger-color: #f56c6c;
-  --success-color: #67c23a;
-  --warning-color: #e6a23c;
+  --on-accent: #14221B;
+  --bg-primary: #1B2420;
+  --bg-secondary: #151D19;
+  --bg-sidebar: #18211C;
+  --text-primary: #E7EDE8;
+  --text-secondary: #A8B6AE;
+  --border-color: #35433A;
+  --accent-color: #80C5B4;
+  --editor-bg: #1B2420;
+  --preview-bg: #151D19;
+  --danger-color: #EF918C;
+  --success-color: #91BD93;
+  --warning-color: #D8B272;
   --highlight-color: #ff6b6b;
   --highlight-mastered: #5aab5a;
   --shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
 
   /* Aliases used by components (kept in sync with the tokens above). */
-  --text-regular: #e0e0e0;
-  --text-placeholder: #7a7f8a;
-  --bg-color: #1a1a2e;
-  --hover-bg: #2a3550;
-  --accent-light: rgba(64, 158, 255, 0.15);
+  --text-regular: #E7EDE8;
+  --text-placeholder: #A0AEA5;
+  --bg-color: #1B2420;
+  --hover-bg: #29372F;
+  --accent-light: #293D33;
 
   /* Editor vocab-highlight colors — red / orange / gray (readable on dark). */
   --editor-hl-unknown: #ff7b72;

@@ -28,3 +28,8 @@ test-data
 
 # Android build assets are regenerated from src-tauri/resources.
 /src-tauri/gen/android/app/src/main/assets/
+
+/test-results/
+/playwright-report/
+
+/.ui-preview/

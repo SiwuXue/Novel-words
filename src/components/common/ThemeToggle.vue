@@ -1,5 +1,6 @@
 <template>
   <el-switch
+    :aria-label="t('settings.theme')"
     :model-value="settingsStore.theme === 'dark'"
     :active-icon="Moon"
     :inactive-icon="Sunny"
@@ -12,6 +13,7 @@
 <script setup lang="ts">
 import { Sunny, Moon } from '@element-plus/icons-vue'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { t } from '@/i18n'
 
 const settingsStore = useSettingsStore()
 

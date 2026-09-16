@@ -159,3 +159,5 @@ for (const [name, component] of Object.entries(elementComponents)) {
 app.directive('loading', vLoading)
 
 app.mount('#app')
+
+import './assets/styles/workshop.css'

@@ -5,9 +5,17 @@
     @dragover.prevent="onDragOver"
     @drop.prevent="onDrop"
   >
-    <div class="page-header">
-      <h2>{{ t('novelList.title') }}</h2>
-      <div class="header-actions">
+    <PageHeader :title="t('novelList.title')">
+
+        <el-button @click="showCreateDialog">
+          <el-icon><Plus /></el-icon> {{ t('novelList.new') }}
+        </el-button>
+        <el-button type="primary" @click="showImportDialog">
+          <el-icon><FolderOpened /></el-icon> {{ t('novelList.import') }}
+        </el-button>
+
+    </PageHeader>
+    <div class="page-toolbar" :aria-label="t('ui.search')">
         <el-input
           class="header-search"
           v-model="searchQuery"
@@ -19,13 +27,6 @@
             <el-icon><Search /></el-icon>
           </template>
         </el-input>
-        <el-button type="primary" @click="showCreateDialog">
-          <el-icon><Plus /></el-icon> {{ t('novelList.new') }}
-        </el-button>
-        <el-button @click="showImportDialog">
-          <el-icon><FolderOpened /></el-icon> {{ t('novelList.import') }}
-        </el-button>
-      </div>
     </div>
 
     <!-- Full-page drop overlay -->
@@ -38,6 +39,7 @@
     </div>
 
     <!-- Table -->
+    <PageState v-if="store.error" :title="t('ui.loadFailed')" :description="store.error" error @retry="onSearch" />
     <el-table
       v-loading="store.loading"
       :data="store.novels"
@@ -47,36 +49,37 @@
     >
       <el-table-column prop="title" :label="t('novelList.name')" min-width="160">
         <template #default="{ row }">
-          <el-link type="primary" @click="openNovel(row.id)">{{ row.title }}</el-link>
+          <RouterLink class="library-title" :to="novelReadingLocation(row.id)">{{ row.title }}</RouterLink>
         </template>
       </el-table-column>
       <el-table-column prop="author" :label="t('novelList.author')" width="140" />
-      <el-table-column prop="category" :label="t('novelList.category')" width="80">
+      <el-table-column prop="category" :label="t('novelList.category')" width="64">
         <template #default="{ row }">
           <el-tag size="small" type="info">{{ row.category }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="updatedAt" :label="t('novelList.updatedAt')" width="170">
+      <el-table-column prop="updatedAt" :label="t('novelList.updatedAt')" width="120">
         <template #default="{ row }">
           {{ formatDate(row.updatedAt) }}
         </template>
       </el-table-column>
-      <el-table-column :label="t('novelList.favorite')" width="70" align="center">
+      <el-table-column :label="t('novelList.favorite')" width="64" align="center">
         <template #default="{ row }">
-          <el-icon
-            :class="{ 'is-favorite': row.isFavorite }"
-            class="fav-icon"
-            @click="toggleFavorite(row)"
-          >
+          <button class="favorite-button" :aria-label="t('ui.favorite')" :aria-pressed="!!row.isFavorite" @click="toggleFavorite(row)">
+          <el-icon :class="{ 'is-favorite': row.isFavorite }" class="fav-icon">
             <StarFilled v-if="row.isFavorite" />
             <Star v-else />
-          </el-icon>
+          </el-icon></button>
         </template>
       </el-table-column>
-      <el-table-column :label="t('novelList.actions')" width="140" fixed="right">
+      <el-table-column :label="t('novelList.actions')" width="144" fixed="right">
         <template #default="{ row }">
-          <el-button size="small" link type="primary" @click="editNovel(row)">{{ t('novelList.edit') }}</el-button>
-          <el-button size="small" link type="danger" @click="confirmDelete(row)">{{ t('novelList.delete') }}</el-button>
+          <el-button size="small" link type="primary" @click="openNovel(row.id)">{{ t('home.continueReading') }}</el-button>
+          <el-dropdown trigger="click"><el-button size="small" link :aria-label="t('ui.more')">•••</el-button><template #dropdown><el-dropdown-menu>
+            <el-dropdown-item @click="editNovel(row)">{{ t('novelList.edit') }}</el-dropdown-item>
+            <el-dropdown-item @click="$router.push(`/novels/${row.id}`)">{{ t('ui.editContent') }}</el-dropdown-item>
+            <el-dropdown-item divided @click="confirmDelete(row)">{{ t('novelList.delete') }}</el-dropdown-item>
+          </el-dropdown-menu></template></el-dropdown>
         </template>
       </el-table-column>
     </el-table>
@@ -99,8 +102,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import PageState from '@/components/common/PageState.vue'
+import { novelReadingLocation } from '@/utils/workspace'
+import { useRoute } from 'vue-router'
+import PageHeader from '@/components/common/PageHeader.vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
+import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { invoke } from '@tauri-apps/api/core'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Plus, Star, StarFilled, FolderOpened } from '@element-plus/icons-vue'
@@ -111,6 +119,7 @@ import ImportDialog from '@/components/novel/ImportDialog.vue'
 import { t } from '@/i18n'
 
 const router = useRouter()
+const route = useRoute()
 const store = useNovelStore()
 
 const searchQuery = ref('')
@@ -122,9 +131,21 @@ const isDragOver = ref(false)
 
 const ACCEPTED_EXTS = ['txt', 'md', 'text', 'epub', 'fb2']
 
-onMounted(() => {
-  store.fetchAll()
+let unlistenDrop: (() => void) | undefined
+let disposed = false
+onMounted(async () => {
+  void store.fetchAll()
+  try {
+    const unlisten = await getCurrentWebview().onDragDropEvent(event => {
+      if (event.payload.type === 'enter' || event.payload.type === 'over') isDragOver.value = true
+      else if (event.payload.type === 'leave') isDragOver.value = false
+      else { isDragOver.value = false; openDroppedFile(event.payload.paths[0]) }
+    })
+    if (disposed) unlisten()
+    else unlistenDrop = unlisten
+  } catch { /* The standalone browser preview has no native drag-drop API. */ }
 })
+onBeforeUnmount(() => { disposed = true; unlistenDrop?.() })
 
 function onSearch() {
   store.search(searchQuery.value)
@@ -155,7 +176,9 @@ function onDragOver() {
 function onDrop(e: DragEvent) {
   isDragOver.value = false
   const file = e.dataTransfer?.files?.[0] as (File & { path?: string }) | undefined
-  const path = file?.path
+  openDroppedFile(file?.path)
+}
+function openDroppedFile(path?: string) {
   if (!path) {
     ElMessage.warning('无法获取文件路径')
     return
@@ -195,7 +218,7 @@ async function handleImportConfirm(result: ImportResult, _filePath: string) {
     }
     showImport.value = false
     if (novel) {
-      router.push(`/novels/${novel.id}`)
+      router.push(novelReadingLocation(novel.id))
     }
   } catch (e: any) {
     ElMessage.error(typeof e === 'string' ? e : (e?.message || '导入失败'))
@@ -226,7 +249,7 @@ async function handleSubmit(data: { title: string; author: string; category: str
 }
 
 function openNovel(id: number) {
-  router.push(`/novels/${id}`)
+  router.push(novelReadingLocation(id))
 }
 
 async function toggleFavorite(novel: Novel) {
@@ -252,6 +275,12 @@ function formatDate(dateStr: string): string {
   // SQLite datetime format: "YYYY-MM-DD HH:MM:SS"
   return dateStr.replace('T', ' ').substring(0, 19)
 }
+onMounted(() => {
+  if (route.query.import === '1' || route.query.create === '1') {
+    if (route.query.import === '1') showImportDialog(); else showCreateDialog()
+    const query = { ...route.query }; delete query.import; delete query.create; void router.replace({ query })
+  }
+})
 </script>
 
 <style scoped>
@@ -303,7 +332,7 @@ function formatDate(dateStr: string): string {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(64, 158, 255, 0.45);
+  background: color-mix(in srgb, var(--accent-color) 80%, transparent);
   backdrop-filter: blur(4px);
   pointer-events: none;
 }
@@ -354,4 +383,6 @@ function formatDate(dateStr: string): string {
     padding: 24px 16px;
   }
 }
+
+.favorite-button { border:0; background:none; padding:6px; cursor:pointer; color:var(--text-secondary); }
 </style>

@@ -1,8 +1,13 @@
 <template>
   <div class="vocab-book-list-page">
-    <div class="page-header">
-      <h2>{{ t('vocabList.title') }}</h2>
-      <div class="header-actions">
+    <PageHeader :title="t('vocabList.title')">
+
+        <el-button type="primary" @click="showCreateDialog">
+          <el-icon><Plus /></el-icon> {{ t('vocabList.new') }}
+        </el-button>
+
+    </PageHeader>
+    <div class="page-toolbar" :aria-label="t('ui.search')">
         <el-input
           class="header-search"
           v-model="searchQuery"
@@ -13,12 +18,9 @@
             <el-icon><Search /></el-icon>
           </template>
         </el-input>
-        <el-button type="primary" @click="showCreateDialog">
-          <el-icon><Plus /></el-icon> {{ t('vocabList.new') }}
-        </el-button>
-      </div>
     </div>
 
+    <PageState v-if="store.error" :title="t('ui.loadFailed')" :description="store.error" error @retry="store.fetchAll" />
     <el-table
       v-loading="store.loading"
       :data="filteredBooks"
@@ -28,7 +30,7 @@
     >
       <el-table-column prop="name" :label="t('vocabList.name')" min-width="160">
         <template #default="{ row }">
-          <el-link type="primary" @click="openDetail(row.id)">{{ row.name }}</el-link>
+          <RouterLink class="library-title" :to="`/vocabulary/${row.id}`">{{ row.name }}</RouterLink>
           <el-tag v-if="row.isPreset" size="small" type="warning" style="margin-left:6px;">
             {{ t('preset.preset') }}
           </el-tag>
@@ -44,12 +46,14 @@
           {{ formatDate(row.updatedAt) }}
         </template>
       </el-table-column>
-      <el-table-column :label="t('novelList.actions')" width="200" fixed="right">
+      <el-table-column :label="t('novelList.actions')" width="120" fixed="right">
         <template #default="{ row }">
-          <el-button size="small" link type="primary" :disabled="row.isPreset" @click="editBook(row)">{{ t('vocabList.edit') }}</el-button>
-          <el-button size="small" link @click="exportJson(row)">{{ t('vocabList.export') }}</el-button>
-          <el-button size="small" link @click="importJson(row)">{{ t('vocabList.import') }}</el-button>
-          <el-button size="small" link type="danger" :disabled="row.isPreset" @click="confirmDelete(row)">{{ t('vocabList.delete') }}</el-button>
+          <el-dropdown trigger="click"><el-button size="small" link :aria-label="t('ui.more')">{{ t('ui.more') }}</el-button><template #dropdown><el-dropdown-menu>
+            <el-dropdown-item :disabled="row.isPreset" @click="editBook(row)">{{ t('vocabList.edit') }}</el-dropdown-item>
+            <el-dropdown-item @click="exportJson(row)">{{ t('vocabList.export') }}</el-dropdown-item>
+            <el-dropdown-item @click="importJson(row)">{{ t('vocabList.import') }}</el-dropdown-item>
+            <el-dropdown-item divided :disabled="row.isPreset" @click="confirmDelete(row)">{{ t('vocabList.delete') }}</el-dropdown-item>
+          </el-dropdown-menu></template></el-dropdown>
         </template>
       </el-table-column>
     </el-table>
@@ -63,8 +67,9 @@
 </template>
 
 <script setup lang="ts">
+import PageState from '@/components/common/PageState.vue'
+import PageHeader from '@/components/common/PageHeader.vue'
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { Search, Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
@@ -74,7 +79,6 @@ import type { VocabBook, VocabBookFormData } from '@/types/vocabBook'
 import VocabBookFormDialog from '@/components/vocabulary/VocabBookFormDialog.vue'
 import { t } from '@/i18n'
 
-const router = useRouter()
 const store = useVocabBookStore()
 
 const searchQuery = ref('')
@@ -171,9 +175,7 @@ async function confirmDelete(book: VocabBook) {
   }
 }
 
-function openDetail(id: number) {
-  router.push(`/vocabulary/${id}`)
-}
+
 
 function formatDate(raw: string): string {
   if (!raw) return ''

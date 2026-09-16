@@ -10,6 +10,34 @@
         <span class="word-count" v-if="!store.loading">{{ t('vocabDetail.wordCount', { n: store.total }) }}</span>
       </div>
       <div class="header-right">
+
+        <el-button type="primary" @click="showCreateDialog">
+          <el-icon><Plus /></el-icon> {{ t('vocabDetail.addWord') }}
+        </el-button>
+
+        <el-button type="success" @click="goReview">
+          <el-icon><Reading /></el-icon> {{ t('vocabDetail.review') }}
+        </el-button>
+        <el-dropdown trigger="click" @command="(command: string) => command === 'import' ? handleImportCsv() : handleExportCommand(command)">
+          <el-button>
+            <el-icon><Download /></el-icon> {{ t('ui.more') }}
+            <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="import">{{ t('vocabDetail.importCsv') }}</el-dropdown-item>
+              <el-dropdown-item command="csv" :disabled="store.words.length === 0">CSV (.csv)</el-dropdown-item>
+              <el-dropdown-item command="xlsx" :disabled="store.words.length === 0">Excel (.xlsx)</el-dropdown-item>
+              <el-dropdown-item command="apkg" :disabled="store.words.length === 0">Anki (.apkg)</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+
+      </div>
+    </div>
+
+    <!-- Proficiency filter (multi-select: only show checked categories) -->
+    <div class="page-toolbar" :aria-label="t('ui.search')">
         <el-input
           class="header-search"
           v-model="searchQuery"
@@ -20,9 +48,6 @@
             <el-icon><Search /></el-icon>
           </template>
         </el-input>
-        <el-button type="primary" @click="showCreateDialog">
-          <el-icon><Plus /></el-icon> {{ t('vocabDetail.addWord') }}
-        </el-button>
         <el-button
           type="danger"
           :disabled="selectedRows.length === 0"
@@ -30,29 +55,6 @@
         >
           <el-icon><Delete /></el-icon> {{ t('vocabDetail.batchDelete') }}{{ selectedRows.length ? ` (${selectedRows.length})` : '' }}
         </el-button>
-        <el-button type="success" @click="goReview">
-          <el-icon><Reading /></el-icon> {{ t('vocabDetail.review') }}
-        </el-button>
-        <el-dropdown trigger="click" @command="handleExportCommand">
-          <el-button :disabled="store.words.length === 0">
-            <el-icon><Download /></el-icon> {{ t('vocabDetail.export') }}
-            <el-icon class="el-icon--right"><ArrowDown /></el-icon>
-          </el-button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item command="csv">CSV (.csv)</el-dropdown-item>
-              <el-dropdown-item command="xlsx">Excel (.xlsx)</el-dropdown-item>
-              <el-dropdown-item command="apkg">Anki (.apkg)</el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
-        <el-button @click="handleImportCsv">
-          <el-icon><Upload /></el-icon> {{ t('vocabDetail.importCsv') }}
-        </el-button>
-      </div>
-    </div>
-
-    <!-- Proficiency filter (multi-select: only show checked categories) -->
     <div class="filter-tabs">
       <el-checkbox-group v-model="proficiencyFilter" size="small">
         <el-checkbox-button value="unknown">{{ t('vocabDetail.unknown') }}</el-checkbox-button>
@@ -63,7 +65,10 @@
       </el-checkbox-group>
     </div>
 
+    </div>
+
     <!-- Word table -->
+    <PageState v-if="store.error" :title="t('ui.loadFailed')" :description="store.error" error @retry="load" />
     <el-table
       ref="tableRef"
       v-loading="store.loading"
@@ -71,7 +76,7 @@
       row-key="id"
       stripe
       style="width: 100%"
-      empty-text="词汇本还没有单词，点击「添加单词」开始"
+      :empty-text="t('ui.emptyWords')"
       @selection-change="handleSelectionChange"
     >
       <el-table-column type="selection" width="48" reserve-selection />
@@ -142,9 +147,10 @@
 </template>
 
 <script setup lang="ts">
+import PageState from '@/components/common/PageState.vue'
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Search, Plus, Download, Upload, Delete, ArrowDown, Reading } from '@element-plus/icons-vue'
+import { ArrowLeft, Search, Plus, Download, Delete, ArrowDown, Reading } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'

@@ -8,15 +8,18 @@ export const useVocabWordStore = defineStore('vocabWord', () => {
   const words = ref<VocabWord[]>([])
   const total = ref(0)
   const loading = ref(false)
+  const error = ref('')
 
   async function fetchAll(bookId: number) {
     loading.value = true
+    error.value = ''
     try {
       words.value = await invoke<VocabWord[]>('get_vocab_words', {
         vocabBookId: bookId,
       })
       total.value = words.value.length
     } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
       console.error('[vocabWordStore] fetchAll failed:', e)
     } finally {
       loading.value = false
@@ -33,6 +36,7 @@ export const useVocabWordStore = defineStore('vocabWord', () => {
     },
   ) {
     loading.value = true
+    error.value = ''
     try {
       const page = await invoke<{ total: number; words: VocabWord[] }>(
         'get_vocab_words_page',
@@ -47,6 +51,7 @@ export const useVocabWordStore = defineStore('vocabWord', () => {
       words.value = page.words
       total.value = page.total
     } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
       console.error('[vocabWordStore] fetchPage failed:', e)
     } finally {
       loading.value = false
@@ -109,17 +114,19 @@ export const useVocabWordStore = defineStore('vocabWord', () => {
 
   async function search(bookId: number, query: string) {
     loading.value = true
+    error.value = ''
     try {
       words.value = await invoke<VocabWord[]>('search_vocab_words', {
         vocabBookId: bookId,
         query,
       })
     } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
       console.error('[vocabWordStore] search failed:', e)
     } finally {
       loading.value = false
     }
   }
 
-  return { words, total, loading, fetchAll, fetchPage, create, update, remove, removeMany, search }
+  return { error, words, total, loading, fetchAll, fetchPage, create, update, remove, removeMany, search }
 })

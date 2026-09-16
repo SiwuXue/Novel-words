@@ -1,15 +1,13 @@
 <template>
   <div class="preset-page">
-    <div class="page-header">
-      <h2>{{ t('preset.title') }}</h2>
-      <p class="subtitle">{{ t('preset.subtitle') }}</p>
-    </div>
+    <PageHeader :title="t('preset.title')" :description="t('preset.subtitle')" />
+    <PageState v-if="error" :title="t('ui.loadFailed')" :description="error" error @retry="load" />
 
     <div v-if="loading" class="state-row">
       <el-icon class="is-loading"><Loading /></el-icon>
     </div>
 
-    <div v-else-if="presets.length === 0" class="state-row">{{ t('vocabList.empty') }}</div>
+    <div v-else-if="!error && presets.length === 0" class="state-row">{{ t('vocabList.empty') }}</div>
 
     <div v-else class="preset-grid">
       <div v-for="p in presets" :key="p.id" class="preset-card">
@@ -36,6 +34,8 @@
 </template>
 
 <script setup lang="ts">
+import PageState from '@/components/common/PageState.vue'
+import PageHeader from '@/components/common/PageHeader.vue'
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { invoke } from '@tauri-apps/api/core'
@@ -48,18 +48,22 @@ import PresetCloneDialog from '@/components/vocabulary/PresetCloneDialog.vue'
 const router = useRouter()
 const presets = ref<PresetVocabBook[]>([])
 const loading = ref(true)
+const error = ref('')
 const studyVisible = ref(false)
 const activePreset = ref<PresetVocabBook | null>(null)
 
-onMounted(async () => {
+async function load() {
+  loading.value = true; error.value = ''
   try {
     presets.value = await invoke<PresetVocabBook[]>('list_preset_vocab_books')
   } catch (e: any) {
+    error.value = e instanceof Error ? e.message : String(e)
     ElMessage.error(String(e?.message || e || '加载预设词表失败'))
   } finally {
     loading.value = false
   }
-})
+}
+onMounted(load)
 
 function openStudy(p: PresetVocabBook) {
   activePreset.value = p

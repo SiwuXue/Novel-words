@@ -7,12 +7,15 @@ export const useNovelStore = defineStore('novel', () => {
   const novels = ref<Novel[]>([])
   const currentNovel = ref<Novel | null>(null)
   const loading = ref(false)
+  const error = ref('')
 
   async function fetchAll() {
     loading.value = true
+    error.value = ''
     try {
       novels.value = await invoke<Novel[]>('get_all_novels')
     } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
       console.error('Failed to fetch novels:', e)
     } finally {
       loading.value = false
@@ -21,6 +24,7 @@ export const useNovelStore = defineStore('novel', () => {
 
   async function fetchOne(id: number) {
     loading.value = true
+    error.value = ''
     try {
       // Guard: timeout 8s so loading never gets stuck forever
       const timeout = new Promise<never>((_, reject) =>
@@ -32,6 +36,7 @@ export const useNovelStore = defineStore('novel', () => {
       ])
       currentNovel.value = result
     } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
       console.error('[novelStore] fetchOne failed:', e)
       currentNovel.value = null
       throw e  // 上抛给 page 决定如何呈现错误
@@ -42,9 +47,11 @@ export const useNovelStore = defineStore('novel', () => {
 
   async function fetchMeta(id: number) {
     loading.value = true
+    error.value = ''
     try {
       currentNovel.value = await invoke<Novel>('get_novel_meta', { id })
     } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
       console.error('[novelStore] fetchMeta failed:', e)
       currentNovel.value = null
       throw e
@@ -126,14 +133,16 @@ export const useNovelStore = defineStore('novel', () => {
       return fetchAll()
     }
     loading.value = true
+    error.value = ''
     try {
       novels.value = await invoke<Novel[]>('search_novels', { query })
     } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
       console.error('Failed to search novels:', e)
     } finally {
       loading.value = false
     }
   }
 
-  return { novels, currentNovel, loading, fetchAll, fetchOne, fetchMeta, fetchContent, create, update, updateMetadata, remove, search }
+  return { error, novels, currentNovel, loading, fetchAll, fetchOne, fetchMeta, fetchContent, create, update, updateMetadata, remove, search }
 })
