@@ -324,11 +324,14 @@ function openExportConfig() { exportError.value = ''; exportResult.value = ''; e
 
 
 const split = useSplitLayout({
-  left: 200,
-  right: 280,
+  // 目录与实时预览默认折叠，双击分隔条或拖拽可展开
+  left: 0,
+  right: 0,
+  leftRestored: 200,
+  rightRestored: 280,
   min: 50,
   max: 500,
-  storageKey: 'novel-editor-layout-v2',
+  storageKey: 'novel-editor-layout-v3',
 })
 const route = useRoute()
 const router = useRouter()

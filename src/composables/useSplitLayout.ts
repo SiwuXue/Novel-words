@@ -11,6 +11,9 @@ import { reactive, onMounted, onBeforeUnmount } from 'vue'
 export interface SplitLayoutDefaults {
   left: number
   right: number
+  /** 从折叠态恢复时的宽度（缺省用 left/right） */
+  leftRestored?: number
+  rightRestored?: number
   /** Bounds for the draggable range. */
   min: number
   max: number
@@ -63,8 +66,8 @@ export function useSplitLayout(defaults: SplitLayoutDefaults) {
     leftWidth: defaults.left,
     rightWidth: defaults.right,
     /** Snap-to-this values used when restoring from a collapsed state. */
-    leftRestored: defaults.left,
-    rightRestored: defaults.right,
+    leftRestored: defaults.leftRestored ?? defaults.left,
+    rightRestored: defaults.rightRestored ?? defaults.right,
   })
 
   function persist() {
