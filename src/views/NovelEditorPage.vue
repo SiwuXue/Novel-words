@@ -79,6 +79,14 @@
           </template>
         </ReadingPanels>
         <el-button size="small" @click="openExportConfig" :aria-label="t('editor.exportPdf')"><el-icon><Printer /></el-icon></el-button>
+        <el-button
+          v-if="isEnglishMode"
+          size="small"
+          :type="wordTapMode ? 'primary' : 'default'"
+          @click="wordTapMode = !wordTapMode"
+        >
+          {{ t('wordTap.toggle') }}
+        </el-button>
         <el-button size="small" @click="exitReadingMode">
           {{ t('ui.editContent') }}
         </el-button>
@@ -128,7 +136,15 @@
         </el-icon>
       </div>
       <div class="editor-pane center-pane">
+        <!-- 英文逐词阅读模式：只读逐词渲染 -->
+        <WordTapReader
+          v-if="readingMode && wordTapMode"
+          :content="editorContent"
+          :novel-id="currentNovelId"
+          :chapter-id="editorStore.chapterList[editorStore.activeChapterIndex]?.id ?? null"
+        />
         <NovelEditor
+          v-else
           :key="`${editorStore.chapterList[editorStore.activeChapterIndex]?.id || 'draft'}-${editorStore.activeChapterIndex}`"
           ref="editorRef"
           :novel-id="currentNovelId"
@@ -292,6 +308,7 @@ import { normalizeSteps, type StepNum } from '@/types/pdfSteps'
 // Keep the editor implementation out of the page shell. The editor pulls in
 // Tiptap/ProseMirror and is only needed after this route has rendered.
 const NovelEditor = defineAsyncComponent(() => import('@/components/novel/NovelEditor.vue'))
+const WordTapReader = defineAsyncComponent(() => import('@/components/novel/WordTapReader.vue'))
 import ChapterList from '@/components/novel/ChapterList.vue'
 import PreviewPanel from '@/components/novel/PreviewPanel.vue'
 import { buildHtml as buildPreviewHtml } from '@/utils/pdfPreview'
@@ -343,6 +360,8 @@ type TemplateType = 'intensive' | 'card'
 const pdfTemplateType = ref<TemplateType>('intensive')
 const pdfTemplateLabel = computed(() => t(pdfTemplateType.value === 'card' ? 'editor.templateCard' : 'editor.templateIntensive'))
 const isEnglishMode = computed(() => store.currentNovel?.language === 'en')
+/** 英文逐词阅读模式（仅专注阅读 + 英文小说时可用） */
+const wordTapMode = ref(false)
 const coverEnabled = ref(false)
 const pageNumbersEnabled = ref(false)
 
@@ -462,6 +481,8 @@ watch(
 async function setReadingMode(enabled: boolean) {
   const position = editorRef.value?.getScrollPercent() ?? 0
   readingMode.value = enabled
+  // 退出阅读时收起逐词模式，回到编辑器视图
+  if (!enabled) wordTapMode.value = false
   readingSettingsOpen.value = false
   const query = { ...route.query }
   if (enabled) query.mode = 'read'

@@ -55,6 +55,17 @@
           <div class="dict-translation">{{ store.currentWord.translation || t('dict.noDefinition') }}</div>
           <p v-if="learningState" class="dict-learning-state" role="status">{{ t('wordForm.inherited', { status: t(`vocabDetail.${learningState.proficiency}`) }) }}</p>
           <p v-else-if="checkingLearningState" class="dict-learning-state" role="status">{{ t('wordForm.checking') }}</p>
+          <div v-if="quickMark" class="dict-quick-mark">
+            <button
+              v-for="opt in quickMarkOptions"
+              :key="opt.value"
+              type="button"
+              class="dict-quick-btn"
+              :class="`dict-quick-${opt.value}`"
+              :disabled="marking !== null"
+              @click="quickMark(opt.value)"
+            >{{ opt.label }}</button>
+          </div>
           <div class="dict-footer">
             <el-select
               popper-class="dict-book-dropdown"
@@ -146,6 +157,17 @@
             target="_blank"
             rel="noopener"
           >{{ t('dict.openInBrowser') }}</a>
+          <div v-if="quickMark" class="dict-quick-mark">
+            <button
+              v-for="opt in quickMarkOptions"
+              :key="opt.value"
+              type="button"
+              class="dict-quick-btn"
+              :class="`dict-quick-${opt.value}`"
+              :disabled="marking !== null"
+              @click="quickMark(opt.value)"
+            >{{ opt.label }}</button>
+          </div>
           <div class="dict-footer">
             <el-select
               popper-class="dict-book-dropdown"
@@ -273,7 +295,7 @@ import { useDictionaryStore, type DictWord, type DictSource } from '@/stores/dic
 import { useVocabBookStore } from '@/stores/vocabBookStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { speakWord } from '@/utils/speech'
-import type { UserVocabEntry, VocabWord } from '@/types/vocabWord'
+import type { UserVocabEntry, VocabWord, Proficiency } from '@/types/vocabWord'
 import { t } from '@/i18n'
 
 const props = defineProps<{
@@ -281,10 +303,13 @@ const props = defineProps<{
   position: { x: number; y: number }
   novelId: number | null
   chapterId: number | null
+  /** 逐词阅读模式：显示快捷标记按钮 */
+  quickMark?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'close'): void
+  (e: 'marked', payload: { word: string; proficiency: Proficiency }): void
 }>()
 
 const store = useDictionaryStore()
@@ -392,6 +417,30 @@ function speakOnline() {
 /** Manual speak button handler */
 function speak(word: string) {
   speakWord(word, settingsStore.speechAccent)
+}
+
+/** 逐词阅读快捷标记：写入个人总词汇库并通知父级刷新颜色 */
+const marking = ref<string | null>(null)
+const quickMarkOptions: Array<{ value: Proficiency; label: string }> = [
+  { value: 'unknown', label: t('wordTap.unknown') },
+  { value: 'familiar', label: t('wordTap.familiar') },
+  { value: 'mastered', label: t('wordTap.mastered') },
+  { value: 'ignore', label: t('wordTap.ignore') },
+]
+
+async function quickMark(proficiency: Proficiency) {
+  const word = store.currentWord?.word ?? store.onlineResult?.word
+  if (!word || marking.value) return
+  marking.value = proficiency
+  try {
+    await invoke('mark_word_tap_proficiency', { words: [word], proficiency })
+    emit('marked', { word, proficiency })
+    ElMessage.success(t('wordTap.marked', { status: t(`wordTap.${proficiency}`) }))
+  } catch (e: any) {
+    ElMessage.error(String(e?.message || e))
+  } finally {
+    marking.value = null
+  }
 }
 
 /** Adjust position to keep popover inside viewport */
@@ -658,4 +707,26 @@ onBeforeUnmount(() => {
   padding-top: 4px;
   border-top: 1px solid var(--border-color, #ebeef5);
 }
+
+/* 逐词阅读快捷标记 */
+.dict-quick-mark {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.dict-quick-btn {
+  border: 1px solid var(--border-color, #dcdfe6);
+  background: var(--bg-secondary, #fafafa);
+  color: var(--text-regular, #606266);
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.dict-quick-btn:hover { border-color: currentColor; }
+.dict-quick-btn:disabled { opacity: 0.5; cursor: default; }
+.dict-quick-unknown { color: var(--wt-unknown, #c45656); }
+.dict-quick-familiar { color: var(--wt-familiar, #b88230); }
+.dict-quick-mastered { color: var(--wt-mastered, #5a8a53); }
+.dict-quick-ignore { color: var(--wt-ignore, #8b929c); }
 </style>

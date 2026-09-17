@@ -1,3 +1,6 @@
+/** 熟练度档位：ignore 为逐词阅读的"忽略"标记，不进入复习队列与统计 */
+export type Proficiency = 'unknown' | 'familiar' | 'mastered' | 'ignore'
+
 export interface VocabWord {
   id: number
   userVocabId: number | null
@@ -8,7 +11,7 @@ export interface VocabWord {
   exampleSentence: string
   novelId: number | null
   chapterId: number | null
-  proficiency: 'unknown' | 'familiar' | 'mastered'
+  proficiency: Proficiency
   memoryTag: string
   createdAt: string
   matchTerms: string
@@ -19,13 +22,21 @@ export interface VocabWordFormData {
   definition: string
   phonetic: string
   exampleSentence: string
-  proficiency: 'unknown' | 'familiar' | 'mastered'
+  proficiency: Exclude<Proficiency, 'ignore'>
   memoryTag: string
   chapterId?: number | null
   proficiencyChanged?: boolean
 }
 
-export type Proficiency = VocabWord['proficiency']
+export interface HighlightWord {
+  word: string
+  definition: string
+  phonetic: string
+  exampleSentence: string
+  novelId: number | null
+  proficiency: Proficiency
+  matchTerms: string
+}
 
 export interface UserVocabEntry {
   id: number
@@ -43,14 +54,4 @@ export interface UserVocabEntry {
 export interface UserVocabPage {
   total: number
   words: UserVocabEntry[]
-}
-
-export interface HighlightWord {
-  word: string
-  definition: string
-  phonetic: string
-  exampleSentence: string
-  novelId: number | null
-  proficiency: 'unknown' | 'familiar' | 'mastered'
-  matchTerms: string
 }

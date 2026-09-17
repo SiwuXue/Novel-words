@@ -24,7 +24,7 @@ fn rank(proficiency: &str) -> u8 {
 }
 
 pub fn valid_proficiency(proficiency: &str) -> Result<(), String> {
-    if matches!(proficiency, "unknown" | "familiar" | "mastered") {
+    if matches!(proficiency, "unknown" | "familiar" | "mastered" | "ignore") {
         Ok(())
     } else {
         Err("无效的熟练度".into())
@@ -32,6 +32,11 @@ pub fn valid_proficiency(proficiency: &str) -> Result<(), String> {
 }
 
 fn initial_srs(proficiency: &str, mut srs: SrsState) -> SrsState {
+    if proficiency == "ignore" {
+        // 忽略档永不进入复习队列：把到期日推到极远
+        srs.due = "9999-12-31".into();
+        return srs;
+    }
     if srs.due.is_empty() && proficiency != "unknown" {
         apply_rating(
             &mut srs,
@@ -53,7 +58,7 @@ CREATE TABLE IF NOT EXISTS user_vocab (
  definition TEXT NOT NULL DEFAULT '',
  phonetic TEXT NOT NULL DEFAULT '',
  example_sentence TEXT NOT NULL DEFAULT '',
- proficiency TEXT NOT NULL DEFAULT 'unknown' CHECK(proficiency IN ('unknown','familiar','mastered')),
+ proficiency TEXT NOT NULL DEFAULT 'unknown' CHECK(proficiency IN ('unknown','familiar','mastered','ignore')),
  srs_state TEXT NOT NULL DEFAULT '{}',
  last_reviewed_at INTEGER NOT NULL DEFAULT 0,
  state_updated_at INTEGER NOT NULL DEFAULT 0,
@@ -81,20 +86,96 @@ struct LegacyWord {
 }
 
 pub fn migration_needed(conn: &Connection) -> bool {
+    schema_version(conn) < SCHEMA_VERSION
+}
+
+/// 当前 user_vocab 迁移版本（0 = 未迁移，1 = 个人总词汇库合并，2 = ignore 档）。
+fn schema_version(conn: &Connection) -> i32 {
     conn.query_row(
         "SELECT value FROM app_settings WHERE key='user_vocab_schema'",
         [],
         |r| r.get::<_, String>(0),
     )
     .ok()
-    .as_deref()
-        != Some("1")
+    .and_then(|v| v.parse().ok())
+    .unwrap_or(0)
+}
+
+/// 逐词阅读的 ignore 档：user_vocab.proficiency 的 CHECK 需要扩展。
+/// SQLite 无法修改 CHECK，只能整表重建；保留 id 使 vocab_word/review_log 的
+/// 外键引用继续有效（PRAGMA foreign_keys 不能在事务内切换，因此放在独立事务外）。
+fn migrate_v2(conn: &mut Connection) -> Result<(), String> {
+    let table_exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='user_vocab')",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let already_ok = if table_exists {
+        let sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='user_vocab'",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        sql.contains("'ignore'")
+    } else {
+        true
+    };
+    if already_ok {
+        conn.execute_batch(
+            "INSERT OR REPLACE INTO app_settings(key,value) VALUES ('user_vocab_schema','2');",
+        )
+        .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    conn.execute_batch("PRAGMA foreign_keys=OFF;")
+        .map_err(|e| e.to_string())?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("开启迁移事务失败: {}", e))?;
+    tx.execute_batch(
+        "CREATE TABLE user_vocab_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            word_key TEXT NOT NULL UNIQUE,
+            word TEXT NOT NULL,
+            definition TEXT NOT NULL DEFAULT '',
+            phonetic TEXT NOT NULL DEFAULT '',
+            example_sentence TEXT NOT NULL DEFAULT '',
+            proficiency TEXT NOT NULL DEFAULT 'unknown' CHECK(proficiency IN ('unknown','familiar','mastered','ignore')),
+            srs_state TEXT NOT NULL DEFAULT '{}',
+            last_reviewed_at INTEGER NOT NULL DEFAULT 0,
+            state_updated_at INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        INSERT INTO user_vocab_new (id,word_key,word,definition,phonetic,example_sentence,proficiency,srs_state,last_reviewed_at,state_updated_at,created_at,updated_at)
+        SELECT id,word_key,word,definition,phonetic,example_sentence,proficiency,srs_state,last_reviewed_at,state_updated_at,created_at,updated_at FROM user_vocab;
+        DROP TABLE user_vocab;
+        ALTER TABLE user_vocab_new RENAME TO user_vocab;
+        CREATE INDEX IF NOT EXISTS idx_user_vocab_proficiency ON user_vocab(proficiency);",
+    )
+    .map_err(|e| format!("user_vocab 迁移失败: {}", e))?;
+    tx.commit().map_err(|e| e.to_string())?;
+    conn.execute_batch(
+        "PRAGMA foreign_keys=ON;
+         INSERT OR REPLACE INTO app_settings(key,value) VALUES ('user_vocab_schema','2');",
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 pub fn migrate(conn: &mut Connection) -> Result<(), String> {
-    if !migration_needed(conn) {
-        return Ok(());
+    if schema_version(conn) < 1 {
+        migrate_v1(conn)?;
     }
+    migrate_v2(conn)
+}
+
+/// v1：合并个人总词汇库（旧库从零建表，新库幂等）。
+fn migrate_v1(conn: &mut Connection) -> Result<(), String> {
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     tx.execute_batch(SCHEMA).map_err(|e| e.to_string())?;
     for (name, ddl) in [
@@ -267,8 +348,12 @@ pub fn migrate(conn: &mut Connection) -> Result<(), String> {
        INSERT OR REPLACE INTO app_settings(key,value) VALUES ('user_vocab_schema','1');",
     )
     .map_err(|e| e.to_string())?;
-    tx.commit().map_err(|e| e.to_string())
+    tx.commit().map_err(|e| e.to_string())?;
+    migrate_v2(conn)
 }
+
+/// 逐词阅读 ignore 档的当前 schema 版本。
+pub const SCHEMA_VERSION: i32 = 2;
 
 /// Returns (personal id, inherited). Caller owns the transaction.
 pub fn ensure_personal(

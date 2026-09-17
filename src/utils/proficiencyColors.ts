@@ -17,5 +17,9 @@ export function textColorFor(proficiency: string | undefined): string {
   if (proficiency === 'mastered' || proficiency === 'familiar') {
     return PROFICIENCY_TEXT[proficiency]
   }
+  if (proficiency === 'ignore') {
+    // 逐词阅读的忽略档：按已掌握渲染（灰色），避免专有名词被标红
+    return PROFICIENCY_TEXT.mastered
+  }
   return PROFICIENCY_TEXT.unknown
 }

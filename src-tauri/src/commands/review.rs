@@ -23,7 +23,10 @@ pub(crate) fn due_words(db: &Connection, book: Option<i64>) -> Result<Vec<VocabW
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
-    words.retain(|w| is_due(&parse_memory_tag(&w.memory_tag).1));
+    // ignore 档（逐词阅读的"忽略"标记）永不进入复习队列
+    words.retain(|w| {
+        w.proficiency != "ignore" && is_due(&parse_memory_tag(&w.memory_tag).1)
+    });
     words.sort_by(|a, b| {
         let a_srs = parse_memory_tag(&a.memory_tag).1;
         let b_srs = parse_memory_tag(&b.memory_tag).1;

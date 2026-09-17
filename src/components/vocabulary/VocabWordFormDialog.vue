@@ -67,7 +67,8 @@ watch(() => form.word, raw => {
   const word = raw.trim()
   const key = (value: string) => value.replace(/[‘’]/g, "'").trim().replace(/\s+/g, ' ').toLowerCase()
   if (props.word && key(word) === key(props.word.word)) {
-    form.proficiency = props.word.proficiency
+    // 词汇本条目不存 ignore 档（个人级状态），回退为 unknown
+    form.proficiency = props.word.proficiency === 'ignore' ? 'unknown' : props.word.proficiency
     proficiencyChanged.value = false
     return
   }
@@ -80,7 +81,7 @@ watch(() => form.word, raw => {
       if (disposed || request !== lookupGeneration || !visible.value) return
       inherited.value = state
       if (state) {
-        form.proficiency = state.proficiency
+        form.proficiency = state.proficiency === 'ignore' ? 'unknown' : state.proficiency
       }
     } catch {
       if (!disposed && request === lookupGeneration) lookupError.value = true
