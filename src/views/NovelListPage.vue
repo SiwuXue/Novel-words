@@ -129,7 +129,7 @@ const showImport = ref(false)
 const initialImportPath = ref('')
 const isDragOver = ref(false)
 
-const ACCEPTED_EXTS = ['txt', 'md', 'text', 'epub', 'fb2']
+const ACCEPTED_EXTS = ['txt', 'md', 'text', 'epub', 'fb2', 'pdf']
 
 let unlistenDrop: (() => void) | undefined
 let disposed = false
