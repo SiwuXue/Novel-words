@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 
-async function bridge(page: import('@playwright/test').Page, options: { empty?:boolean; failed?:boolean; dark?:boolean; english?:boolean; multipleChapters?:boolean; largeChapter?:boolean; savedReading?:boolean; largeLists?:boolean; multipleBooks?:boolean } = {}) {
+async function bridge(page: import('@playwright/test').Page, options: { empty?:boolean; failed?:boolean; dark?:boolean; english?:boolean; multipleChapters?:boolean; largeChapter?:boolean; savedReading?:boolean; largeLists?:boolean; multipleBooks?:boolean; licenseInactive?:boolean; licenseError?:boolean; licenseOffline?:boolean } = {}) {
   await page.addInitScript((options) => {
     localStorage.setItem('theme', options.dark ? 'dark' : 'light')
     localStorage.setItem('app_locale', options.english ? 'en' : 'zh')
@@ -22,11 +22,23 @@ async function bridge(page: import('@playwright/test').Page, options: { empty?:b
     if (options.largeChapter) chapters.push({...chapters[0],id:2,title:'Chapter Two',sortOrder:1,startIndex:content.length,content:'<h1>Chapter Two</h1>'+Array.from({length:2000},(_,i) => `<p>Large paragraph ${i}. The garden was full of wonder. Mary opened the little door and found a beautiful world.</p>`).join('')})
     const state = window as any
     state.testCalls = []; state.failRequests = options.failed; state.failExport = false
+    state.testLicense = { authorized: !options.licenseInactive, mode: options.licenseInactive ? null : options.licenseOffline ? 'offline' : 'online', code: options.licenseInactive ? 'ACTIVATION_REQUIRED' : null, plan: options.licenseInactive ? null : '30d', expiresAt: Math.floor(Date.now()/1000) + 30 * 86400, tokenExpiresAt: Math.floor(Date.now()/1000) + 86400, lastVerifiedAt: Math.floor(Date.now()/1000), deviceId: 'device-test-1234567890', maskedCardKey: options.licenseInactive ? null : 'CY-****-ABCD', serverUrl: 'https://license.wuyiuou.top', cardPrefix: 'CY', retryAfterSeconds: null }
+    state.testCallbacks = {}; state.testLicenseListeners = []; state.testCallbackId = 0
+    state.emitLicenseStatus = (status:any) => { state.testLicense = status; state.testLicenseListeners.forEach((handler:number) => state.testCallbacks[handler]?.({event:'license-state-changed',id:handler,payload:status})) }
     state.__TAURI_INTERNALS__ = {
       metadata:{ currentWindow:{label:'main'},currentWebview:{label:'main'} },
-      transformCallback:() => 1, unregisterCallback:() => {},
+      transformCallback:(callback:any) => { const id=++state.testCallbackId; state.testCallbacks[id]=callback; return id }, unregisterCallback:(id:number) => {delete state.testCallbacks[id]},
       invoke:async (cmd:string,args:any = {}) => {
         state.testCalls.push({cmd,args})
+        if (cmd === 'get_license_status') return { ...state.testLicense }
+        if (cmd === 'verify_license') { if(options.licenseError || state.failLicenseVerify) throw {code:'NETWORK_UNAVAILABLE',message:'untrusted network response'}; return { ...state.testLicense } }
+        if (cmd === 'activate_license') {
+          if(state.holdLicenseActivation) await new Promise(resolve=>{state.finishLicenseActivation=resolve})
+          if(state.activationError) throw state.activationError
+          if(args.cardKey !== 'CY-VALID-TEST') throw {code:'INVALID_CARD',message:'untrusted activation response'}
+          state.testLicense={...state.testLicense,authorized:true,mode:'online',code:null,plan:'30d',maskedCardKey:'CY-****-TEST'}
+          return { ...state.testLicense }
+        }
         if (state.failRequests && ['get_all_novels','get_all_vocab_books','get_due_words_count','get_learning_stats','get_all_due_words','list_preset_vocab_books'].includes(cmd)) throw new Error('Database unavailable')
         if (cmd === 'get_app_info') return {version:'0.1.0',dataDir:'C:/test',dbSize:0}
         if (cmd === 'get_all_settings') return [{key:'theme',value:options.dark ? 'dark' : 'light'}]
@@ -54,13 +66,124 @@ async function bridge(page: import('@playwright/test').Page, options: { empty?:b
         if (cmd === 'get_ai_settings') return { enabled:false,provider:'openai',api_key:'',model:'',base_url:'' }
         if (cmd === 'plugin:dialog|save') return 'C:/test/garden.pdf'
         if (cmd === 'export_pdf') { if (state.failExport) throw new Error('Export unavailable'); return {path:'C:/test/garden.pdf',total_vocab:0,matched_words:0,chapter_count:1,steps_used:'1,2,3'} }
-        if (cmd === 'plugin:event|listen') return 1
+        if (cmd === 'plugin:event|listen') { if(args.event === 'license-state-changed') state.testLicenseListeners.push(args.handler); return args.handler || 1 }
         if (cmd === 'dict_lookup_english') return {word:args.word,phonetic:'',definition:'花园',translations:[]}
         return null
       },
     }
     state.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener:() => {} }
   }, options)
+}
+
+test('license activation blocks deep links and opens the requested editor after a valid card', async ({ page }) => {
+  await bridge(page, {licenseInactive:true}); await page.goto('/novels/1?mode=read')
+  await expect(page.getByRole('heading',{name:'激活词阅'})).toBeVisible()
+  await expect(page.locator('.app-layout')).toHaveCount(0)
+  expect(await page.evaluate(()=>(window as any).testCalls.some((c:any)=>['get_novel','get_novel_meta','get_chapter_list','get_all_novels','get_all_vocab_books'].includes(c.cmd)))).toBe(false)
+  await page.getByRole('textbox',{name:'词阅卡密',exact:true}).fill('CY-VALID-TEST')
+  await page.keyboard.press('Enter')
+  await expect(page.locator('.ProseMirror')).toBeVisible()
+  await expect(page).toHaveURL('/novels/1?mode=read')
+  expect(await page.evaluate(()=>Object.values(localStorage).some(value=>String(value).includes('CY-VALID-TEST')))).toBe(false)
+})
+
+test('license initialization failure stays locked and never echoes network response text', async ({ page }) => {
+  await bridge(page, {licenseError:true}); await page.goto('/vocabulary/1')
+  await expect(page.getByRole('alert')).toContainText('无法连接授权服务')
+  await expect(page.locator('.app-layout')).toHaveCount(0)
+  await expect(page.getByText('untrusted network response')).toHaveCount(0)
+  await page.getByRole('button',{name:'备份个人数据',exact:true}).click()
+  await expect(page.getByRole('status')).toContainText('个人数据已备份')
+  expect(await page.evaluate(()=>(window as any).testCalls.some((c:any)=>c.cmd==='backup_database'))).toBe(true)
+})
+
+test('license invalid activation preserves input and rate limits disable retries for the advertised time', async ({ page }) => {
+  await page.clock.install(); await bridge(page, {licenseInactive:true}); await page.goto('/')
+  const input=page.getByRole('textbox',{name:'词阅卡密',exact:true})
+  await input.fill('CY-BAD'); await page.getByRole('button',{name:'激活',exact:true}).click()
+  await expect(page.getByRole('alert')).toContainText('卡密无效')
+  await expect(page.getByText('untrusted activation response')).toHaveCount(0)
+  await expect(input).toHaveValue('CY-BAD')
+  await page.evaluate(()=>{(window as any).activationError={code:'RATE_LIMITED',retryAfterSeconds:3,message:'arbitrary error'}})
+  await input.fill('CY-VALID-TEST'); await page.getByRole('button',{name:'激活',exact:true}).click()
+  const retry=page.getByRole('button',{name:'3 秒后可重试',exact:true})
+  await expect(retry).toBeDisabled(); await expect(page.getByRole('button',{name:'重新校验',exact:true})).toBeDisabled()
+  await page.clock.runFor(3000)
+  await expect(page.getByRole('button',{name:'激活',exact:true})).toBeEnabled()
+})
+
+test('license activation cannot submit twice while its request is pending', async ({ page }) => {
+  await bridge(page,{licenseInactive:true}); await page.goto('/')
+  await page.evaluate(()=>{(window as any).holdLicenseActivation=true})
+  await page.getByRole('textbox',{name:'词阅卡密',exact:true}).fill('CY-VALID-TEST')
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('button',{name:'激活',exact:true})).toBeDisabled()
+  await page.keyboard.press('Enter')
+  expect(await page.evaluate(()=>(window as any).testCalls.filter((c:any)=>c.cmd==='activate_license').length)).toBe(1)
+  await page.evaluate(()=>{(window as any).finishLicenseActivation()})
+  await expect(page.locator('.home-page')).toBeVisible()
+})
+
+test('license expiry locks the mounted editor and keeps its current content and focus behind the mask', async ({ page }) => {
+  await bridge(page); await page.goto('/novels/1')
+  const editor=page.locator('.ProseMirror'); await expect(editor).toBeVisible()
+  const text=await editor.textContent()
+  await editor.focus()
+  await page.evaluate(()=>{const state=window as any;state.emitLicenseStatus({...state.testLicense,authorized:false,mode:null,code:'LICENSE_EXPIRED'})})
+  await expect(page.getByRole('dialog',{name:'激活词阅'})).toBeVisible()
+  await expect(page.locator('.license-workspace')).toHaveAttribute('inert','')
+  await expect(page.locator('.license-workspace')).toHaveAttribute('aria-hidden','true')
+  await expect(editor).toHaveCount(1); expect(await editor.textContent()).toBe(text)
+  await expect(page.getByRole('alert')).toContainText('授权已到期')
+  await page.getByRole('textbox',{name:'词阅卡密',exact:true}).fill('CY-VALID-TEST')
+  await page.keyboard.press('Enter')
+  await expect(page.locator('.license-gate')).toHaveCount(0)
+  await expect(page.locator('.license-workspace')).not.toHaveAttribute('inert')
+  expect(await editor.textContent()).toBe(text)
+})
+
+test('license replacement errors retain the original masked card and valid workspace access',async({page})=>{
+  await bridge(page); await page.goto('/settings')
+  await page.getByRole('tab',{name:'词阅授权',exact:true}).click()
+  await expect(page.getByText('CY-****-ABCD',{exact:true})).toBeVisible()
+  await page.getByRole('button',{name:'更换卡密',exact:true}).click()
+  await page.getByRole('textbox',{name:'新词阅卡密',exact:true}).fill('CY-BAD')
+  await page.getByRole('button',{name:'激活新卡密',exact:true}).click()
+  await expect(page.getByRole('alert')).toContainText('卡密无效')
+  await expect(page.getByText('CY-****-ABCD',{exact:true})).toBeVisible()
+  await expect(page.locator('.license-gate')).toHaveCount(0)
+  await page.getByRole('button',{name:'取消',exact:true}).click()
+  await page.getByRole('button',{name:'更换卡密',exact:true}).click()
+  await expect(page.getByRole('textbox',{name:'新词阅卡密',exact:true})).toHaveValue('')
+})
+
+test('license offline panel reports the actual plan and bounded offline deadline in English',async({page})=>{
+  await bridge(page,{licenseOffline:true,english:true,dark:true}); await page.goto('/settings')
+  await page.getByRole('tab',{name:'WordRead license',exact:true}).click()
+  await expect(page.getByText('Available offline',{exact:true})).toBeVisible()
+  await expect(page.getByText('30 days',{exact:true})).toBeVisible()
+  await expect(page.getByText('Offline access until',{exact:true})).toBeVisible()
+  await expect(page.getByText(/offline access lasts up to 24 hours/)).toBeVisible()
+})
+
+for(const size of [{width:800,height:500},{width:390,height:844}]) {
+  test(`license controls fit ${size.width}x${size.height} and keep keyboard focus inside the gate`,async({page})=>{
+    await page.setViewportSize(size); await bridge(page,{licenseInactive:true}); await page.goto('/novels/1')
+    await expect(page.getByRole('heading',{name:'激活词阅'})).toBeVisible()
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true)
+    await page.getByRole('button',{name:'备份个人数据',exact:true}).focus()
+    await page.keyboard.press('Tab')
+    expect(await page.evaluate(()=>!!document.activeElement?.closest('.license-titlebar'))).toBe(true)
+    await page.getByRole('button',{name:'备份个人数据',exact:true}).click()
+    const bounds=await page.getByRole('button',{name:'备份个人数据',exact:true}).boundingBox()
+    expect(bounds!.x+bounds!.width).toBeLessThanOrEqual(size.width)
+    expect(bounds!.y+bounds!.height).toBeLessThanOrEqual(size.height)
+    await page.getByRole('button',{name:'切换为 English',exact:true}).click()
+    await expect(page.getByRole('heading',{name:'Activate WordRead'})).toBeVisible()
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true)
+    await page.locator('.license-gate-content').evaluate(el=>{el.scrollTop=0})
+    await page.screenshot({path:`.ui-preview/license-${size.width}-english.png`,animations:'disabled'})
+  })
 }
 
 test('desktop navigation is stable, collapsible and exposes review', async ({ page }) => {

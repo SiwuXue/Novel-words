@@ -16,6 +16,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+base64 = "0.22"
 
 [dependencies]
 tauri = { version = "2", features = [] }
@@ -39,3 +40,10 @@ html-escape = "0.2"
 rust_xlsxwriter = "0.94"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+base64 = "0.22"
+ring = "0.17"
+sha2 = "0.10"
+uuid = "1"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_System_Memory", "Win32_System_Registry"] }

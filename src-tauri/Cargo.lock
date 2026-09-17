@@ -2405,6 +2405,7 @@ dependencies = [
 name = "novel-words"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "csv",
  "encoding_rs",
@@ -2412,17 +2413,21 @@ dependencies = [
  "html-escape",
  "printpdf",
  "reqwest 0.12.28",
+ "ring",
  "roxmltree",
  "rusqlite",
  "rust_xlsxwriter",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-fs",
  "tauri-plugin-opener",
  "tokio",
+ "uuid",
+ "windows-sys 0.59.0",
  "zip 2.4.2",
 ]
 

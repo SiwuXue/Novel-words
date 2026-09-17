@@ -3,6 +3,7 @@
     <PageHeader :title="t('nav.settings')" />
 
     <el-tabs v-model="activeTab" class="settings-tabs">
+      <el-tab-pane :label="t('license.title')" name="license"><LicensePanel /></el-tab-pane>
       <!-- General tab -->
       <el-tab-pane :label="t('settings.general')" name="general">
         <el-form class="settings-form" label-width="130px">
@@ -264,6 +265,7 @@
 </template>
 
 <script setup lang="ts">
+import LicensePanel from '@/components/license/LicensePanel.vue'
 import PageHeader from '@/components/common/PageHeader.vue'
 import { computed, ref, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'

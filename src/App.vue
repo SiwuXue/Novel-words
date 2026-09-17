@@ -1,12 +1,13 @@
 <template>
   <el-config-provider :locale="elementLocale">
-    <AppLayout />
+    <LicenseGate><AppLayout /></LicenseGate>
   </el-config-provider>
 </template>
 
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import LicenseGate from '@/components/license/LicenseGate.vue'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { elementLocale } from '@/i18n'
 

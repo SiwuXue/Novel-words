@@ -1,16 +1,19 @@
 mod commands;
 mod db;
 mod dictionary;
+mod license;
 mod models;
 mod pdf;
 mod preset_catalog;
 mod user_vocab;
 mod utils;
 
+use license::state::{activate_license, get_license_status, verify_license, LicenseState};
 #[cfg(target_os = "android")]
 use std::path::{Path, PathBuf};
 #[cfg(target_os = "android")]
 use tauri::AppHandle;
+use tauri::Emitter;
 use tauri::Manager;
 #[cfg(target_os = "android")]
 use tauri_plugin_fs::FsExt;
@@ -150,6 +153,26 @@ pub fn run() {
             }
             app.manage(db_state);
             app.manage(catalog);
+            let license_state = (|| -> Result<LicenseState, license::LicenseError> {
+                let config = license::ClientConfig::compiled()?;
+                let device = license::storage::stable_device_id(&app_data_dir, &config.product_id)?;
+                LicenseState::new(config, &app_data_dir, &device)
+            })();
+            match license_state {
+                Ok(state) => {
+                    app.manage(state);
+                    let license_app = app.handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        let state = license_app.state::<LicenseState>();
+                        if let Ok(status) = state.verify().await {
+                            let _ = license_app.emit("license-state-changed", status);
+                        } else if let Ok(status) = state.status() {
+                            let _ = license_app.emit("license-state-changed", status);
+                        }
+                    });
+                }
+                Err(_) => eprintln!("[license] Initialization failed: LICENSING_UNAVAILABLE"),
+            }
 
             // Auto-backup on startup (best effort; failures are logged only).
             {
@@ -181,79 +204,112 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            create_novel,
-            get_all_novels,
-            get_novel,
-            get_novel_meta,
-            get_novel_content,
-            update_novel,
-            update_novel_content,
-            update_novel_metadata,
-            delete_novel,
-            search_novels,
-            import_file,
-            write_text_file,
-            read_text_file,
-            create_vocab_book,
-            get_all_vocab_books,
-            update_vocab_book,
-            delete_vocab_book,
-            import_cet4_core_words,
-            create_vocab_word,
-            get_vocab_words,
-            get_vocab_words_page,
-            update_vocab_word,
-            delete_vocab_word,
-            delete_vocab_words,
-            search_vocab_words,
-            get_highlight_words,
-            export_vocab_words_csv,
-            export_vocab_words_xlsx,
-            export_vocab_words_apkg,
-            export_vocab_book_json,
-            import_vocab_book_json,
-            get_user_vocab_page,
-            lookup_user_vocab,
-            set_user_vocab_proficiency,
-            import_preset_vocab_book,
-            commit_preset_clone_with_state,
-            list_preset_vocab_books,
-            preview_preset_clone,
-            commit_preset_clone,
-            get_due_words,
-            get_all_due_words,
-            get_due_words_count,
-            get_review_progress,
-            get_learning_stats,
-            review_vocab_word,
-            import_vocab_words_csv,
-            create_pdf_template,
-            get_all_pdf_templates,
-            update_pdf_template,
-            delete_pdf_template,
-            get_builtin_templates,
-            save_chapters,
-            get_chapters,
-            get_chapter_list,
-            get_chapter_content,
-            update_chapter_content,
-            update_chapter_title,
-            delete_chapters_by_novel,
-            export_pdf,
-            backup_database,
-            restore_database,
-            get_app_info,
-            get_setting,
-            set_setting,
-            get_all_settings,
-            get_ai_settings,
-            list_ai_models,
-            save_ai_settings,
-            test_ai_connection,
-            dict_lookup_english,
-            dict_lookup_chinese,
-        ])
+        .invoke_handler(|invoke| {
+            let command = invoke.message.command();
+            if let Some(state) = invoke.message.state_ref().try_get::<LicenseState>() {
+                let payload = match invoke.message.payload() {
+                    tauri::ipc::InvokeBody::Json(value) => Some(value),
+                    tauri::ipc::InvokeBody::Raw(_) => None,
+                };
+                if let Err(error) = state.guard_with_payload(command, payload) {
+                    if let Ok(status) = state.status() {
+                        let _ = invoke
+                            .message
+                            .webview_ref()
+                            .app_handle()
+                            .emit("license-state-changed", status);
+                    }
+                    invoke.resolver.reject(error);
+                    return true;
+                }
+            } else if matches!(
+                command,
+                "get_license_status" | "verify_license" | "activate_license"
+            ) || !license::state::public_command(command)
+            {
+                invoke
+                    .resolver
+                    .reject(license::LicenseError::new("LICENSING_UNAVAILABLE"));
+                return true;
+            }
+            let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+                get_license_status,
+                verify_license,
+                activate_license,
+                create_novel,
+                get_all_novels,
+                get_novel,
+                get_novel_meta,
+                get_novel_content,
+                update_novel,
+                update_novel_content,
+                update_novel_metadata,
+                delete_novel,
+                search_novels,
+                import_file,
+                write_text_file,
+                read_text_file,
+                create_vocab_book,
+                get_all_vocab_books,
+                update_vocab_book,
+                delete_vocab_book,
+                import_cet4_core_words,
+                create_vocab_word,
+                get_vocab_words,
+                get_vocab_words_page,
+                update_vocab_word,
+                delete_vocab_word,
+                delete_vocab_words,
+                search_vocab_words,
+                get_highlight_words,
+                export_vocab_words_csv,
+                export_vocab_words_xlsx,
+                export_vocab_words_apkg,
+                export_vocab_book_json,
+                import_vocab_book_json,
+                get_user_vocab_page,
+                lookup_user_vocab,
+                set_user_vocab_proficiency,
+                import_preset_vocab_book,
+                commit_preset_clone_with_state,
+                list_preset_vocab_books,
+                preview_preset_clone,
+                commit_preset_clone,
+                get_due_words,
+                get_all_due_words,
+                get_due_words_count,
+                get_review_progress,
+                get_learning_stats,
+                review_vocab_word,
+                import_vocab_words_csv,
+                create_pdf_template,
+                get_all_pdf_templates,
+                update_pdf_template,
+                delete_pdf_template,
+                get_builtin_templates,
+                save_chapters,
+                get_chapters,
+                get_chapter_list,
+                get_chapter_content,
+                update_chapter_content,
+                update_chapter_title,
+                delete_chapters_by_novel,
+                export_pdf,
+                backup_database,
+                restore_database,
+                get_app_info,
+                get_setting,
+                set_setting,
+                get_all_settings,
+                get_ai_settings,
+                list_ai_models,
+                save_ai_settings,
+                test_ai_connection,
+                dict_lookup_english,
+                dict_lookup_chinese,
+            ];
+            handler(invoke)
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
