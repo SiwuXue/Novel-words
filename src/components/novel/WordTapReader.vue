@@ -19,7 +19,18 @@
         <el-button size="small" @click="clearSelection">{{ t('wordTap.phraseCancel') }}</el-button>
       </span>
 
-      <el-button v-else size="small" :loading="finishing" @click="finishChapter">
+      <!-- 朗读音频 -->
+      <span v-if="novelId" class="wt-audio">
+        <audio v-if="audioSrc" controls :src="audioSrc" preload="metadata" class="wt-audio-player" />
+        <el-button size="small" link type="primary" @click="pickAudio">
+          {{ audioPath ? t('wordTap.audioChange') : t('wordTap.audioSelect') }}
+        </el-button>
+        <el-button v-if="audioPath" size="small" link type="danger" @click="clearAudio">
+          {{ t('wordTap.audioClear') }}
+        </el-button>
+      </span>
+
+      <el-button v-if="!phraseDraft" size="small" :loading="finishing" @click="finishChapter">
         {{ t('wordTap.finish') }}
       </el-button>
     </div>
@@ -61,6 +72,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
+import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
 import DictLookupPopover from './DictLookupPopover.vue'
 import { useDictionaryStore } from '@/stores/dictionaryStore'
 import {
@@ -335,6 +347,52 @@ async function finishChapter() {
   }
 }
 
+// ---------- 朗读音频 ----------
+
+const audioPath = ref('')
+
+/** 自定义协议 URL：Windows/Linux 为 http://<scheme>.localhost，macOS/Android 为 <scheme>://localhost */
+const audioSrc = computed(() => {
+  if (!props.novelId || !audioPath.value) return ''
+  const macLike = /Macintosh|Android|iPhone|iPad/.test(navigator.userAgent)
+  const base = macLike ? 'novelaudio://localhost' : 'http://novelaudio.localhost'
+  return `${base}/stream/${props.novelId}`
+})
+
+async function loadAudioSetting() {
+  if (!props.novelId) {
+    audioPath.value = ''
+    return
+  }
+  try {
+    audioPath.value = await invoke<string>('get_setting', {
+      key: `novel_audio_${props.novelId}`,
+    })
+  } catch {
+    audioPath.value = ''
+  }
+}
+
+async function pickAudio() {
+  if (!props.novelId) return
+  const file = await openFileDialog({
+    multiple: false,
+    filters: [{ name: 'Audio', extensions: ['mp3', 'm4a', 'aac', 'wav', 'ogg', 'flac'] }],
+  })
+  if (typeof file !== 'string') return
+  await invoke('set_setting', { key: `novel_audio_${props.novelId}`, value: file })
+  audioPath.value = file
+  ElMessage.success(t('wordTap.audioSet'))
+}
+
+async function clearAudio() {
+  if (!props.novelId) return
+  await invoke('set_setting', { key: `novel_audio_${props.novelId}`, value: '' })
+  audioPath.value = ''
+}
+
+watch(() => props.novelId, loadAudioSetting, { immediate: true })
+
 // ---------- 全局按键（Esc 取消短语选择） ----------
 
 function onKeydown(e: KeyboardEvent) {
@@ -343,6 +401,7 @@ function onKeydown(e: KeyboardEvent) {
 
 onMounted(() => {
   void loadStates()
+  void loadAudioSetting()
   document.addEventListener('keydown', onKeydown)
 })
 onBeforeUnmount(() => {
@@ -402,6 +461,16 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.wt-audio {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.wt-audio-player {
+  height: 32px;
+  max-width: min(360px, 40vw);
 }
 
 .wt-scroll {

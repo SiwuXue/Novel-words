@@ -529,4 +529,8 @@ export default {
   'wordTap.phraseCancel': '取消',
   'wordTap.phraseSaved': '短语已保存，可像单词一样标记和复习',
   'wordTap.phraseHint': '连续点击相邻单词可组成短语',
+  'wordTap.audioSelect': '朗读音频',
+  'wordTap.audioChange': '更换音频',
+  'wordTap.audioClear': '移除',
+  'wordTap.audioSet': '音频已挂载，边听边读吧',
 }

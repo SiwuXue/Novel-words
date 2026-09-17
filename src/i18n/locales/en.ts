@@ -529,4 +529,8 @@ export default {
   'wordTap.phraseCancel': 'Cancel',
   'wordTap.phraseSaved': 'Phrase saved — mark and review it like a word',
   'wordTap.phraseHint': 'Click adjacent words in a row to build a phrase',
+  'wordTap.audioSelect': 'Read-along audio',
+  'wordTap.audioChange': 'Change audio',
+  'wordTap.audioClear': 'Remove',
+  'wordTap.audioSet': 'Audio attached — listen while you read',
 }

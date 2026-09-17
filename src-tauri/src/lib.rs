@@ -95,6 +95,68 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        // 本地朗读音频流：…/stream/{novelId}。
+        // 音频路径保存在 app_settings(novel_audio_{id})，URL 只暴露小说 id 不暴露路径，
+        // 处理器按 id 回查数据库后再读文件，天然限制了可访问范围。
+        .register_uri_scheme_protocol("novelaudio", |ctx, request| {
+            let not_found = || {
+                tauri::http::Response::builder()
+                    .status(404)
+                    .body(Vec::new())
+                    .unwrap()
+            };
+            let uri = request.uri().to_string();
+            let id: i64 = uri
+                .rsplit('/')
+                .next()
+                .and_then(|s| s.split('?').next())
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
+            if id <= 0 {
+                return not_found();
+            }
+            let key = format!("novel_audio_{id}");
+            let path: String = {
+                let db = ctx.app_handle().state::<crate::db::DbState>();
+                let conn = match db.db.lock() {
+                    Ok(c) => c,
+                    Err(_) => return not_found(),
+                };
+                conn.query_row(
+                    "SELECT value FROM app_settings WHERE key=?1",
+                    [&key],
+                    |r| r.get(0),
+                )
+                .unwrap_or_default()
+            };
+            if path.trim().is_empty() {
+                return not_found();
+            }
+            let bytes = match std::fs::read(&path) {
+                Ok(b) => b,
+                Err(_) => return not_found(),
+            };
+            let ext = path
+                .rsplit('.')
+                .next()
+                .map(|s| s.to_ascii_lowercase())
+                .unwrap_or_default();
+            let content_type = match ext.as_str() {
+                "mp3" => "audio/mpeg",
+                "m4a" => "audio/mp4",
+                "aac" => "audio/aac",
+                "wav" => "audio/wav",
+                "ogg" | "opus" => "audio/ogg",
+                "flac" => "audio/flac",
+                _ => "application/octet-stream",
+            };
+            tauri::http::Response::builder()
+                .status(200)
+                .header("Content-Type", content_type)
+                .header("Access-Control-Allow-Origin", "*")
+                .body(bytes)
+                .unwrap()
+        })
         .setup(|app| {
             // Resolve app data directory and initialize main database
             let app_data_dir = app

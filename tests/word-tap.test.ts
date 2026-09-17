@@ -15,6 +15,7 @@ import {
 const invoke = vi.hoisted(() => vi.fn())
 vi.mock('@tauri-apps/api/core', () => ({ invoke }))
 vi.mock('@/utils/speech', () => ({ speakWord: vi.fn() }))
+vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn(async () => null) }))
 // 跳过"读完本章"的确认弹窗
 vi.mock('element-plus', async importOriginal => {
   const actual = await importOriginal<typeof import('element-plus')>()
@@ -167,7 +168,10 @@ describe('WordTapReader', () => {
 
   it('finish chapter marks all new and unknown words as ignored', async () => {
     const wrapper = await mountReader()
-    await wrapper.find('.wt-toolbar button').trigger('click')
+    const finishBtn = wrapper
+      .findAll('.wt-toolbar button')
+      .find(b => b.text() === '读完本章')!
+    await finishBtn.trigger('click')
     await flushPromises()
     expect(invoke).toHaveBeenCalledWith('mark_word_tap_proficiency', {
       words: expect.arrayContaining(['was', 'quiet', 'An', 'fell']),
