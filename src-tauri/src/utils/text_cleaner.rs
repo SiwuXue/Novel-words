@@ -84,3 +84,40 @@ fn strip_special_chars(text: &str) -> String {
         })
         .collect()
 }
+
+/// 根据内容判断语言：采样统计 CJK 字符与 ASCII 字母占比。
+/// 日文假名一并计入 CJK（非英文）。英文小说几乎无 CJK → "en"。
+pub fn detect_language(text: &str) -> &'static str {
+    let sample: String = text.chars().take(20_000).collect();
+    let mut cjk = 0usize;
+    let mut ascii_letters = 0usize;
+    for ch in sample.chars() {
+        if ('\u{4e00}'..='\u{9fff}').contains(&ch)
+            || ('\u{3400}'..='\u{4dbf}').contains(&ch)
+            || ('\u{3040}'..='\u{30ff}').contains(&ch)
+        {
+            cjk += 1;
+        } else if ch.is_ascii_alphabetic() {
+            ascii_letters += 1;
+        }
+    }
+    if ascii_letters > 0 && cjk * 5 < ascii_letters {
+        "en"
+    } else {
+        "zh"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detect_language_english_and_chinese() {
+        let english = "All I've ever wanted is for Juli Baker to leave me alone.\nShe barged into my life.";
+        assert_eq!(detect_language(english), "en");
+        let chinese = "我只想让朱莉·贝克别来烦我。她硬是闯进了我的生活，还推推搡搡。";
+        assert_eq!(detect_language(chinese), "zh");
+        assert_eq!(detect_language(""), "zh");
+    }
+}

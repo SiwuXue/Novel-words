@@ -40,4 +40,6 @@ export interface ImportResult {
   rawText: string
   cleanedText: string
   detectedTitle: string
+  /** 后端按内容自动检测："en" | "zh" */
+  language: string
 }

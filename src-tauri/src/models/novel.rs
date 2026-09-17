@@ -49,4 +49,6 @@ pub struct ImportResult {
     pub raw_text: String,
     pub cleaned_text: String,
     pub detected_title: String,
+    /// 自动检测的语言："en" | "zh"
+    pub language: String,
 }

@@ -200,6 +200,7 @@ async function handleImportConfirm(result: ImportResult, _filePath: string) {
       category: '其他',
       rawText: result.rawText,
       cleanedText: result.cleanedText,
+      language: result.language === 'en' ? 'en' : 'zh',
     })
     // Save chapters to DB
     try {

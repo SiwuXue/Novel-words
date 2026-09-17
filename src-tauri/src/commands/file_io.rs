@@ -106,11 +106,13 @@ fn import_text_file_sync(
     let chapters = chapter_detector::detect_chapters(&cleaned_text);
 
     progress(98, "解析完成");
+    let language = text_cleaner::detect_language(&cleaned_text).to_string();
     Ok(ImportResult {
         chapters,
         raw_text,
         cleaned_text,
         detected_title,
+        language,
     })
 }
 
@@ -156,11 +158,13 @@ fn import_ebook_sync(
         .collect();
 
     progress(98, "解析完成");
+    let language = text_cleaner::detect_language(&full).to_string();
     Ok(ImportResult {
         chapters,
         raw_text: full.clone(),
         cleaned_text: full,
         detected_title,
+        language,
     })
 }
 
