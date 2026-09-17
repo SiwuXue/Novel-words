@@ -114,6 +114,29 @@ pub(crate) fn lookup_word_tap(
     Ok(out)
 }
 
+/// 逐词阅读：返回全部已保存短语（word_key 含空格的 user_vocab 条目）。
+/// 短语量远小于单词量，一次全量返回供渲染端做相邻词合并。
+#[tauri::command]
+pub fn lookup_word_tap_phrases(state: State<DbState>) -> Result<Vec<WordTapState>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let mut stmt = db
+        .prepare(
+            "SELECT word_key, word, proficiency FROM user_vocab
+             WHERE word_key LIKE '% %' ORDER BY word_key",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(WordTapState {
+                key: r.get(0)?,
+                word: r.get(1)?,
+                proficiency: r.get(2)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
 /// 逐词阅读：批量标记单词熟练度（写入个人总词汇库，未收录的直接建条目，
 /// 不产生词汇本归属）。返回成功标记的个数。
 #[tauri::command]

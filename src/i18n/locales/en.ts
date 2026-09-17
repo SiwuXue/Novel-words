@@ -525,4 +525,8 @@ export default {
   'wordTap.finishDone': 'Done. On to the next chapter!',
   'wordTap.nothingToIgnore': 'No new words to ignore',
   'wordTap.marked': 'Marked as "{status}"',
+  'wordTap.phraseSave': 'Save phrase',
+  'wordTap.phraseCancel': 'Cancel',
+  'wordTap.phraseSaved': 'Phrase saved — mark and review it like a word',
+  'wordTap.phraseHint': 'Click adjacent words in a row to build a phrase',
 }

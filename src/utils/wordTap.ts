@@ -19,7 +19,14 @@ export interface TextToken {
   text: string
 }
 
-export type Token = WordToken | TextToken
+/** 已保存短语：相邻若干单词合并后的整体 */
+export interface PhraseToken {
+  type: 'phrase'
+  text: string
+  key: string
+}
+
+export type Token = WordToken | TextToken | PhraseToken
 
 export interface WordTapBlock {
   /** 渲染标签（p / h2 / blockquote / li …） */
@@ -162,4 +169,60 @@ export function stateClass(proficiency: string | undefined): string {
       // 未收录 → 新词
       return 'wt-st-new'
   }
+}
+
+/**
+ * 将相邻单词序列合并为已保存短语（贪心最长匹配）。
+ * 仅当词与词之间是纯空白分隔时才算相邻（"apple, pie" 不会合并）。
+ */
+export function mergePhrases(blocks: WordTapBlock[], phraseKeys: Set<string>): WordTapBlock[] {
+  if (phraseKeys.size === 0) return blocks
+  return blocks.map((block) => {
+    const tokens = block.tokens
+    const out: Token[] = []
+    let merged = false
+    let i = 0
+    while (i < tokens.length) {
+      const token = tokens[i]
+      if (token.type !== 'word') {
+        out.push(token)
+        i += 1
+        continue
+      }
+      // 从 i 开始向前扩展，记录命中的最长短语
+      const keys: string[] = []
+      const words: string[] = []
+      let matched: { end: number; key: string; text: string } | null = null
+      let j = i
+      while (j < tokens.length) {
+        const current = tokens[j]
+        if (current.type === 'word') {
+          keys.push(current.key)
+          words.push(current.text)
+          j += 1
+          const key = keys.join(' ')
+          if (phraseKeys.has(key)) {
+            matched = { end: j, key, text: words.join(' ') }
+          }
+        } else if (
+          current.type === 'text' &&
+          /^\s+$/.test(current.text) &&
+          keys.length > 0
+        ) {
+          j += 1
+        } else {
+          break
+        }
+      }
+      if (matched && matched.end - i >= 2) {
+        out.push({ type: 'phrase', text: matched.text, key: matched.key })
+        merged = true
+        i = matched.end
+      } else {
+        out.push(token)
+        i += 1
+      }
+    }
+    return merged ? { ...block, tokens: out } : block
+  })
 }

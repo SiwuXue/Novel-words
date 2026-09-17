@@ -525,4 +525,8 @@ export default {
   'wordTap.finishDone': '已标记完成，继续阅读下一章吧',
   'wordTap.nothingToIgnore': '没有需要忽略的新词',
   'wordTap.marked': '已标记为「{status}」',
+  'wordTap.phraseSave': '保存短语',
+  'wordTap.phraseCancel': '取消',
+  'wordTap.phraseSaved': '短语已保存，可像单词一样标记和复习',
+  'wordTap.phraseHint': '连续点击相邻单词可组成短语',
 }

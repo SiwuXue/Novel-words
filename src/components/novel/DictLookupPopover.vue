@@ -429,7 +429,9 @@ const quickMarkOptions: Array<{ value: Proficiency; label: string }> = [
 ]
 
 async function quickMark(proficiency: Proficiency) {
-  const word = store.currentWord?.word ?? store.onlineResult?.word
+  // 词典无结果时（如自定义短语）回退用查询文本本身
+  const word =
+    store.currentWord?.word ?? store.onlineResult?.word ?? (props.quickMark ? props.text.trim() : '')
   if (!word || marking.value) return
   marking.value = proficiency
   try {

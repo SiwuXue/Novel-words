@@ -7,6 +7,7 @@ import {
   tokenizeText,
   parseWordTapBlocks,
   collectWordKeys,
+  mergePhrases,
   wordKey,
   stateClass,
 } from '@/utils/wordTap'
@@ -38,6 +39,7 @@ beforeEach(() => {
         { key: 'the', word: 'the', proficiency: 'ignore' },
       ]
     }
+    if (cmd === 'lookup_word_tap_phrases') return []
     if (cmd === 'mark_word_tap_proficiency') return 1
     return null
   })
@@ -173,5 +175,72 @@ describe('WordTapReader', () => {
     })
     const was = wrapper.findAll('.wt-word').find(w => w.text() === 'was')!
     expect(was.classes()).toContain('wt-st-ignore')
+  })
+})
+
+describe('phrase merging', () => {
+  it('merges adjacent words into saved phrases (longest match)', () => {
+    const blocks = parseWordTapBlocks('<p>I like apple pie and apple, pie too.</p>')
+    const phrases = new Set(['apple pie', 'like apple pie'])
+    const merged = mergePhrases(blocks, phrases)
+    const tokens = merged[0].tokens
+    const phrasesTokens = tokens.filter(t => t.type === 'phrase')
+    expect(phrasesTokens.map(t => (t as any).text)).toEqual(['like apple pie'])
+    expect(merged[0].tokens.some(t => t.type === 'word' && (t as any).text === 'apple')).toBe(true)
+  })
+
+  it('does not merge across punctuation', () => {
+    const blocks = parseWordTapBlocks('<p>apple, pie here</p>')
+    const merged = mergePhrases(blocks, new Set(['apple pie']))
+    expect(merged[0].tokens.some(t => t.type === 'phrase')).toBe(false)
+  })
+
+  it('returns blocks unchanged when no phrases saved', () => {
+    const blocks = parseWordTapBlocks('<p>apple pie</p>')
+    expect(mergePhrases(blocks, new Set())).toBe(blocks)
+  })
+})
+
+describe('phrase selection in reader', () => {
+  const content = '<p>I like apple pie a lot.</p>'
+
+  async function mountReader() {
+    const wrapper = mount(WordTapReader, {
+      props: { content, novelId: 3, chapterId: 9 },
+      global: { plugins: [ElementPlus] },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    return wrapper
+  }
+
+  it('builds a phrase draft by clicking adjacent words and saves it', async () => {
+    const wrapper = await mountReader()
+    const words = wrapper.findAll('.wt-word')
+    const apple = words.find(w => w.text() === 'apple')!
+    const pie = words.find(w => w.text() === 'pie')!
+    await apple.trigger('click'); await flushPromises()
+    // 第一次点击：打开查词弹窗，无短语草稿
+    expect(wrapper.find('.wt-phrase-bar').exists()).toBe(false)
+    await pie.trigger('click'); await flushPromises()
+    // 相邻第二次点击：出现保存条
+    const bar = wrapper.find('.wt-phrase-bar')
+    expect(bar.exists()).toBe(true)
+    expect(bar.text()).toContain('apple pie')
+    await bar.find('button.el-button--primary').trigger('click'); await flushPromises()
+    expect(invoke).toHaveBeenCalledWith('mark_word_tap_proficiency', {
+      words: ['apple pie'],
+      proficiency: 'unknown',
+    })
+    // 保存后合并渲染为整体短语
+    expect(wrapper.findAll('.wt-word').some(w => w.text() === 'apple pie')).toBe(true)
+  })
+
+  it('does not build a phrase when clicking non-adjacent words', async () => {
+    const wrapper = await mountReader()
+    const words = wrapper.findAll('.wt-word')
+    await words.find(w => w.text() === 'apple')!.trigger('click'); await flushPromises()
+    await words.find(w => w.text() === 'lot')!.trigger('click'); await flushPromises()
+    expect(wrapper.find('.wt-phrase-bar').exists()).toBe(false)
   })
 })
