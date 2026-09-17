@@ -27,6 +27,100 @@ function isHeading(line: string): boolean {
   return PATTERNS.some((p) => trimmed.startsWith(p))
 }
 
+/** 目录驱动识别：适配无 "Chapter N" 前缀、以 CONTENTS/目录 + 标题行分章的英文小说
+ *  （如 Flipped）。目录首条目在目录块之后再次出现即为正文起点，按目录顺序切章；
+ *  任一候选未按序命中则返回 null（回退到前缀模式匹配）。 */
+export function detectChaptersViaToc(text: string): Chapter[] | null {
+  // 按行切分（记录起始偏移，兼容 \n / \r\n / \r）
+  const lines: Array<{ start: number; text: string }> = []
+  let lineStart = 0
+  for (let i = 0; i <= text.length; i++) {
+    const ch = i < text.length ? text[i] : '\n'
+    if (ch === '\n' || ch === '\r') {
+      lines.push({ start: lineStart, text: text.slice(lineStart, i) })
+      if (ch === '\r' && text[i + 1] === '\n') i++
+      lineStart = i + 1
+    }
+  }
+
+  // 1. 目录标记行
+  const markerIdx = lines.findIndex((l) => {
+    const t = l.text.trim()
+    return t.toLowerCase() === 'contents' || t === '目录'
+  })
+  if (markerIdx === -1) return null
+
+  // 2. 收集目录条目；首条目重复出现 → 正文起点
+  const candidates: string[] = []
+  let bodyStartIdx = -1
+  let i = markerIdx + 1
+  while (i < lines.length) {
+    const trimmed = lines[i].text.trim()
+    if (!trimmed) {
+      i++
+      continue
+    }
+    if (candidates.length >= 500 || isHeading(trimmed) || trimmed.length > 60) break
+    if (candidates.length > 0 && trimmed === candidates[0]) {
+      bodyStartIdx = i
+      break
+    }
+    candidates.push(trimmed)
+    i++
+  }
+  if (candidates.length < 2 || bodyStartIdx === -1) return null
+
+  // 3. 从正文起点按目录顺序切章
+  const chapters: Chapter[] = []
+  const preamble = text.slice(0, lines[bodyStartIdx].start).trim()
+  if (preamble) {
+    chapters.push({
+      id: 0,
+      novelId: 0,
+      title: '前言',
+      content: preamble,
+      sortOrder: 0,
+      startIndex: 0,
+      createdAt: '',
+    })
+  }
+  let expected = 0
+  let lastTitle = ''
+  let lastPos = 0
+  let inBody = false
+  for (let j = bodyStartIdx; j < lines.length; j++) {
+    const trimmed = lines[j].text.trim()
+    if (expected < candidates.length && trimmed === candidates[expected]) {
+      if (inBody) {
+        chapters.push({
+          id: 0,
+          novelId: 0,
+          title: lastTitle,
+          content: text.slice(lastPos, lines[j].start).trim(),
+          sortOrder: chapters.length,
+          startIndex: lastPos,
+          createdAt: '',
+        })
+      }
+      lastTitle = trimmed
+      lastPos = lines[j].start + lines[j].text.length
+      inBody = true
+      expected++
+    }
+  }
+  if (expected !== candidates.length || !inBody) return null
+  chapters.push({
+    id: 0,
+    novelId: 0,
+    title: lastTitle,
+    content: text.slice(lastPos).trim(),
+    sortOrder: chapters.length,
+    startIndex: lastPos,
+    createdAt: '',
+  })
+  return chapters
+}
+
 /**
  * Yield (char_offset, line_content) pairs for each line in the text.
  * Handles \n, \r\n, and standalone \r line endings.
@@ -111,6 +205,8 @@ function buildChapters(text: string, headings: Heading[]): Chapter[] {
 }
 
 export function detectChapters(text: string): Chapter[] {
+  const toc = detectChaptersViaToc(text)
+  if (toc) return toc
   return buildChapters(text, collectHeadings(text))
 }
 
@@ -122,6 +218,12 @@ export async function detectChaptersInBatches(
   text: string,
   onProgress?: (progress: number) => void,
 ): Promise<Chapter[]> {
+  // 目录驱动策略需要全文视野，命中即免分批扫描
+  const toc = detectChaptersViaToc(text)
+  if (toc) {
+    onProgress?.(1)
+    return toc
+  }
   const headings: Heading[] = []
   const batchSize = 64 * 1024
   let lineStart = 0
