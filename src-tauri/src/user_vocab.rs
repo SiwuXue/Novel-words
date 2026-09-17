@@ -407,6 +407,57 @@ pub fn set_proficiency(conn: &Connection, id: i64, proficiency: &str) -> Result<
     Ok(())
 }
 
+/// 与 set_proficiency 相同，但额外把这次标记记为一次正式复习：
+/// 对该词的每个词汇本归属写入 review_log（阅读联动复习）。
+/// rating: Some("again"|"good"|"easy")；None 不写日志（如 ignore 档）。
+pub fn set_proficiency_with_log(
+    conn: &Connection,
+    id: i64,
+    proficiency: &str,
+    rating: Option<&str>,
+) -> Result<(), String> {
+    valid_proficiency(proficiency)?;
+    let encoded: String = conn
+        .query_row("SELECT srs_state FROM user_vocab WHERE id=?1", [id], |r| {
+            r.get(0)
+        })
+        .map_err(|e| e.to_string())?;
+    let srs_old: SrsState = serde_json::from_str(&encoded).map_err(|e| e.to_string())?;
+    let mut srs = srs_old.clone();
+    if proficiency == "unknown" {
+        srs.due = chrono::Local::now().date_naive().to_string();
+    } else {
+        srs = initial_srs(proficiency, srs);
+    }
+    let now = now_secs();
+    conn.execute(
+        "UPDATE user_vocab SET proficiency=?1,srs_state=?2,state_updated_at=?3,updated_at=datetime('now','localtime') WHERE id=?4",
+        params![proficiency, serde_json::to_string(&srs).map_err(|e| e.to_string())?, now, id],
+    )
+    .map_err(|e| e.to_string())?;
+    if let Some(rating) = rating {
+        let word: String = conn
+            .query_row("SELECT word FROM user_vocab WHERE id=?1", [id], |r| r.get(0))
+            .map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT id, vocab_book_id FROM vocab_word WHERE user_vocab_id=?1")
+            .map_err(|e| e.to_string())?;
+        let members: Vec<(i64, i64)> = stmt
+            .query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        for (wid, bid) in members {
+            conn.execute(
+                "INSERT INTO review_log(user_vocab_id,vocab_word_id,vocab_book_id,word_snapshot,book_name_snapshot,rating,reviewed_at,due_before,due_after,proficiency) VALUES (?1,?2,?3,?4,(SELECT name FROM vocab_book WHERE id=?5),?6,?7,?8,?9,?10)",
+                params![id, wid, bid, word, bid, rating, now, srs_old.due, srs.due, proficiency],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 /// One shared read path for lists, highlights, review and every export format.
 pub const SELECT_WORDS: &str = "SELECT w.id,w.vocab_book_id,w.word,w.definition,w.phonetic,w.example_sentence,w.novel_id,w.chapter_id,
  COALESCE(u.proficiency,w.proficiency),w.memory_tag,w.created_at,w.match_terms,w.user_vocab_id,u.srs_state,u.last_reviewed_at

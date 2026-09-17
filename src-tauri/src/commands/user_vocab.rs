@@ -40,12 +40,20 @@ pub struct WordTapState {
 }
 
 /// 逐词阅读：批量标记的内部实现（调用方持有事务/连接）。
+/// 已收录词的标记同时写入 review_log（阅读联动复习）：
+/// 不认识=again / 模糊=good / 认识=easy；ignore 不记复习。
 pub(crate) fn mark_word_tap(
     db: &mut Connection,
     words: &[String],
     proficiency: &str,
 ) -> Result<u32, String> {
     crate::user_vocab::valid_proficiency(proficiency)?;
+    let rating = match proficiency {
+        "unknown" => Some("again"),
+        "familiar" => Some("good"),
+        "mastered" => Some("easy"),
+        _ => None,
+    };
     let tx = db.transaction().map_err(|e| e.to_string())?;
     let mut count: u32 = 0;
     for raw in words {
@@ -66,7 +74,7 @@ pub(crate) fn mark_word_tap(
             .optional()
             .map_err(|e| e.to_string())?;
         match existing {
-            Some(id) => crate::user_vocab::set_proficiency(&tx, id, proficiency)?,
+            Some(id) => crate::user_vocab::set_proficiency_with_log(&tx, id, proficiency, rating)?,
             None => {
                 crate::user_vocab::ensure_personal(&tx, word, "", "", "", proficiency, "")?;
             }
@@ -378,6 +386,22 @@ mod tests {
         let due = crate::commands::review::due_words(&db, None).unwrap();
         assert!(due.iter().all(|w| crate::user_vocab::word_key(&w.word) != "garden"));
         assert!(due.iter().any(|w| crate::user_vocab::word_key(&w.word) == "run"));
+
+        // 阅读联动复习：已收录词标"认识" → review_log 写入 easy
+        super::mark_word_tap(&mut db, &["RUN".into()], "mastered").unwrap();
+        let count: i64 = db
+            .query_row("SELECT COUNT(*) FROM review_log WHERE rating='easy'", [], |r| r.get(0))
+            .unwrap();
+        assert!(count >= 1, "mastered 标记应写入 easy 复习日志");
+        let again_count: i64 = db
+            .query_row("SELECT COUNT(*) FROM review_log WHERE rating='again'", [], |r| r.get(0))
+            .unwrap();
+        assert!(again_count >= 1, "unknown 标记应写入 again 复习日志");
+        // ignore 不写复习日志
+        let ignore_count: i64 = db
+            .query_row("SELECT COUNT(*) FROM review_log WHERE proficiency='ignore'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(ignore_count, 0);
         drop(db);
         drop(state);
         std::fs::remove_dir_all(dir).unwrap();
