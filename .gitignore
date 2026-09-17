@@ -34,3 +34,6 @@ test-data
 
 /.ui-preview/
 __pycache__/
+
+# WorkBuddy 本地数据
+/.workbuddy/
