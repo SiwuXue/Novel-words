@@ -76,7 +76,10 @@ jobs:
 
       - name: Set up Android SDK
         if: matrix.mobile == 'android'
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          # 新版 runner 镜像（cmdline-tools 16.0）已移除废弃的 "tools" 包，默认值会导致 sdkmanager 报错
+          packages: 'platform-tools'
 
       - name: Install Android SDK components
         if: matrix.mobile == 'android'
