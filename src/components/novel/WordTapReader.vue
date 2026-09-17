@@ -75,6 +75,8 @@ import { invoke } from '@tauri-apps/api/core'
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
 import DictLookupPopover from './DictLookupPopover.vue'
 import { useDictionaryStore } from '@/stores/dictionaryStore'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { speakWord } from '@/utils/speech'
 import {
   parseWordTapBlocks,
   collectWordKeys,
@@ -107,6 +109,7 @@ const savingPhrase = ref(false)
 const disposed = ref(false)
 
 const dictStore = useDictionaryStore()
+const settingsStore = useSettingsStore()
 
 const blocks = computed<WordTapBlock[]>(() => parseWordTapBlocks(props.content))
 
@@ -258,13 +261,15 @@ function onWordClick(e: MouseEvent, token: WordToken | PhraseToken) {
 }
 
 function openPopover(e: MouseEvent, text: string) {
-  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  // 弹窗出现在点击位置（组件内部会自动防溢出）
   popover.value = {
     visible: true,
     text,
-    position: { x: rect.left, y: rect.bottom + 6 },
+    position: { x: e.clientX, y: e.clientY + 8 },
   }
   void dictStore.lookupAuto(text)
+  // 点击即朗读，无需再点弹窗里的朗读按钮
+  speakWord(text, settingsStore.speechAccent)
 }
 
 // ---------- 快捷标记 ----------
@@ -399,14 +404,25 @@ function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape' && selection.value) clearSelection()
 }
 
+/** 点击空白处（弹窗与单词之外）关闭查词弹窗，不耽误阅读 */
+function onDocMouseDown(e: MouseEvent) {
+  if (!popover.value.visible) return
+  const target = e.target as HTMLElement | null
+  if (!target) return
+  if (target.closest('.dict-lookup-popover') || target.closest('.wt-word')) return
+  popover.value = { ...popover.value, visible: false }
+}
+
 onMounted(() => {
   void loadStates()
   void loadAudioSetting()
   document.addEventListener('keydown', onKeydown)
+  document.addEventListener('mousedown', onDocMouseDown)
 })
 onBeforeUnmount(() => {
   disposed.value = true
   document.removeEventListener('keydown', onKeydown)
+  document.removeEventListener('mousedown', onDocMouseDown)
 })
 </script>
 

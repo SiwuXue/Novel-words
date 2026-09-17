@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
 import WordTapReader from '@/components/novel/WordTapReader.vue'
+import { speakWord } from '@/utils/speech'
 import {
   tokenizeText,
   parseWordTapBlocks,
@@ -164,6 +165,25 @@ describe('WordTapReader', () => {
     })
     const garden = wrapper.findAll('.wt-word').find(w => w.text() === 'garden')!
     expect(garden.classes()).toContain('wt-st-mastered')
+  })
+
+  it('speaks the word immediately when clicked', async () => {
+    const wrapper = await mountReader()
+    vi.mocked(speakWord).mockClear()
+    await wrapper.findAll('.wt-word').find(w => w.text() === 'garden')!.trigger('click')
+    await flushPromises()
+    expect(speakWord).toHaveBeenCalledWith('garden', 'us')
+  })
+
+  it('closes the popover when clicking blank space', async () => {
+    const wrapper = await mountReader()
+    await wrapper.findAll('.wt-word').find(w => w.text() === 'garden')!.trigger('click')
+    await flushPromises()
+    expect(document.querySelector('.dict-lookup-popover')).toBeTruthy()
+    // 点击正文空白处（非单词、非弹窗）
+    document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    await flushPromises()
+    expect(document.querySelector('.dict-lookup-popover')).toBeNull()
   })
 
   it('finish chapter marks all new and unknown words as ignored', async () => {
