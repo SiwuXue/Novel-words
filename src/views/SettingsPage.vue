@@ -125,6 +125,18 @@
             />
             <span class="backup-hint inline-hint">{{ t('settings.reviewGoalHint') }}</span>
           </el-form-item>
+
+          <el-form-item :label="t('settings.dailyNewWordLimit')">
+            <el-input-number
+              :model-value="settingsStore.dailyNewWordLimit"
+              :min="0"
+              :max="500"
+              size="small"
+              style="width: 120px"
+              @change="onDailyNewWordLimitChange"
+            />
+            <span class="backup-hint inline-hint">{{ t('settings.dailyNewWordLimitHint') }}</span>
+          </el-form-item>
         </el-form>
       </el-tab-pane>
 
@@ -400,6 +412,10 @@ function onAutoBackupChange(v: AutoBackup) {
 
 function onReviewGoalChange(v: number | undefined) {
   if (typeof v === 'number') settingsStore.setReviewDailyGoal(v)
+}
+
+function onDailyNewWordLimitChange(v: number | undefined) {
+  if (typeof v === 'number') settingsStore.setDailyNewWordLimit(Math.floor(v))
 }
 
 function onAccentChange(accent: SpeechAccent) {

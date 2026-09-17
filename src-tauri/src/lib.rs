@@ -53,7 +53,7 @@ use commands::review::{
 use commands::settings::{get_all_settings, get_setting, set_setting};
 use commands::user_vocab::{
     get_user_vocab_page, lookup_user_vocab, lookup_word_tap_phrases, lookup_word_tap_states,
-    mark_word_tap_proficiency, set_user_vocab_proficiency,
+    mark_word_tap_proficiency, set_user_vocab_proficiency, word_tap_today_new_count,
 };
 use commands::vocab_book::{
     create_vocab_book, delete_vocab_book, get_all_vocab_books, import_cet4_core_words,
@@ -340,6 +340,7 @@ pub fn run() {
                 mark_word_tap_proficiency,
                 lookup_word_tap_states,
                 lookup_word_tap_phrases,
+                word_tap_today_new_count,
                 import_preset_vocab_book,
                 commit_preset_clone_with_state,
                 list_preset_vocab_books,

@@ -121,6 +121,8 @@ const states = ref<Record<string, Proficiency>>({})
 const phrases = ref<Set<string>>(new Set())
 /** 唯一词 key → 首次出现的原文 */
 const sampleWords = ref<Record<string, string>>({})
+/** 今日新建的个人词条数（用于每日新词上限提醒） */
+const todayNewCount = ref(0)
 
 const displayedBlocks = computed<WordTapBlock[]>(() =>
   mergePhrases(blocks.value, phrases.value),
@@ -174,6 +176,22 @@ async function loadStates() {
     console.error('[wordTap] load phrases failed:', e)
   }
   if (!disposed.value) states.value = fetched
+  try {
+    todayNewCount.value = await invoke<number>('word_tap_today_new_count')
+  } catch {
+    todayNewCount.value = 0
+  }
+}
+
+/** 标记了此前未收录的词 → 计入今日新词，超过上限时提醒（不阻断） */
+function noteNewWordIfNeeded(key: string) {
+  if (states.value[key]) return
+  const limit = settingsStore.dailyNewWordLimit
+  if (limit <= 0) return
+  todayNewCount.value += 1
+  if (todayNewCount.value > limit) {
+    ElMessage.warning(t('wordTap.dailyLimitExceeded', { n: limit }))
+  }
 }
 
 watch(
@@ -276,7 +294,9 @@ function openPopover(e: MouseEvent, text: string) {
 
 function onMarked(payload: { word: string; proficiency: Proficiency }) {
   const key = wordKey(payload.word)
+  const isNew = !states.value[key]
   states.value = { ...states.value, [key]: payload.proficiency }
+  if (isNew) noteNewWordIfNeeded(key)
   emit('mark', payload)
 }
 
@@ -290,6 +310,7 @@ async function savePhrase() {
     await invoke('mark_word_tap_proficiency', { words: [draft.text], proficiency: 'unknown' })
     phrases.value = new Set(phrases.value).add(wordKey(draft.text))
     states.value = { ...states.value, [wordKey(draft.text)]: 'unknown' }
+    noteNewWordIfNeeded(wordKey(draft.text))
     clearSelection()
     lastWordEl = null
     ElMessage.success(t('wordTap.phraseSaved'))

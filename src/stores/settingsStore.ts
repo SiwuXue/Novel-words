@@ -18,6 +18,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const autoBackup = ref<AutoBackup>('weekly')
   const reviewDailyGoal = ref<number>(20)
   const speechAccent = ref<SpeechAccent>('us')
+  /** 每日新词上限（0 = 不限），阅读中标记新词超过时提醒 */
+  const dailyNewWordLimit = ref(0)
   /** DeepLX 翻译端点（空串 = 使用 Rust 端默认公共实例） */
   const deeplEndpoint = ref('')
   const loaded = ref(false)
@@ -74,6 +76,11 @@ export const useSettingsStore = defineStore('settings', () => {
                   speechAccent.value = s.value
                 }
                 break
+              case 'daily_new_word_limit': {
+                const n = Number(s.value)
+                if (Number.isFinite(n) && n >= 0) dailyNewWordLimit.value = Math.floor(n)
+                break
+              }
               case 'deepl_endpoint':
                 deeplEndpoint.value = s.value
                 break
@@ -168,6 +175,15 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
+  async function setDailyNewWordLimit(n: number) {
+    dailyNewWordLimit.value = n
+    try {
+      await invoke('set_setting', { key: 'daily_new_word_limit', value: String(n) })
+    } catch (e) {
+      console.error('[settingsStore] setDailyNewWordLimit failed:', e)
+    }
+  }
+
   async function setSpeechAccent(accent: SpeechAccent) {
     speechAccent.value = accent
     try {
@@ -195,6 +211,7 @@ export const useSettingsStore = defineStore('settings', () => {
     autoBackup,
     reviewDailyGoal,
     speechAccent,
+    dailyNewWordLimit,
     deeplEndpoint,
     loaded,
     load,
@@ -207,5 +224,6 @@ export const useSettingsStore = defineStore('settings', () => {
     setReviewDailyGoal,
     setSpeechAccent,
     setDeeplEndpoint,
+    setDailyNewWordLimit,
   }
 })

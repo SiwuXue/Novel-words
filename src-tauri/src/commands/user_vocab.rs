@@ -157,6 +157,19 @@ pub fn mark_word_tap_proficiency(
     mark_word_tap(&mut db, &words, &proficiency)
 }
 
+/// 逐词阅读：今日新建的个人词条数（按 user_vocab.created_at 本地日期统计），
+/// 用于"每日新词上限"提醒。
+#[tauri::command]
+pub fn word_tap_today_new_count(state: State<DbState>) -> Result<i64, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.query_row(
+        "SELECT COUNT(*) FROM user_vocab WHERE date(created_at)=date('now','localtime')",
+        [],
+        |r| r.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
 /// 逐词阅读：批量查询单词状态（按归一化词形匹配，未收录的词不返回）。
 #[tauri::command]
 pub fn lookup_word_tap_states(
@@ -402,6 +415,18 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM review_log WHERE proficiency='ignore'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(ignore_count, 0);
+
+        // 今日新词计数：统计今天创建的，排除昨日
+        let today_sql = "SELECT COUNT(*) FROM user_vocab WHERE date(created_at)=date('now','localtime')";
+        let before: i64 = db.query_row(today_sql, [], |r| r.get(0)).unwrap();
+        assert!(before >= 3, "本测试已创建多个今日词条");
+        db.execute(
+            "INSERT INTO user_vocab(word_key,word,proficiency,created_at) VALUES ('yesterday','yesterday','unknown', datetime('now','localtime','-1 day'))",
+            [],
+        )
+        .unwrap();
+        let after: i64 = db.query_row(today_sql, [], |r| r.get(0)).unwrap();
+        assert_eq!(after, before, "昨日创建的词条不计入今日新词");
         drop(db);
         drop(state);
         std::fs::remove_dir_all(dir).unwrap();
