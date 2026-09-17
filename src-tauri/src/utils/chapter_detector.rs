@@ -202,6 +202,61 @@ fn detect_chapters_via_toc(text: &str) -> Option<Vec<Chapter>> {
     Some(chapters)
 }
 
+/// 自定义规则分章：用户提供的正则命中（trim 后的整行）即为章节标题行。
+/// 仅在用户显式提供规则时使用，不影响内置规则。
+pub fn detect_chapters_with_custom(text: &str, pattern: &str) -> Result<Vec<Chapter>, String> {
+    let re = regex::Regex::new(pattern).map_err(|e| format!("无效的正则表达式: {}", e))?;
+    let mut chapters: Vec<Chapter> = Vec::new();
+    let mut last_pos = 0usize;
+    let mut last_title = String::new();
+    let mut found_first = false;
+    for (line_start, line) in line_starts(text) {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if re.is_match(trimmed) && trimmed.chars().count() <= 100 {
+            let title = trimmed.to_string();
+            if found_first {
+                let content = text[last_pos..line_start].trim().to_string();
+                if !content.is_empty() {
+                    chapters.push(Chapter {
+                        id: 0,
+                        novel_id: 0,
+                        title: std::mem::take(&mut last_title),
+                        content,
+                        sort_order: chapters.len() as i32,
+                        start_index: last_pos,
+                        created_at: String::new(),
+                    });
+                }
+            } else {
+                found_first = true;
+            }
+            last_title = title;
+            last_pos = line_start + line.len();
+        }
+    }
+    if found_first {
+        let content = text[last_pos..].trim().to_string();
+        if !content.is_empty() || !last_title.is_empty() {
+            chapters.push(Chapter {
+                id: 0,
+                novel_id: 0,
+                title: last_title,
+                content,
+                sort_order: chapters.len() as i32,
+                start_index: last_pos,
+                created_at: String::new(),
+            });
+        }
+    }
+    if chapters.is_empty() {
+        return Err("自定义规则未匹配到任何章节标题".into());
+    }
+    Ok(chapters)
+}
+
 /// Detect a likely title from the first non-empty line or filename
 pub fn detect_title_from_text(text: &str) -> String {
     for line in text.lines() {
@@ -259,6 +314,20 @@ mod tests {
         assert_eq!(chapters.len(), 2);
         assert_eq!(chapters[0].title, "序章");
         assert_eq!(chapters[1].title, "第一章 开端");
+    }
+
+    #[test]
+    fn custom_regex_rule_splits_chapters() {
+        // 页码行作为章节标题（如老人与海按页分章）
+        let text = "intro body\n1\npage one content\n2\npage two content\n3\npage three content\n";
+        let chapters = detect_chapters_with_custom(text, "^\\d+$").unwrap();
+        assert_eq!(chapters.len(), 3);
+        assert_eq!(chapters[0].title, "1");
+        assert_eq!(chapters[0].content, "page one content");
+        // 无效正则报错
+        assert!(detect_chapters_with_custom(text, "([").is_err());
+        // 无命中报错
+        assert!(detect_chapters_with_custom("no headings here", "^章节$").is_err());
     }
 
     #[test]

@@ -359,6 +359,10 @@ export default {
   'reading.shortcutHint': 'Space pages · Alt + ←/→ changes chapters',
 
   // ---- Import dialog ----
+  'import.customRule': 'Custom chapter rule',
+  'import.customRulePlaceholder': 'Regex, e.g. ^Chapter \\d+',
+  'import.customRuleHint': 'A matched line becomes a chapter title; leave empty to use built-in rules',
+  'import.customRuleInvalid': 'Custom rule is not a valid regex',
   'import.title': 'Import novel file',
   'import.clickSelect': 'Click to select .txt / .md / .epub / .fb2',
   'import.dragHere': 'Or drag a file here · TXT supports UTF-8 / GBK',

@@ -359,6 +359,10 @@ export default {
   'reading.shortcutHint': 'Space 翻页 · Alt + ←/→ 切换章节',
 
   // ---- Import dialog ----
+  'import.customRule': '自定义章节规则',
+  'import.customRulePlaceholder': '正则表达式，如 ^第.+章$ 或 ^Chapter \\d+',
+  'import.customRuleHint': '匹配到的整行将作为章节标题；留空使用内置规则。适合目录在正文前、按页码分章等特殊排版',
+  'import.customRuleInvalid': '自定义规则不是有效的正则表达式',
   'import.title': '导入小说文件',
   'import.clickSelect': '点击选择 .txt / .md / .epub / .fb2 文件',
   'import.dragHere': '或将文件拖到此处 · TXT 支持 UTF-8 / GBK 编码',

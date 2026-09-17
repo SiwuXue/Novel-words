@@ -30,6 +30,17 @@
       <div v-if="filePath" class="selected-file">
         <el-tag type="info" size="small">{{ fileName }}</el-tag>
       </div>
+      <div class="custom-rule-row">
+        <el-input
+          v-model="customPattern"
+          size="small"
+          clearable
+          :placeholder="t('import.customRulePlaceholder')"
+        >
+          <template #prepend>{{ t('import.customRule') }}</template>
+        </el-input>
+        <div class="custom-rule-hint">{{ t('import.customRuleHint') }}</div>
+      </div>
       <div v-if="analyzing" class="analyze-progress">
         <el-progress :percentage="importPercent" :stroke-width="8" :status="importPercent >= 100 ? 'success' : undefined" />
         <div class="analyze-msg">{{ importMessage }}</div>
@@ -118,6 +129,12 @@ const result = ref<ImportResult | null>(null)
 const errorMsg = ref('')
 const importPercent = ref(0)
 const importMessage = ref('')
+/** 自定义章节规则（正则，可选），localStorage 记住上次输入 */
+const customPattern = ref(localStorage.getItem('custom-chapter-pattern') ?? '')
+
+watch(customPattern, (v) => {
+  localStorage.setItem('custom-chapter-pattern', v)
+})
 
 let unlistenProgress: UnlistenFn | null = null
 onBeforeUnmount(() => {
@@ -177,6 +194,16 @@ async function selectFile() {
 
 async function analyzeFile() {
   if (!filePath.value) return
+  const pattern = customPattern.value.trim()
+  if (pattern) {
+    try {
+      // eslint-disable-next-line no-new
+      new RegExp(pattern)
+    } catch {
+      ElMessage.warning(t('import.customRuleInvalid'))
+      return
+    }
+  }
   analyzing.value = true
   importPercent.value = 0
   importMessage.value = '正在准备…'
@@ -188,7 +215,10 @@ async function analyzeFile() {
         importMessage.value = event.payload.message
       },
     )
-    const r = await invoke<ImportResult>('import_file', { path: filePath.value })
+    const r = await invoke<ImportResult>('import_file', {
+      path: filePath.value,
+      customPattern: pattern || null,
+    })
     result.value = r
     importPercent.value = 100
     step.value = 2
@@ -254,6 +284,14 @@ async function handleImport() {
 .selected-file {
   margin-top: 12px;
   text-align: center;
+}
+.custom-rule-row {
+  margin-top: 14px;
+}
+.custom-rule-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 .analyze-progress {
   margin-top: 16px;

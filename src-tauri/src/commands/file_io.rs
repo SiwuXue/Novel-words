@@ -74,9 +74,35 @@ fn filename_title(path: &str) -> String {
         .to_string()
 }
 
+/// 文本类导入（TXT/PDF）公共收尾：清洗 → 标题 → 分章（自定义规则优先）→ 语言。
+fn finalize_text_import(
+    path: &str,
+    raw_text: String,
+    custom_pattern: Option<&str>,
+) -> Result<ImportResult, String> {
+    let cleaned_text = text_cleaner::clean_text(&raw_text);
+    let mut detected_title = chapter_detector::detect_title_from_text(&cleaned_text);
+    if detected_title.is_empty() {
+        detected_title = filename_title(path);
+    }
+    let chapters = match custom_pattern {
+        Some(pattern) => chapter_detector::detect_chapters_with_custom(&cleaned_text, pattern)?,
+        None => chapter_detector::detect_chapters(&cleaned_text),
+    };
+    let language = text_cleaner::detect_language(&cleaned_text).to_string();
+    Ok(ImportResult {
+        chapters,
+        raw_text,
+        cleaned_text,
+        detected_title,
+        language,
+    })
+}
+
 fn import_text_file_sync(
     path: &str,
     bytes: Vec<u8>,
+    custom_pattern: Option<&str>,
     progress: &dyn Fn(u32, &str),
 ) -> Result<ImportResult, String> {
     progress(20, "正在读取文件…");
@@ -89,60 +115,26 @@ fn import_text_file_sync(
     progress(40, "正在识别编码…");
     let raw_text = detect_and_decode(&bytes)?;
 
-    // 2. Clean text (remove ads, normalize whitespace, strip special chars)
+    // 2. Clean + title + chapters (自定义规则优先)
     progress(60, "正在清洗文本…");
-    let cleaned_text = text_cleaner::clean_text(&raw_text);
-
-    // 3. Detect title — try first meaningful line, fallback to filename
     progress(80, "正在划分章节…");
-    let detected_title = chapter_detector::detect_title_from_text(&cleaned_text);
-    let detected_title = if detected_title.is_empty() {
-        filename_title(path)
-    } else {
-        detected_title
-    };
-
-    // 4. Split into chapters
-    let chapters = chapter_detector::detect_chapters(&cleaned_text);
-
     progress(98, "解析完成");
-    let language = text_cleaner::detect_language(&cleaned_text).to_string();
-    Ok(ImportResult {
-        chapters,
-        raw_text,
-        cleaned_text,
-        detected_title,
-        language,
-    })
+    finalize_text_import(path, raw_text, custom_pattern)
 }
 
 /// 解析 PDF：提取文本后走与 TXT 相同的清洗/标题/分章管线。
 fn import_pdf_sync(
     path: &str,
     bytes: Vec<u8>,
+    custom_pattern: Option<&str>,
     progress: &dyn Fn(u32, &str),
 ) -> Result<ImportResult, String> {
     progress(40, "正在解析 PDF…");
     let raw_text = pdf_extractor::extract_text(&bytes)?;
     progress(60, "正在清洗文本…");
-    let cleaned_text = text_cleaner::clean_text(&raw_text);
     progress(80, "正在划分章节…");
-    let detected_title = chapter_detector::detect_title_from_text(&cleaned_text);
-    let detected_title = if detected_title.is_empty() {
-        filename_title(path)
-    } else {
-        detected_title
-    };
-    let chapters = chapter_detector::detect_chapters(&cleaned_text);
     progress(98, "解析完成");
-    let language = text_cleaner::detect_language(&cleaned_text).to_string();
-    Ok(ImportResult {
-        chapters,
-        raw_text,
-        cleaned_text,
-        detected_title,
-        language,
-    })
+    finalize_text_import(path, raw_text, custom_pattern)
 }
 
 /// Parse an EPUB / FB2 file into the standard ImportResult shape.
@@ -200,7 +192,11 @@ fn import_ebook_sync(
 /// Import a novel file, dispatching on extension: `.epub`/`.fb2` use the ebook
 /// parsers, everything else goes through the plain-text pipeline.
 #[tauri::command]
-pub async fn import_file(app: AppHandle, path: String) -> Result<ImportResult, String> {
+pub async fn import_file(
+    app: AppHandle,
+    path: String,
+    custom_pattern: Option<String>,
+) -> Result<ImportResult, String> {
     let ext = Path::new(&path)
         .extension()
         .and_then(|s| s.to_str())
@@ -227,6 +223,7 @@ pub async fn import_file(app: AppHandle, path: String) -> Result<ImportResult, S
         .read(path.parse::<tauri_plugin_fs::FilePath>().unwrap())
         .map_err(|e| format!("无法读取文件: {}", e))?;
 
+    let custom = custom_pattern.filter(|p| !p.trim().is_empty());
     let result = if ext == "epub" || ext == "fb2" {
         let inner = emit.clone();
         tokio::task::spawn_blocking(move || import_ebook_sync(&path, bytes, &inner))
@@ -234,12 +231,12 @@ pub async fn import_file(app: AppHandle, path: String) -> Result<ImportResult, S
             .map_err(|e| format!("任务执行失败: {}", e))?
     } else if ext == "pdf" {
         let inner = emit.clone();
-        tokio::task::spawn_blocking(move || import_pdf_sync(&path, bytes, &inner))
+        tokio::task::spawn_blocking(move || import_pdf_sync(&path, bytes, custom.as_deref(), &inner))
             .await
             .map_err(|e| format!("任务执行失败: {}", e))?
     } else {
         let inner = emit.clone();
-        tokio::task::spawn_blocking(move || import_text_file_sync(&path, bytes, &inner))
+        tokio::task::spawn_blocking(move || import_text_file_sync(&path, bytes, custom.as_deref(), &inner))
             .await
             .map_err(|e| format!("任务执行失败: {}", e))?
     };
