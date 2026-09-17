@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::models::novel::{Chapter, ImportResult};
-use crate::utils::{chapter_detector, ebook, text_cleaner};
+use crate::utils::{chapter_detector, ebook, pdf_extractor, text_cleaner};
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_fs::FsExt;
 
@@ -116,6 +116,35 @@ fn import_text_file_sync(
     })
 }
 
+/// 解析 PDF：提取文本后走与 TXT 相同的清洗/标题/分章管线。
+fn import_pdf_sync(
+    path: &str,
+    bytes: Vec<u8>,
+    progress: &dyn Fn(u32, &str),
+) -> Result<ImportResult, String> {
+    progress(40, "正在解析 PDF…");
+    let raw_text = pdf_extractor::extract_text(&bytes)?;
+    progress(60, "正在清洗文本…");
+    let cleaned_text = text_cleaner::clean_text(&raw_text);
+    progress(80, "正在划分章节…");
+    let detected_title = chapter_detector::detect_title_from_text(&cleaned_text);
+    let detected_title = if detected_title.is_empty() {
+        filename_title(path)
+    } else {
+        detected_title
+    };
+    let chapters = chapter_detector::detect_chapters(&cleaned_text);
+    progress(98, "解析完成");
+    let language = text_cleaner::detect_language(&cleaned_text).to_string();
+    Ok(ImportResult {
+        chapters,
+        raw_text,
+        cleaned_text,
+        detected_title,
+        language,
+    })
+}
+
 /// Parse an EPUB / FB2 file into the standard ImportResult shape.
 fn import_ebook_sync(
     path: &str,
@@ -201,6 +230,11 @@ pub async fn import_file(app: AppHandle, path: String) -> Result<ImportResult, S
     let result = if ext == "epub" || ext == "fb2" {
         let inner = emit.clone();
         tokio::task::spawn_blocking(move || import_ebook_sync(&path, bytes, &inner))
+            .await
+            .map_err(|e| format!("任务执行失败: {}", e))?
+    } else if ext == "pdf" {
+        let inner = emit.clone();
+        tokio::task::spawn_blocking(move || import_pdf_sync(&path, bytes, &inner))
             .await
             .map_err(|e| format!("任务执行失败: {}", e))?
     } else {

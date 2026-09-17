@@ -164,9 +164,9 @@ async function selectFile() {
   const selected = await open({
     multiple: false,
     filters: [
-      { name: '小说文件', extensions: ['txt', 'md', 'text', 'epub', 'fb2'] },
+      { name: '小说文件', extensions: ['txt', 'md', 'text', 'epub', 'fb2', 'pdf'] },
       { name: '文本文件', extensions: ['txt', 'md', 'text'] },
-      { name: '电子书', extensions: ['epub', 'fb2'] },
+      { name: '电子书', extensions: ['epub', 'fb2', 'pdf'] },
       { name: '所有文件', extensions: ['*'] },
     ],
   })
