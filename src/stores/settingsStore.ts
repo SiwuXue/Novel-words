@@ -18,6 +18,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const autoBackup = ref<AutoBackup>('weekly')
   const reviewDailyGoal = ref<number>(20)
   const speechAccent = ref<SpeechAccent>('us')
+  /** DeepLX 翻译端点（空串 = 使用 Rust 端默认公共实例） */
+  const deeplEndpoint = ref('')
   const loaded = ref(false)
   let loadPromise: Promise<void> | null = null
 
@@ -71,6 +73,9 @@ export const useSettingsStore = defineStore('settings', () => {
                 if (s.value === 'uk' || s.value === 'us') {
                   speechAccent.value = s.value
                 }
+                break
+              case 'deepl_endpoint':
+                deeplEndpoint.value = s.value
                 break
             }
           }
@@ -172,6 +177,15 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
+  async function setDeeplEndpoint(endpoint: string) {
+    deeplEndpoint.value = endpoint
+    try {
+      await invoke('set_setting', { key: 'deepl_endpoint', value: endpoint })
+    } catch (e) {
+      console.error('[settingsStore] setDeeplEndpoint failed:', e)
+    }
+  }
+
   return {
     theme,
     defaultExportFolder,
@@ -181,6 +195,7 @@ export const useSettingsStore = defineStore('settings', () => {
     autoBackup,
     reviewDailyGoal,
     speechAccent,
+    deeplEndpoint,
     loaded,
     load,
     setTheme,
@@ -191,5 +206,6 @@ export const useSettingsStore = defineStore('settings', () => {
     setAutoBackup,
     setReviewDailyGoal,
     setSpeechAccent,
+    setDeeplEndpoint,
   }
 })

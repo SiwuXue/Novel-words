@@ -102,6 +102,16 @@
             </el-radio-group>
             <el-button class="inline-hint" link type="primary" size="small" @click="onTestAccent">{{ t('settings.listen') }}</el-button>
           </el-form-item>
+          <el-form-item :label="t('settings.deeplEndpoint')">
+            <el-input
+              v-model="deeplEndpointLocal"
+              :placeholder="t('settings.deeplEndpointPlaceholder')"
+              style="max-width: 420px"
+              clearable
+              @change="onDeeplEndpointChange"
+            />
+            <span class="backup-hint inline-hint">{{ t('settings.deeplEndpointHint') }}</span>
+          </el-form-item>
 
           <h3 class="settings-section-title">{{ t('ui.reviewSettings') }}</h3>
           <el-form-item :label="t('settings.reviewGoal')">
@@ -398,6 +408,13 @@ function onAccentChange(accent: SpeechAccent) {
 
 function onTestAccent() {
   speakWord('hello', settingsStore.speechAccent)
+}
+
+/** DeepLX 端点本地编辑态（change 时持久化，留空恢复默认） */
+const deeplEndpointLocal = ref(settingsStore.deeplEndpoint)
+
+function onDeeplEndpointChange(value: string) {
+  settingsStore.setDeeplEndpoint(value.trim())
 }
 
 async function loadAiSettings() {

@@ -1,5 +1,6 @@
 mod commands;
 mod db;
+mod dict_online;
 mod dictionary;
 mod license;
 mod models;
@@ -61,6 +62,7 @@ use commands::vocab_word::{
     search_vocab_words, update_vocab_word,
 };
 use dictionary::{dict_lookup_chinese, dict_lookup_english, DictDbState};
+use dict_online::{dict_online_cambridge, dict_online_youdao, dict_translate_sentence};
 
 /// Android packages resources as APK assets, represented by an `asset://` URI.
 /// The SQLite and import code works with normal filesystem paths, so materialize
@@ -307,6 +309,9 @@ pub fn run() {
                 test_ai_connection,
                 dict_lookup_english,
                 dict_lookup_chinese,
+                dict_online_youdao,
+                dict_online_cambridge,
+                dict_translate_sentence,
             ];
             handler(invoke)
         })

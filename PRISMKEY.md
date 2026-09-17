@@ -42,7 +42,7 @@ docker compose --project-directory /opt/prismkey -f /opt/prismkey/compose.yaml -
 
 注册后在 PrismKey 管理台选择“词阅”生成卡密；客户端不包含管理账号、发卡凭证、pepper 或服务端签名私钥。产品目录只注册一次，不修改现有 XHS 产品及卡密。
 
-当前生产注册尚待完成：SSH 严格主机密钥校验发现服务器密钥与本机已保存记录不一致，连接被拒绝。本次未删除 known_hosts 记录或绕过校验。完成可信连接确认后执行上面的注册命令，再验证公开产品信息。
+生产注册已于 2026-09-17 完成：核对服务器 TLS 证书（Let's Encrypt 签发时间与 2026-09-15 新建时间吻合）与健康检查后更新了本机 known_hosts，随后执行 add-product，并验证 `GET /api/v1/public-key?product=novel-words` 返回 issuer `PrismKey_NovelWords`、audience `NovelWords`、kid `4906a9a5e11eef9e`。首批生产卡密已通过管理 API 生成。API 层真实卡密验收已完成（2026-09-17）：激活路由 `NovelWords`、Ed25519 严格验签与全部 claims、幂等重激活起点不变、换设备 409、停用后 403 LICENSE_DISABLED 均符合预期；测试卡已解绑停用并补发。原生客户端完整激活验收仍待执行。
 
 ## 缓存与设备
 
@@ -120,4 +120,4 @@ node tests/native-license.mjs lifecycle
 - 离线：503 固定凭证期限、停止 API 后真实断网重启、稳定设备与学习数据恢复已验证。
 - 授权生命周期：停用后不能离线复活、恢复、解绑后显式激活并保留原套餐期限、已打开编辑内容保存、到期锁定、深色英文激活页及永久套餐已验证。
 
-首轮脚本的页面等待及离线对比断言已修正；`core-finish` 仅允许在核心学习流程完整结束、已有 PDF 且统计匹配时补验最后的离线检查。生产产品注册和真实生产卡密验收仍待可信 SSH 连接确认。
+首轮脚本的页面等待及离线对比断言已修正；`core-finish` 仅允许在核心学习流程完整结束、已有 PDF 且统计匹配时补验最后的离线检查。生产产品注册与 API 层真实卡密验收已完成（2026-09-17）；原生客户端使用生产卡密的完整激活验收仍待执行。

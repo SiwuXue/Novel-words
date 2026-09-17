@@ -11,64 +11,174 @@
       <span>{{ t('dict.checking') }}</span>
     </div>
 
-    <!-- Error -->
-    <div v-else-if="store.lookupError" class="dict-state dict-error">
+    <!-- Error（离线/中→英查询错误） -->
+    <div v-else-if="store.lookupError && store.direction !== 'sentence'" class="dict-state dict-error">
       <el-icon><WarningFilled /></el-icon>
       <span>{{ store.lookupError }}</span>
     </div>
 
-    <!-- 英→中：单条结果 -->
+    <!-- 英→中：词典源切换 + 单条结果 -->
     <template v-else-if="store.direction === 'english'">
-      <template v-if="store.currentWord">
-        <div class="dict-header">
-          <span class="dict-word">{{ store.currentWord.word }}</span>
-          <span v-if="preferredPhonetic" class="dict-phonetic">/{{ preferredPhonetic }}/</span>
-          <el-button
-            link
-            size="small"
-            class="dict-speak-btn"
-            :title="t('dict.pronounce', { word: store.currentWord.word })"
-            :aria-label="t('dict.pronounce', { word: store.currentWord.word })"
-            @click="speak(store.currentWord!.word)"
-          >
-            <el-icon><Microphone /></el-icon>
-          </el-button>
-        </div>
-        <div class="dict-translation">{{ store.currentWord.translation || t('dict.noDefinition') }}</div>
-        <p v-if="learningState" class="dict-learning-state" role="status">{{ t('wordForm.inherited', { status: t(`vocabDetail.${learningState.proficiency}`) }) }}</p>
-        <p v-else-if="checkingLearningState" class="dict-learning-state" role="status">{{ t('wordForm.checking') }}</p>
-        <div class="dict-footer">
-          <el-select
-            popper-class="dict-book-dropdown"
-            v-model="selectedBookId"
-            size="small"
-            :placeholder="t('dict.chooseBook')"
-            :aria-label="t('dict.chooseBook')"
-            :disabled="!!addingWord"
-            style="flex: 1; min-width: 120px"
-          >
-            <el-option
-              v-for="b in vocabBookStore.books"
-              :key="b.id"
-              :label="b.name"
-              :value="b.id"
-            />
-          </el-select>
-          <el-button
-            size="small"
-            type="primary"
-            :disabled="!selectedBookId || hasCollected(store.currentWord.word) || !!addingWord"
-            :loading="addingWord === collectionKey(selectedBookId, store.currentWord.word)"
-            @click="addEnglishWord(store.currentWord)"
-          >
-            {{ hasCollected(store.currentWord.word) ? t('dict.added') : t('dict.addToBook') }}
-          </el-button>
+      <div class="dict-source-tabs" role="tablist">
+        <button
+          v-for="s in sourceTabs"
+          :key="s.key"
+          type="button"
+          class="dict-source-tab"
+          :class="{ active: store.activeSource === s.key }"
+          role="tab"
+          :aria-selected="store.activeSource === s.key"
+          :disabled="store.looking || store.onlineLooking"
+          @click="switchSource(s.key)"
+        >
+          {{ s.label }}
+        </button>
+      </div>
+
+      <!-- 离线词典 -->
+      <template v-if="store.activeSource === 'offline'">
+        <template v-if="store.currentWord">
+          <div class="dict-header">
+            <span class="dict-word">{{ store.currentWord.word }}</span>
+            <span v-if="preferredPhonetic" class="dict-phonetic">/{{ preferredPhonetic }}/</span>
+            <el-button
+              link
+              size="small"
+              class="dict-speak-btn"
+              :title="t('dict.pronounce', { word: store.currentWord.word })"
+              :aria-label="t('dict.pronounce', { word: store.currentWord.word })"
+              @click="speak(store.currentWord!.word)"
+            >
+              <el-icon><Microphone /></el-icon>
+            </el-button>
+          </div>
+          <div class="dict-translation">{{ store.currentWord.translation || t('dict.noDefinition') }}</div>
+          <p v-if="learningState" class="dict-learning-state" role="status">{{ t('wordForm.inherited', { status: t(`vocabDetail.${learningState.proficiency}`) }) }}</p>
+          <p v-else-if="checkingLearningState" class="dict-learning-state" role="status">{{ t('wordForm.checking') }}</p>
+          <div class="dict-footer">
+            <el-select
+              popper-class="dict-book-dropdown"
+              v-model="selectedBookId"
+              size="small"
+              :placeholder="t('dict.chooseBook')"
+              :aria-label="t('dict.chooseBook')"
+              :disabled="!!addingWord"
+              style="flex: 1; min-width: 120px"
+            >
+              <el-option
+                v-for="b in vocabBookStore.books"
+                :key="b.id"
+                :label="b.name"
+                :value="b.id"
+              />
+            </el-select>
+            <el-button
+              size="small"
+              type="primary"
+              :disabled="!selectedBookId || hasCollected(store.currentWord.word) || !!addingWord"
+              :loading="addingWord === collectionKey(selectedBookId, store.currentWord.word)"
+              @click="addEnglishWord(store.currentWord)"
+            >
+              {{ hasCollected(store.currentWord.word) ? t('dict.added') : t('dict.addToBook') }}
+            </el-button>
+          </div>
+        </template>
+        <div v-else class="dict-state dict-empty">
+          <el-icon><Search /></el-icon>
+          <span>{{ t('dict.notFound') }}</span>
         </div>
       </template>
-      <div v-else class="dict-state dict-empty">
-        <el-icon><Search /></el-icon>
-        <span>{{ t('dict.notFound') }}</span>
-      </div>
+
+      <!-- 在线词典（有道 / 剑桥） -->
+      <template v-else>
+        <div v-if="store.onlineLooking" class="dict-state">
+          <el-icon class="is-loading"><Loading /></el-icon>
+          <span>{{ t('dict.onlineLooking') }}</span>
+        </div>
+        <div v-else-if="store.onlineError" class="dict-state dict-error">
+          <el-icon><WarningFilled /></el-icon>
+          <span>{{ store.onlineError }}</span>
+        </div>
+        <template v-else-if="store.onlineResult">
+          <div class="dict-header">
+            <span class="dict-word">{{ store.onlineResult.word }}</span>
+            <span v-if="onlinePhonetic" class="dict-phonetic">/{{ onlinePhonetic }}/</span>
+            <el-button
+              link
+              size="small"
+              class="dict-speak-btn"
+              :title="t('dict.pronounce', { word: store.onlineResult.word })"
+              :aria-label="t('dict.pronounce', { word: store.onlineResult.word })"
+              @click="speakOnline"
+            >
+              <el-icon><Microphone /></el-icon>
+            </el-button>
+          </div>
+          <div class="dict-translation">
+            <!-- 剑桥：按词性分组展示 -->
+            <template v-if="store.onlineResult.senses.length > 0">
+              <div v-for="(sense, i) in store.onlineResult.senses" :key="i" class="dict-online-sense">
+                <div v-if="sense.pos" class="dict-online-pos">{{ sense.pos }}</div>
+                <div v-for="(def, j) in sense.defs" :key="j" class="dict-online-def">{{ def }}</div>
+                <div v-if="sense.examples.length > 0" class="dict-online-examples">
+                  <div v-for="(ex, k) in sense.examples" :key="k" class="dict-online-example">
+                    <div class="dict-online-example-en">{{ ex.en }}</div>
+                    <div v-if="ex.zh" class="dict-online-example-zh">{{ ex.zh }}</div>
+                  </div>
+                </div>
+              </div>
+            </template>
+            <!-- 有道：扁平释义行 -->
+            <template v-else>
+              <div v-for="(line, i) in store.onlineResult.translations" :key="i" class="dict-online-def">{{ line }}</div>
+              <div v-if="store.onlineResult.examples.length > 0" class="dict-online-examples">
+                <div v-for="(ex, k) in store.onlineResult.examples" :key="k" class="dict-online-example">
+                  <div class="dict-online-example-en">{{ ex.en }}</div>
+                  <div v-if="ex.zh" class="dict-online-example-zh">{{ ex.zh }}</div>
+                </div>
+              </div>
+            </template>
+          </div>
+          <a
+            v-if="store.onlineResult.url"
+            class="dict-online-link"
+            :href="store.onlineResult.url"
+            target="_blank"
+            rel="noopener"
+          >{{ t('dict.openInBrowser') }}</a>
+          <div class="dict-footer">
+            <el-select
+              popper-class="dict-book-dropdown"
+              v-model="selectedBookId"
+              size="small"
+              :placeholder="t('dict.chooseBook')"
+              :aria-label="t('dict.chooseBook')"
+              :disabled="!!addingWord"
+              style="flex: 1; min-width: 120px"
+            >
+              <el-option
+                v-for="b in vocabBookStore.books"
+                :key="b.id"
+                :label="b.name"
+                :value="b.id"
+              />
+            </el-select>
+            <el-button
+              size="small"
+              type="primary"
+              :disabled="!selectedBookId || hasCollected(store.onlineResult.word) || !!addingWord"
+              :loading="addingWord === collectionKey(selectedBookId, store.onlineResult.word)"
+              @click="addEnglishWord(onlineDictWord!)"
+            >
+              {{ hasCollected(store.onlineResult.word) ? t('dict.added') : t('dict.addToBook') }}
+            </el-button>
+          </div>
+        </template>
+        <div v-else class="dict-state dict-empty">
+          <el-icon><Search /></el-icon>
+          <span>{{ t('dict.onlineNotFound') }}</span>
+        </div>
+      </template>
     </template>
 
     <!-- 中→英：列表结果 -->
@@ -128,6 +238,29 @@
         </el-select>
       </div>
     </template>
+
+    <!-- 整句翻译（DeepLX） -->
+    <template v-else-if="store.direction === 'sentence'">
+      <div class="dict-header">
+        <span class="dict-word cn">{{ t('dict.sentenceTitle') }}</span>
+        <span class="dict-count">{{ t('dict.sentenceViaDeepL') }}</span>
+      </div>
+      <div v-if="store.sentenceLooking" class="dict-state">
+        <el-icon class="is-loading"><Loading /></el-icon>
+        <span>{{ t('dict.sentenceLooking') }}</span>
+      </div>
+      <div v-else-if="store.sentenceError" class="dict-state dict-error">
+        <el-icon><WarningFilled /></el-icon>
+        <span>{{ store.sentenceError }}</span>
+        <el-button link size="small" type="primary" @click="store.lookupSentence(store.keyword)">
+          {{ t('dict.retry') }}
+        </el-button>
+      </div>
+      <template v-else>
+        <div class="dict-sentence-original" :title="t('dict.sentenceOriginal')">{{ store.keyword }}</div>
+        <div class="dict-translation">{{ store.sentenceTranslation || t('dict.noDefinition') }}</div>
+      </template>
+    </template>
   </div>
 </template>
 
@@ -136,7 +269,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { Loading, WarningFilled, Search, Microphone } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
-import { useDictionaryStore, type DictWord } from '@/stores/dictionaryStore'
+import { useDictionaryStore, type DictWord, type DictSource } from '@/stores/dictionaryStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { speakWord } from '@/utils/speech'
@@ -169,6 +302,13 @@ let disposed = false
 const posX = ref(0)
 const posY = ref(0)
 
+/** 词典源标签（英→中方向可切换） */
+const sourceTabs: Array<{ key: DictSource; label: string }> = [
+  { key: 'offline', label: t('dict.sourceOffline') },
+  { key: 'youdao', label: t('dict.sourceYoudao') },
+  { key: 'cambridge', label: t('dict.sourceCambridge') },
+]
+
 function collectionKey(bookId: number | null, word: string): string {
   return `${bookId}:${word.replace(/[‘’]/g, "'").trim().replace(/\s+/g, ' ').toLowerCase()}`
 }
@@ -176,7 +316,17 @@ function hasCollected(word: string): boolean {
   return selectedBookId.value !== null && addedWords.value.has(collectionKey(selectedBookId.value, word))
 }
 
-watch(() => store.direction === 'english' && !store.looking ? store.currentWord?.word : null, async word => {
+/** 切换词典源：离线重新查库，在线走网页解析 */
+function switchSource(source: DictSource) {
+  if (store.activeSource === source) return
+  if (source === 'offline') {
+    void store.lookupEnglish(store.keyword)
+  } else {
+    void store.lookupOnline(store.keyword, source)
+  }
+}
+
+watch(() => store.direction === 'english' && store.activeSource === 'offline' && !store.looking ? store.currentWord?.word : null, async word => {
   const request = ++learningRequest
   learningState.value = null
   checkingLearningState.value = false
@@ -202,6 +352,42 @@ const preferredPhonetic = computed(() => {
     ? store.currentWord.phonetic_uk
     : store.currentWord.phonetic_us
 })
+
+/** 在线结果按口音取音标 */
+const onlinePhonetic = computed(() => {
+  if (!store.onlineResult) return ''
+  return settingsStore.speechAccent === 'uk'
+    ? store.onlineResult.phonetic_uk
+    : store.onlineResult.phonetic_us
+})
+
+/** 在线结果转 DictWord 以复用"加入词汇本" */
+const onlineDictWord = computed<DictWord | null>(() => {
+  const r = store.onlineResult
+  if (!r) return null
+  return {
+    word: r.word,
+    phonetic_uk: r.phonetic_uk,
+    phonetic_us: r.phonetic_us,
+    translation: r.translations.join('\n'),
+    frequency: 0,
+    difficulty: 0,
+  }
+})
+
+/** 在线发音：优先用词典站真人音频，失败回落有道 TTS */
+function speakOnline() {
+  const r = store.onlineResult
+  if (!r) return
+  const url = settingsStore.speechAccent === 'uk' ? r.audio_uk : r.audio_us
+  if (url) {
+    // 有道/剑桥的 mp3 直链：直接用 Audio 播放
+    const audio = new Audio(url)
+    void audio.play().catch(() => speakWord(r.word, settingsStore.speechAccent))
+  } else {
+    speakWord(r.word, settingsStore.speechAccent)
+  }
+}
 
 /** Manual speak button handler */
 function speak(word: string) {
@@ -327,6 +513,29 @@ onBeforeUnmount(() => {
 .dict-state.dict-error { color: var(--danger-color, #f56c6c); }
 .dict-state.dict-empty { color: var(--text-placeholder, #c0c4cc); }
 
+.dict-source-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border-color, #ebeef5);
+  padding-bottom: 6px;
+}
+.dict-source-tab {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary, #909399);
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.dict-source-tab:hover { color: var(--text-primary, #303133); }
+.dict-source-tab.active {
+  color: var(--accent-color, #409eff);
+  background: var(--bg-secondary, #ecf5ff);
+  font-weight: 600;
+}
+.dict-source-tab:disabled { cursor: default; opacity: 0.6; }
+
 .dict-header {
   display: flex;
   align-items: baseline;
@@ -371,6 +580,44 @@ onBeforeUnmount(() => {
   padding: 4px 0;
 }
 .dict-learning-state { color: var(--text-secondary); font-size: 12px; line-height: 1.6; margin: 0; }
+
+.dict-online-sense { margin-bottom: 6px; }
+.dict-online-pos {
+  font-weight: 600;
+  color: var(--accent-color, #409eff);
+  font-size: 12px;
+  margin: 2px 0;
+}
+.dict-online-def { margin: 2px 0; }
+.dict-online-examples {
+  margin-top: 4px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border-color, #ebeef5);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.dict-online-example-en { color: var(--text-regular, #606266); font-style: italic; }
+.dict-online-example-zh { color: var(--text-secondary, #909399); font-size: 12px; }
+.dict-online-link {
+  color: var(--accent-color, #409eff);
+  font-size: 12px;
+  text-decoration: none;
+  align-self: flex-start;
+}
+.dict-online-link:hover { text-decoration: underline; }
+
+.dict-sentence-original {
+  color: var(--text-secondary, #909399);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 6px 8px;
+  background: var(--bg-secondary, #fafafa);
+  border-radius: 4px;
+  max-height: 90px;
+  overflow-y: auto;
+  word-break: break-word;
+}
 
 .dict-list {
   max-height: 280px;
