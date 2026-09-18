@@ -1,6 +1,6 @@
 # 语音朗读（TTS）· 实现计划
 
-> 状态：**一期已完成**（2026-09-17，提交 f931114）
+> 状态：**一期已完成**（2026-09-17，提交 f931114）；**二期已完成**（2026-09-18）
 > 参考：用户提供的阅读类 TTS 配置面板截图（服务商/语速/音调/音量/朗读方案/试听）
 > 决策：一期做 **Edge TTS + 系统语音**；读完**自动连播下一章**；**逐词视图同样支持**
 >
@@ -8,6 +8,12 @@
 > - Edge TTS 版本串必须用 **143.0.3650.75**（130 会被 403），需携带 Sec-MS-GEC / Sec-MS-GEC-Version / Sec-CH-UA 头
 > - 当前网络环境干扰微软语音端点（连接被重置），**默认服务商为 system**；换网络/代理后可用 `cargo test --lib -- --ignored` 验证真实合成
 > - 句子切分逐句返回不合并（原 buffer 拼接逻辑会在总长<300 时把句子拼回去，已修复）
+>
+> 二期落地（2026-09-18）：
+> - **多角色对白分音色**：`src/utils/dialogue.ts` 引号切分（中文“”/英文""，开闭字符配对）+ 规则说话人识别（对白前后 XX说/道/said XX，长动词优先）；角色-音色映射存 `novel_characters` 表（novel_id+name 唯一）；`CharacterVoicePanel.vue` 面板（普通阅读/逐词视图工具条「角色」按钮），逐句音色覆盖由 `buildVoiceOverrides` 构建，经 `ttsPlayer.start` 第 4 参数生效。
+> - **AI 识别角色性别**：复用 ai_enhancer 的通用 OpenAI 兼容配置（DashScope 兼容端点可用），`ai_detect_characters` 命令 → qwen 输出 [{name,gender}] JSON → 合并入库（保留已设音色，unknown 性别可被更新）。
+> - **云服务商接入**：Rust `tts_synthesize_cloud` — DashScope qwen3-tts-flash（POST multimodal-generation → output.audio.url → 下载）与 MiniMax t2a_v2（data.audio 为 **hex 编码** MP3，base_resp.status_code==0 校验）；设置页朗读页签新增两家服务商 + Key 输入（存 app_settings），音色下拉 allow-create 可自由填音色 ID，音色按服务商记忆在 localStorage。
+> - 教训：中文引号开/闭是不同字符，必须按 “→” 配对；说话人前缀归因需长动词优先逐个尝试，否则贪婪回溯会把「说」吃进名字（王小明说道 → 名字变成"王小明说"）。
 
 ## 一、目标
 

@@ -284,7 +284,7 @@ struct ChatMessage<'a> {
     content: &'a str,
 }
 
-async fn chat_completion(config: &AiConfig, system: &str, user: &str) -> Result<String, String> {
+pub(crate) async fn chat_completion(config: &AiConfig, system: &str, user: &str) -> Result<String, String> {
     config.validate()?;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(120))

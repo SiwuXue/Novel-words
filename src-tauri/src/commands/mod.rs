@@ -1,6 +1,7 @@
 pub mod ai_enhancer;
 pub mod app_info;
 pub mod backup;
+pub mod characters;
 pub mod chapter;
 pub mod export;
 pub mod file_io;

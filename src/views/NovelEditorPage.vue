@@ -101,12 +101,24 @@
         <span v-if="!wordTapMode && ttsState !== 'idle'" class="tts-progress-label" role="status">
           {{ ttsProgressLabel }}
         </span>
+        <el-button v-if="!wordTapMode && store.currentNovel" size="small" @click="charPanel?.open()">
+          {{ t('characters.open') }}
+        </el-button>
         <el-button size="small" @click="exitReadingMode">
           {{ t('ui.editContent') }}
         </el-button>
       </template>
       <WindowControls v-if="readingMode" />
     </div>
+
+    <!-- 角色音色面板（多角色对白分音色，普通阅读模式） -->
+    <CharacterVoicePanel
+      v-if="store.currentNovel"
+      ref="charPanel"
+      :novel-id="store.currentNovel.id"
+      :chapter-text="plainChapterText"
+      @updated="onCharVoicesUpdated"
+    />
 
     <el-dialog v-model="exportConfigOpen" :title="t('ui.exportConfig')" width="520px" append-to-body :close-on-click-modal="!exportingPdf" :close-on-press-escape="!exportingPdf" :show-close="!exportingPdf">
       <p class="export-config-hint">{{ t('ui.exportHint') }}</p>
@@ -327,7 +339,9 @@ const WordTapReader = defineAsyncComponent(() => import('@/components/novel/Word
 import ChapterList from '@/components/novel/ChapterList.vue'
 import PreviewPanel from '@/components/novel/PreviewPanel.vue'
 import { buildHtml as buildPreviewHtml } from '@/utils/pdfPreview'
-import { ttsPlayer, splitSentences } from '@/utils/ttsPlayer'
+import { ttsPlayer, splitSentenceSpans } from '@/utils/ttsPlayer'
+import { buildVoiceOverrides } from '@/utils/dialogue'
+import CharacterVoicePanel from '@/components/novel/CharacterVoicePanel.vue'
 import { useSplitLayout } from '@/composables/useSplitLayout'
 import { t } from '@/i18n'
 
@@ -400,6 +414,9 @@ function htmlToPlainText(html: string): string {
   return (doc.body.textContent ?? '').replace(/\s+/g, ' ').trim()
 }
 
+/** 当前章纯文本（角色面板与朗读共用） */
+const plainChapterText = computed(() => htmlToPlainText(editorContent.value))
+
 function currentTtsSettings() {
   return {
     provider: settingsStore.ttsProvider,
@@ -407,7 +424,25 @@ function currentTtsSettings() {
     rate: settingsStore.ttsRate,
     pitch: settingsStore.ttsPitch,
     volume: settingsStore.ttsVolume,
+    apiKey:
+      settingsStore.ttsProvider === 'dashscope'
+        ? settingsStore.ttsDashKey
+        : settingsStore.ttsMinimaxKey,
+    groupId: settingsStore.ttsMinimaxGroupId,
   }
+}
+
+// ---------- 角色分音色（CharacterVoicePanel 回传） ----------
+const charPanel = ref<InstanceType<typeof CharacterVoicePanel> | null>(null)
+const charVoices = ref<Record<string, string>>({})
+const dialogueVoiceEnabled = ref(false)
+
+function onCharVoicesUpdated(payload: {
+  charVoices: Record<string, string>
+  dialogueEnabled: boolean
+}): void {
+  charVoices.value = payload.charVoices
+  dialogueVoiceEnabled.value = payload.dialogueEnabled
 }
 
 async function toggleTtsReading(): Promise<void> {
@@ -423,19 +458,30 @@ async function toggleTtsReading(): Promise<void> {
 }
 
 async function startTtsReading(): Promise<void> {
-  const sentences = splitSentences(htmlToPlainText(editorContent.value))
+  const fullText = plainChapterText.value
+  const spans = splitSentenceSpans(fullText)
+  const sentences = spans.map((s) => s.text)
   if (sentences.length === 0) return
-  await ttsPlayer.start(sentences, currentTtsSettings(), {
-    onFinish: (completed) => {
-      if (completed && settingsStore.ttsAutoNext && hasNextChapter.value) {
-        void (async () => {
-          await scrollToChapter(editorStore.activeChapterIndex + 1, { keepTts: true })
-          await nextTick()
-          if (readingMode.value && !wordTapMode.value) await startTtsReading()
-        })()
-      }
+  const overrides =
+    dialogueVoiceEnabled.value && Object.keys(charVoices.value).length > 0
+      ? buildVoiceOverrides(spans, fullText, charVoices.value)
+      : undefined
+  await ttsPlayer.start(
+    sentences,
+    currentTtsSettings(),
+    {
+      onFinish: (completed) => {
+        if (completed && settingsStore.ttsAutoNext && hasNextChapter.value) {
+          void (async () => {
+            await scrollToChapter(editorStore.activeChapterIndex + 1, { keepTts: true })
+            await nextTick()
+            if (readingMode.value && !wordTapMode.value) await startTtsReading()
+          })()
+        }
+      },
     },
-  })
+    overrides,
+  )
 }
 
 function stopTtsReading(): void {

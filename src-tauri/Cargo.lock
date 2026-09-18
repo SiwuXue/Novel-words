@@ -2591,6 +2591,7 @@ dependencies = [
  "encoding_rs",
  "epub",
  "futures-util",
+ "hex",
  "html-escape",
  "lopdf 0.34.0",
  "pdf-extract",

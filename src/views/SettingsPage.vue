@@ -269,13 +269,45 @@
             <el-select v-model="ttsProviderLocal" style="width: 280px" @change="onTtsProviderChange">
               <el-option value="edge" :label="t('settings.ttsEdge')" />
               <el-option value="system" :label="t('settings.ttsSystem')" />
+              <el-option value="dashscope" :label="t('settings.ttsDashscope')" />
+              <el-option value="minimax" :label="t('settings.ttsMinimax')" />
             </el-select>
             <span class="backup-hint inline-hint">{{ t('settings.ttsProviderHint') }}</span>
           </el-form-item>
+          <el-form-item v-if="ttsProviderLocal === 'dashscope'" :label="t('settings.ttsDashKey')">
+            <el-input
+              v-model="ttsDashKeyLocal"
+              type="password"
+              show-password
+              style="width: 280px"
+              :placeholder="t('settings.ttsDashKey')"
+              @change="onTtsKeyChange"
+            />
+            <span class="backup-hint inline-hint">{{ t('settings.ttsKeyHint') }}</span>
+          </el-form-item>
+          <el-form-item v-if="ttsProviderLocal === 'minimax'" :label="t('settings.ttsMinimaxKey')">
+            <el-input
+              v-model="ttsMinimaxKeyLocal"
+              type="password"
+              show-password
+              style="width: 280px"
+              :placeholder="t('settings.ttsMinimaxKey')"
+              @change="onTtsKeyChange"
+            />
+          </el-form-item>
+          <el-form-item v-if="ttsProviderLocal === 'minimax'" :label="t('settings.ttsMinimaxGroupId')">
+            <el-input
+              v-model="ttsMinimaxGroupIdLocal"
+              style="width: 280px"
+              :placeholder="t('settings.ttsMinimaxGroupId')"
+              @change="onTtsKeyChange"
+            />
+          </el-form-item>
           <el-form-item :label="t('settings.ttsVoice')">
-            <el-select v-model="ttsVoiceLocal" filterable style="width: 280px" @change="onTtsVoiceChange">
+            <el-select v-model="ttsVoiceLocal" filterable allow-create default-first-option style="width: 280px" @change="onTtsVoiceChange">
               <el-option v-for="v in voiceOptions" :key="v.id" :value="v.id" :label="v.label" />
             </el-select>
+            <span v-if="isCloudProvider" class="backup-hint inline-hint">{{ t('settings.ttsVoiceCustomHint') }}</span>
           </el-form-item>
           <el-form-item :label="t('settings.ttsRate')">
             <el-slider v-model="ttsRateLocal" :min="0.5" :max="2" :step="0.05" style="width: 280px" @change="onTtsParamsChange" />
@@ -334,7 +366,7 @@ import type { PdfBackground, AutoBackup } from '@/stores/settingsStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
 import { type StepNum } from '@/types/pdfSteps'
 import { speakWord, type SpeechAccent } from '@/utils/speech'
-import { ttsPlayer } from '@/utils/ttsPlayer'
+import { ttsPlayer, type TtsProvider } from '@/utils/ttsPlayer'
 import { isAndroid } from '@/utils/platform'
 import { currentLocale, t, setLocale, type Locale } from '@/i18n'
 import { AI_PROVIDER_PRESETS, getAiProvider } from '@/config/aiProviders'
@@ -464,19 +496,45 @@ function onTestAccent() {
 }
 
 // ===== TTS 朗读设置 =====
-const ttsProviderLocal = ref(settingsStore.ttsProvider)
+const ttsProviderLocal = ref<TtsProvider>(settingsStore.ttsProvider)
 const ttsVoiceLocal = ref(settingsStore.ttsVoice)
 const ttsRateLocal = ref(settingsStore.ttsRate)
 const ttsPitchLocal = ref(settingsStore.ttsPitch)
 const ttsVolumeLocal = ref(settingsStore.ttsVolume)
 const ttsAutoNextLocal = ref(settingsStore.ttsAutoNext)
+const ttsDashKeyLocal = ref(settingsStore.ttsDashKey)
+const ttsMinimaxKeyLocal = ref(settingsStore.ttsMinimaxKey)
+const ttsMinimaxGroupIdLocal = ref(settingsStore.ttsMinimaxGroupId)
 const voiceOptions = ref<Array<{ id: string; label: string }>>([])
 const ttsPreviewing = ref(false)
+
+const isCloudProvider = computed(() => ttsProviderLocal.value === 'dashscope' || ttsProviderLocal.value === 'minimax')
+
+/** 音色按服务商记忆（localStorage），切换服务商自动带回上次选择 */
+const DEFAULT_VOICE: Record<TtsProvider, string> = {
+  edge: 'zh-CN-XiaoxiaoNeural',
+  system: '',
+  dashscope: 'Cherry',
+  minimax: 'female-shaonv',
+}
+const VOICE_KEY_PREFIX = 'tts-voice-'
+function saveProviderVoice(provider: TtsProvider, voice: string): void {
+  localStorage.setItem(VOICE_KEY_PREFIX + provider, voice)
+}
 
 async function loadVoiceOptions(): Promise<void> {
   if (ttsProviderLocal.value === 'edge') {
     try {
       const list = await invoke<Array<[string, string, string]>>('tts_voices')
+      voiceOptions.value = list.map(([id, name, lang]) => ({ id, label: `${name} (${lang})` }))
+    } catch {
+      voiceOptions.value = []
+    }
+  } else if (ttsProviderLocal.value === 'dashscope' || ttsProviderLocal.value === 'minimax') {
+    try {
+      const list = await invoke<Array<[string, string, string]>>('tts_cloud_voices', {
+        provider: ttsProviderLocal.value,
+      })
       voiceOptions.value = list.map(([id, name, lang]) => ({ id, label: `${name} (${lang})` }))
     } catch {
       voiceOptions.value = []
@@ -491,20 +549,27 @@ async function loadVoiceOptions(): Promise<void> {
   }
 }
 
-function onTtsProviderChange(v: 'edge' | 'system'): void {
+function onTtsProviderChange(v: TtsProvider): void {
+  saveProviderVoice(ttsProviderLocal.value, ttsVoiceLocal.value)
   ttsProviderLocal.value = v
   void settingsStore.setTtsSettings({ ttsProvider: v })
-  if (v === 'edge') {
-    ttsVoiceLocal.value = 'zh-CN-XiaoxiaoNeural'
-  } else {
-    ttsVoiceLocal.value = ''
-  }
+  const remembered = localStorage.getItem(VOICE_KEY_PREFIX + v)
+  ttsVoiceLocal.value = remembered ?? DEFAULT_VOICE[v]
   void settingsStore.setTtsSettings({ ttsVoice: ttsVoiceLocal.value })
   void loadVoiceOptions()
 }
 
 function onTtsVoiceChange(v: string): void {
+  saveProviderVoice(ttsProviderLocal.value, v)
   void settingsStore.setTtsSettings({ ttsVoice: v })
+}
+
+function onTtsKeyChange(): void {
+  void settingsStore.setTtsSettings({
+    ttsDashKey: ttsDashKeyLocal.value.trim(),
+    ttsMinimaxKey: ttsMinimaxKeyLocal.value.trim(),
+    ttsMinimaxGroupId: ttsMinimaxGroupIdLocal.value.trim(),
+  })
 }
 
 function onTtsParamsChange(): void {
@@ -521,9 +586,12 @@ function onTtsAutoNextChange(v: boolean | string | number | undefined): void {
 
 async function previewTts(): Promise<void> {
   const voice = ttsVoiceLocal.value
-  const sample = voice.startsWith('zh')
-    ? '你好，这是词阅的语音朗读试听。'
-    : 'Hello, this is a voice reading preview from CiYue.'
+  const sample =
+    ttsProviderLocal.value === 'minimax' || ttsProviderLocal.value === 'dashscope'
+      ? '你好，这是词阅的语音朗读试听。'
+      : voice.startsWith('zh')
+        ? '你好，这是词阅的语音朗读试听。'
+        : 'Hello, this is a voice reading preview from CiYue.'
   ttsPreviewing.value = true
   try {
     await ttsPlayer.start([sample], {
@@ -532,6 +600,8 @@ async function previewTts(): Promise<void> {
       rate: ttsRateLocal.value,
       pitch: ttsPitchLocal.value,
       volume: ttsVolumeLocal.value,
+      apiKey: ttsDashKeyLocal.value.trim() || ttsMinimaxKeyLocal.value.trim(),
+      groupId: ttsMinimaxGroupIdLocal.value.trim(),
     })
   } catch (e) {
     ElMessage.error(String(e && (e as Error).message ? (e as Error).message : e))

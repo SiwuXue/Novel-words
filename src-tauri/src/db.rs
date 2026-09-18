@@ -342,6 +342,19 @@ CREATE TABLE IF NOT EXISTS app_settings (
     value TEXT NOT NULL
 );
 
+-- 多角色朗读：每本小说的说话人 → 音色/性别映射（TTS 二期）。
+-- name 来自对白识别或 AI 分析；voice 为空表示跟随章节默认音色。
+CREATE TABLE IF NOT EXISTS novel_characters (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    novel_id   INTEGER NOT NULL,
+    name       TEXT    NOT NULL,
+    gender     TEXT    NOT NULL DEFAULT 'unknown',
+    voice      TEXT    NOT NULL DEFAULT '',
+    updated_at TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
+    UNIQUE(novel_id, name),
+    FOREIGN KEY (novel_id) REFERENCES novel(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS review_log (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     vocab_word_id   INTEGER NOT NULL,

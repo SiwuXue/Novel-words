@@ -49,6 +49,7 @@ regex = "1"
 base64 = "0.22"
 ring = "0.17"
 sha2 = "0.10"
+hex = "0.4"
 uuid = "1"
 
 [target.'cfg(windows)'.dependencies]

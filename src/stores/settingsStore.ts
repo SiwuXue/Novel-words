@@ -4,14 +4,18 @@ import { invoke } from '@tauri-apps/api/core'
 import type { StepNum } from '@/types/pdfSteps'
 import { normalizeSteps, serializeSteps } from '@/types/pdfSteps'
 import type { SpeechAccent } from '@/utils/speech'
+import type { TtsProvider } from '@/utils/ttsPlayer'
 
 interface TtsPrefs {
-  ttsProvider: 'edge' | 'system'
+  ttsProvider: TtsProvider
   ttsVoice: string
   ttsRate: number
   ttsPitch: number
   ttsVolume: number
   ttsAutoNext: boolean
+  ttsDashKey: string
+  ttsMinimaxKey: string
+  ttsMinimaxGroupId: string
 }
 
 export type PdfBackground = 'grid' | 'dots' | 'none'
@@ -29,13 +33,17 @@ export const useSettingsStore = defineStore('settings', () => {
   const speechAccent = ref<SpeechAccent>('us')
   /** 每日新词上限（0 = 不限），阅读中标记新词超过时提醒 */
   const dailyNewWordLimit = ref(0)
-  /** 朗读：服务商 edge/system、音色、语速/音调倍率、音量、自动连播 */
-  const ttsProvider = ref<'edge' | 'system'>('system')
+  /** 朗读：服务商、音色、语速/音调倍率、音量、自动连播、云 Key */
+  const ttsProvider = ref<TtsProvider>('system')
   const ttsVoice = ref('zh-CN-XiaoxiaoNeural')
   const ttsRate = ref(1)
   const ttsPitch = ref(1)
   const ttsVolume = ref(100)
   const ttsAutoNext = ref(true)
+  /** 云服务商密钥：DashScope / MiniMax */
+  const ttsDashKey = ref('')
+  const ttsMinimaxKey = ref('')
+  const ttsMinimaxGroupId = ref('')
   /** DeepLX 翻译端点（空串 = 使用 Rust 端默认公共实例） */
   const deeplEndpoint = ref('')
   const loaded = ref(false)
@@ -98,7 +106,9 @@ export const useSettingsStore = defineStore('settings', () => {
                 break
               }
               case 'tts_provider':
-                if (s.value === 'edge' || s.value === 'system') ttsProvider.value = s.value
+                if (['edge', 'system', 'dashscope', 'minimax'].includes(s.value)) {
+                  ttsProvider.value = s.value as TtsProvider
+                }
                 break
               case 'tts_voice':
                 if (s.value) ttsVoice.value = s.value
@@ -120,6 +130,15 @@ export const useSettingsStore = defineStore('settings', () => {
               }
               case 'tts_auto_next':
                 ttsAutoNext.value = s.value !== 'false'
+                break
+              case 'tts_dashscope_key':
+                ttsDashKey.value = s.value
+                break
+              case 'tts_minimax_key':
+                ttsMinimaxKey.value = s.value
+                break
+              case 'tts_minimax_group_id':
+                ttsMinimaxGroupId.value = s.value
                 break
               case 'deepl_endpoint':
                 deeplEndpoint.value = s.value
@@ -218,7 +237,7 @@ export const useSettingsStore = defineStore('settings', () => {
   function ttsPrefsTarget(): TtsPrefs {
     return {
       get ttsProvider() { return ttsProvider.value },
-      set ttsProvider(v: 'edge' | 'system') { ttsProvider.value = v },
+      set ttsProvider(v: TtsProvider) { ttsProvider.value = v },
       get ttsVoice() { return ttsVoice.value },
       set ttsVoice(v: string) { ttsVoice.value = v },
       get ttsRate() { return ttsRate.value },
@@ -229,10 +248,16 @@ export const useSettingsStore = defineStore('settings', () => {
       set ttsVolume(v: number) { ttsVolume.value = v },
       get ttsAutoNext() { return ttsAutoNext.value },
       set ttsAutoNext(v: boolean) { ttsAutoNext.value = v },
+      get ttsDashKey() { return ttsDashKey.value },
+      set ttsDashKey(v: string) { ttsDashKey.value = v },
+      get ttsMinimaxKey() { return ttsMinimaxKey.value },
+      set ttsMinimaxKey(v: string) { ttsMinimaxKey.value = v },
+      get ttsMinimaxGroupId() { return ttsMinimaxGroupId.value },
+      set ttsMinimaxGroupId(v: string) { ttsMinimaxGroupId.value = v },
     }
   }
 
-  async function setTtsSettings(patch: Partial<Pick<TtsPrefs, 'ttsProvider' | 'ttsVoice' | 'ttsRate' | 'ttsPitch' | 'ttsVolume' | 'ttsAutoNext'>>) {
+  async function setTtsSettings(patch: Partial<TtsPrefs>) {
     Object.assign(ttsPrefsTarget(), patch)
     const keyMap: Partial<Record<keyof TtsPrefs, string>> = {
       ttsProvider: 'tts_provider',
@@ -241,6 +266,9 @@ export const useSettingsStore = defineStore('settings', () => {
       ttsPitch: 'tts_pitch',
       ttsVolume: 'tts_volume',
       ttsAutoNext: 'tts_auto_next',
+      ttsDashKey: 'tts_dashscope_key',
+      ttsMinimaxKey: 'tts_minimax_key',
+      ttsMinimaxGroupId: 'tts_minimax_group_id',
     }
     try {
       for (const [k, v] of Object.entries(patch)) {
@@ -295,6 +323,9 @@ export const useSettingsStore = defineStore('settings', () => {
     ttsPitch,
     ttsVolume,
     ttsAutoNext,
+    ttsDashKey,
+    ttsMinimaxKey,
+    ttsMinimaxGroupId,
     deeplEndpoint,
     loaded,
     load,

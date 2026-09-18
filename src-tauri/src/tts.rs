@@ -214,6 +214,191 @@ pub fn tts_voices() -> Vec<(String, String, String)> {
         .collect()
 }
 
+// ---------------------------------------------------------------------------
+// 云服务商 TTS（REST）：阿里云 DashScope Qwen-TTS / MiniMax T2A v2
+// ---------------------------------------------------------------------------
+
+const DASHSCOPE_TTS_URL: &str =
+    "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
+const DASHSCOPE_TTS_MODEL: &str = "qwen3-tts-flash";
+const MINIMAX_TTS_URL: &str = "https://api.minimaxi.com/v1/t2a_v2";
+const MINIMAX_TTS_MODEL: &str = "speech-2.8-hd";
+
+/// DashScope / MiniMax 预置音色清单（id 可自由填写，不限于清单）。
+pub const CLOUD_VOICES: &[(&str, &str, &str, &str)] = &[
+    // (provider, id, 名称, 语言)
+    ("dashscope", "Cherry", "Cherry（女·知性）", "zh"),
+    ("dashscope", "Serena", "Serena（女·清亮）", "zh"),
+    ("dashscope", "Ethan", "Ethan（男·醇厚）", "zh"),
+    ("dashscope", "Chelsie", "Chelsie（女·活泼）", "zh"),
+    ("dashscope", "Aria", "Aria（Female·EN）", "en"),
+    ("minimax", "female-shaonv", "少女（女）", "zh"),
+    ("minimax", "female-yujie", "御姐（女）", "zh"),
+    ("minimax", "female-chengshu", "成熟女性（女）", "zh"),
+    ("minimax", "male-qn-qingse", "青涩青年（男）", "zh"),
+    ("minimax", "male-qn-jingying", "精英青年（男）", "zh"),
+    ("minimax", "male-qn-bada", "霸道青年（男）", "zh"),
+    ("minimax", "presenter_female", "女主播（女）", "zh"),
+];
+
+#[tauri::command]
+pub fn tts_cloud_voices(provider: String) -> Vec<(String, String, String)> {
+    CLOUD_VOICES
+        .iter()
+        .filter(|(p, _, _, _)| *p == provider)
+        .map(|(_, id, name, lang)| (id.to_string(), name.to_string(), lang.to_string()))
+        .collect()
+}
+
+/// 按字符占比猜测 language_type：DashScope 指定语种比 Auto 合成质量更好。
+fn guess_language_type(text: &str) -> &'static str {
+    let total = text.chars().count().max(1);
+    let cjk = text
+        .chars()
+        .filter(|c| ('\u{4e00}'..='\u{9fff}').contains(c))
+        .count();
+    if cjk * 4 >= total {
+        "Chinese"
+    } else {
+        "English"
+    }
+}
+
+/// DashScope Qwen-TTS 非流式合成：POST → output.audio.url（24h 有效）→ 下载。
+async fn synthesize_dashscope(api_key: &str, text: &str, voice: &str) -> Result<Vec<u8>, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .http1_only()
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+    let payload = serde_json::json!({
+        "model": DASHSCOPE_TTS_MODEL,
+        "input": {
+            "text": text,
+            "voice": voice,
+            "language_type": guess_language_type(text),
+        }
+    });
+    let resp = client
+        .post(DASHSCOPE_TTS_URL)
+        .bearer_auth(api_key.trim())
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("DashScope 请求失败: {}", e))?;
+    let status = resp.status();
+    let body: serde_json::Value = resp.json().await.map_err(|e| format!("DashScope 响应解析失败: {}", e))?;
+    if !status.is_success() {
+        let msg = body["message"].as_str().unwrap_or("未知错误");
+        return Err(format!("DashScope 合成失败（{}）: {}", status, msg));
+    }
+    let audio_url = body["output"]["audio"]["url"]
+        .as_str()
+        .filter(|u| !u.is_empty())
+        .ok_or_else(|| format!("DashScope 未返回音频 URL: {}", body))?;
+    let audio = client
+        .get(audio_url)
+        .send()
+        .await
+        .map_err(|e| format!("DashScope 音频下载失败: {}", e))?;
+    if !audio.status().is_success() {
+        return Err(format!("DashScope 音频下载失败（{}）", audio.status()));
+    }
+    let bytes = audio.bytes().await.map_err(|e| format!("DashScope 音频读取失败: {}", e))?;
+    let bytes = bytes.to_vec();
+    if bytes.is_empty() {
+        return Err("DashScope 返回空音频".into());
+    }
+    Ok(bytes)
+}
+
+/// MiniMax T2A v2 合成：POST → data.audio（hex 编码 MP3）→ 解码。
+async fn synthesize_minimax(
+    api_key: &str,
+    group_id: &str,
+    text: &str,
+    voice: &str,
+) -> Result<Vec<u8>, String> {
+    let group_id = group_id.trim();
+    if group_id.is_empty() {
+        return Err("MiniMax 需要 GroupId（在设置页填写）".into());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .http1_only()
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+    let payload = serde_json::json!({
+        "model": MINIMAX_TTS_MODEL,
+        "text": text,
+        "stream": false,
+        "voice_setting": {
+            "voice_id": voice,
+            "speed": 1.0,
+            "vol": 1.0,
+            "pitch": 0,
+            "emotion": "neutral"
+        },
+        "audio_setting": {
+            "sample_rate": 32000,
+            "bitrate": 128000,
+            "format": "mp3",
+            "channel": 1
+        }
+    });
+    let resp = client
+        .post(format!("{MINIMAX_TTS_URL}?GroupId={group_id}"))
+        .bearer_auth(api_key.trim())
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("MiniMax 请求失败: {}", e))?;
+    let body: serde_json::Value = resp.json().await.map_err(|e| format!("MiniMax 响应解析失败: {}", e))?;
+    let status_code = body["base_resp"]["status_code"].as_i64().unwrap_or(-1);
+    if status_code != 0 {
+        let msg = body["base_resp"]["status_msg"].as_str().unwrap_or("未知错误");
+        return Err(format!("MiniMax 合成失败（{}）: {}", status_code, msg));
+    }
+    let hex_audio = body["data"]["audio"].as_str().unwrap_or_default();
+    if hex_audio.is_empty() {
+        return Err("MiniMax 返回空音频".into());
+    }
+    hex::decode(hex_audio).map_err(|e| format!("MiniMax 音频解码失败: {}", e))
+}
+
+/// 云服务商合成命令：provider = dashscope | minimax。
+#[tauri::command]
+pub async fn tts_synthesize_cloud(
+    provider: String,
+    api_key: String,
+    group_id: Option<String>,
+    text: String,
+    voice: String,
+) -> Result<Vec<u8>, String> {
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        return Err("朗读内容为空".into());
+    }
+    if api_key.trim().is_empty() {
+        return Err(format!("{} 需要 API Key（在设置页填写）", provider));
+    }
+    let fut: std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<u8>, String>> + Send>,
+    > = match provider.as_str() {
+            "dashscope" => Box::pin(synthesize_dashscope(&api_key, &text, &voice)),
+            "minimax" => Box::pin(synthesize_minimax(
+                &api_key,
+                group_id.as_deref().unwrap_or(""),
+                &text,
+                &voice,
+            )),
+            other => return Err(format!("不支持的 TTS 服务商: {}", other)),
+        };
+    tokio::time::timeout(std::time::Duration::from_secs(75), fut)
+        .await
+        .map_err(|_| format!("{} 合成超时（将回退系统语音）", provider))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,5 +448,31 @@ mod tests {
             WsMessage::Binary(bin),
         ];
         assert_eq!(collect_audio(&messages), b"MP3DATA");
+    }
+
+    #[test]
+    fn language_type_guesses_by_cjk_ratio() {
+        assert_eq!(guess_language_type("你好，这是词阅的朗读测试。"), "Chinese");
+        assert_eq!(guess_language_type("It was a quiet morning in the valley."), "English");
+        // 混合少量汉字的英文文本仍判为英文
+        assert_eq!(
+            guess_language_type("This is English text with 汉字 few."),
+            "English"
+        );
+    }
+
+    /// 真实云合成验证（需要有效 Key，手动运行时先填入）。
+    #[test]
+    #[ignore = "requires network + api key"]
+    fn dashscope_real_synthesis() {
+        let key = std::env::var("DASHSCOPE_API_KEY").unwrap_or_default();
+        if key.is_empty() {
+            return;
+        }
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let audio = rt
+            .block_on(synthesize_dashscope(&key, "你好，这是词阅的朗读测试。", "Cherry"))
+            .expect("dashscope synthesis should succeed");
+        assert!(audio.len() > 1000, "音频字节量: {}", audio.len());
     }
 }

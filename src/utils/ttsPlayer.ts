@@ -11,8 +11,10 @@
 import { invoke } from '@tauri-apps/api/core'
 import { ref } from 'vue'
 
+export type TtsProvider = 'edge' | 'system' | 'dashscope' | 'minimax'
+
 export interface TtsSettings {
-  provider: 'edge' | 'system'
+  provider: TtsProvider
   voice: string
   /** 倍率 0.5–2.0，1.0 正常 */
   rate: number
@@ -20,6 +22,10 @@ export interface TtsSettings {
   pitch: number
   /** 0–100 */
   volume: number
+  /** 云服务商 API Key（dashscope/minimax 必填，缺省回退系统语音） */
+  apiKey?: string
+  /** MiniMax GroupId（minimax 必填） */
+  groupId?: string
 }
 
 export interface TtsHandlers {
@@ -112,7 +118,13 @@ class TtsPlayer {
   currentIndex = ref(-1)
   totalSentences = ref(0)
 
-  async start(sentences: string[], settings: TtsSettings, handlers: TtsHandlers = {}): Promise<void> {
+  async start(
+    sentences: string[],
+    settings: TtsSettings,
+    handlers: TtsHandlers = {},
+    /** 逐句音色覆盖（角色分音色）：与 sentences 对齐，空/缺省走 settings.voice */
+    voiceOverrides?: Array<string | undefined>,
+  ): Promise<void> {
     this.stop(true)
     const myToken = ++this.token
     if (sentences.length === 0) {
@@ -132,13 +144,14 @@ class TtsPlayer {
       }
       this.currentIndex.value = i
       handlers.onSentenceStart?.(i, sentences.length, sentences[i])
+      const voice = voiceOverrides?.[i] || settings.voice
       try {
-        await this.speakOne(sentences[i], settings, myToken)
+        await this.speakOne(sentences[i], settings, voice, myToken)
       } catch (e) {
         if (myToken !== this.token) return
         console.error('[ttsPlayer] sentence failed:', e)
-        // 合成失败：跳过该句继续（Edge 失败时回退系统语音播一遍）
-        if (settings.provider === 'edge') {
+        // 合成失败：跳过该句继续（在线后端失败时回退系统语音播一遍）
+        if (settings.provider !== 'system') {
           try {
             await this.speakSystem(sentences[i], settings)
           } catch {
@@ -155,23 +168,55 @@ class TtsPlayer {
   }
 
   /** 单句合成并等待播放结束 */
-  private speakOne(text: string, settings: TtsSettings, myToken: number): Promise<void> {
+  private speakOne(
+    text: string,
+    settings: TtsSettings,
+    voice: string,
+    myToken: number,
+  ): Promise<void> {
     if (settings.provider === 'edge') {
-      return this.speakEdge(text, settings, myToken)
+      return this.speakEdge(text, settings, voice, myToken)
+    }
+    if (settings.provider === 'dashscope' || settings.provider === 'minimax') {
+      return this.speakCloud(text, settings, voice, myToken)
     }
     return this.speakSystem(text, settings)
   }
 
-  private async speakEdge(text: string, settings: TtsSettings, myToken: number): Promise<void> {
+  private async speakEdge(
+    text: string,
+    settings: TtsSettings,
+    voice: string,
+    myToken: number,
+  ): Promise<void> {
     const rate = Math.round((settings.rate - 1) * 100)
     const pitch = Math.round((settings.pitch - 1) * 100)
     const volume = settings.volume - 100
     const bytes = await invoke<number[]>('tts_synthesize', {
       text,
-      voice: settings.voice,
+      voice,
       rate,
       pitch,
       volume,
+    })
+    if (myToken !== this.token) return
+    const url = bytesToDataUrl(bytes)
+    await this.playAudioUrl(url, myToken, settings.volume / 100)
+  }
+
+  /** 云服务商（DashScope / MiniMax）：REST 合成 → audio 播放；失败抛出由上层回退 */
+  private async speakCloud(
+    text: string,
+    settings: TtsSettings,
+    voice: string,
+    myToken: number,
+  ): Promise<void> {
+    const bytes = await invoke<number[]>('tts_synthesize_cloud', {
+      provider: settings.provider,
+      apiKey: settings.apiKey ?? '',
+      groupId: settings.groupId ?? null,
+      text,
+      voice,
     })
     if (myToken !== this.token) return
     const url = bytesToDataUrl(bytes)

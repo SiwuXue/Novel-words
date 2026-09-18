@@ -25,6 +25,9 @@ use commands::ai_enhancer::{
 };
 use commands::app_info::get_app_info;
 use commands::backup::{backup_database, restore_database};
+use commands::characters::{
+    ai_detect_characters, delete_novel_character, list_novel_characters, upsert_novel_character,
+};
 use commands::chapter::{
     delete_chapters_by_novel, get_chapter_content, get_chapter_list, get_chapters, save_chapters,
     update_chapter_content, update_chapter_title,
@@ -67,7 +70,7 @@ use commands::vocab_word::{
 };
 use dictionary::{dict_lookup_chinese, dict_lookup_english, DictDbState};
 use dict_online::{dict_online_cambridge, dict_online_youdao, dict_translate_sentence};
-use tts::{tts_synthesize, tts_voices};
+use tts::{tts_cloud_voices, tts_synthesize, tts_synthesize_cloud, tts_voices};
 
 /// Android packages resources as APK assets, represented by an `asset://` URI.
 /// The SQLite and import code works with normal filesystem paths, so materialize
@@ -345,6 +348,12 @@ pub fn run() {
                 word_tap_today_new_count,
                 tts_synthesize,
                 tts_voices,
+                tts_synthesize_cloud,
+                tts_cloud_voices,
+                list_novel_characters,
+                upsert_novel_character,
+                delete_novel_character,
+                ai_detect_characters,
                 import_preset_vocab_book,
                 commit_preset_clone_with_state,
                 list_preset_vocab_books,

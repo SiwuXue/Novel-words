@@ -17,6 +17,9 @@
         <span v-if="ttsState !== 'idle'" class="wt-tts-progress" role="status">
           {{ ttsProgress }}
         </span>
+        <el-button v-if="novelId" size="small" @click="charPanel?.open()">
+          {{ t('characters.open') }}
+        </el-button>
       </span>
       <span class="wt-counts" role="status" :aria-label="t('wordTap.countsLabel')">
         <span class="wt-c wt-c-new">{{ t('wordTap.new') }} {{ counts.new }}</span>
@@ -82,6 +85,15 @@
       @close="popover.visible = false"
       @marked="onMarked"
     />
+
+    <!-- 角色音色面板（多角色对白分音色） -->
+    <CharacterVoicePanel
+      v-if="novelId"
+      ref="charPanel"
+      :novel-id="novelId"
+      :chapter-text="fullText"
+      @updated="onCharVoicesUpdated"
+    />
   </div>
 </template>
 
@@ -91,10 +103,12 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
 import DictLookupPopover from './DictLookupPopover.vue'
+import CharacterVoicePanel from './CharacterVoicePanel.vue'
 import { useDictionaryStore } from '@/stores/dictionaryStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { speakWord } from '@/utils/speech'
 import { ttsPlayer, splitSentenceSpans, type SentenceSpan } from '@/utils/ttsPlayer'
+import { buildVoiceOverrides } from '@/utils/dialogue'
 import {
   parseWordTapBlocks,
   collectWordKeys,
@@ -404,6 +418,11 @@ function currentTtsSettings() {
     rate: settingsStore.ttsRate,
     pitch: settingsStore.ttsPitch,
     volume: settingsStore.ttsVolume,
+    apiKey:
+      settingsStore.ttsProvider === 'dashscope'
+        ? settingsStore.ttsDashKey
+        : settingsStore.ttsMinimaxKey,
+    groupId: settingsStore.ttsMinimaxGroupId,
   }
 }
 
@@ -420,18 +439,42 @@ async function toggleTts(): Promise<void> {
 }
 
 async function startTts(): Promise<void> {
-  const sentences = sentenceSpans.value.map((s) => s.text)
+  const spans = sentenceSpans.value
+  const sentences = spans.map((s) => s.text)
   if (sentences.length === 0) return
-  await ttsPlayer.start(sentences, currentTtsSettings(), {
-    onSentenceStart: (i) => highlightSentence(i),
-    onFinish: (completed) => {
-      speakingRange.value = null
-      if (completed && settingsStore.ttsAutoNext) {
-        autoRestart.value = true
-        emit('ttsNext')
-      }
+  // 对白分音色：角色面板开启且配置了角色音色时，按说话人覆盖每句音色
+  const overrides =
+    dialogueVoiceEnabled.value && Object.keys(charVoices.value).length > 0
+      ? buildVoiceOverrides(spans, fullText.value, charVoices.value)
+      : undefined
+  await ttsPlayer.start(
+    sentences,
+    currentTtsSettings(),
+    {
+      onSentenceStart: (i) => highlightSentence(i),
+      onFinish: (completed) => {
+        speakingRange.value = null
+        if (completed && settingsStore.ttsAutoNext) {
+          autoRestart.value = true
+          emit('ttsNext')
+        }
+      },
     },
-  })
+    overrides,
+  )
+}
+
+// ---------- 角色分音色（CharacterVoicePanel 回传） ----------
+const charPanel = ref<InstanceType<typeof CharacterVoicePanel> | null>(null)
+const charVoices = ref<Record<string, string>>({})
+const dialogueVoiceEnabled = ref(false)
+
+function onCharVoicesUpdated(payload: {
+  charVoices: Record<string, string>
+  dialogueEnabled: boolean
+}): void {
+  charVoices.value = payload.charVoices
+  dialogueVoiceEnabled.value = payload.dialogueEnabled
 }
 
 function stopTts(): void {
