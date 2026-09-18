@@ -369,31 +369,36 @@ async fn synthesize_dashscope(api_key: &str, text: &str, voice: &str) -> Result<
 }
 
 /// MiniMax T2A v2 合成：POST → data.audio（hex 编码 MP3）→ 解码。
+/// 新 API（api.minimaxi.com/v1/t2a_v2）仅需 Bearer API Key，GroupId 已不再需要；
+/// 仅在用户填写了 GroupId 时才拼 `?GroupId=`（兼容老账号/老控制台习惯）。
 async fn synthesize_minimax(
     api_key: &str,
     group_id: &str,
     text: &str,
     voice: &str,
+    rate: f64,
 ) -> Result<Vec<u8>, String> {
     let group_id = group_id.trim();
-    if group_id.is_empty() {
-        return Err("MiniMax 需要 GroupId（在设置页填写）".into());
-    }
+    let url = if group_id.is_empty() {
+        MINIMAX_TTS_URL.to_string()
+    } else {
+        format!("{MINIMAX_TTS_URL}?GroupId={group_id}")
+    };
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
         .http1_only()
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+    let speed = if rate.is_finite() { rate.clamp(0.5, 2.0) } else { 1.0 };
     let payload = serde_json::json!({
         "model": MINIMAX_TTS_MODEL,
         "text": text,
         "stream": false,
         "voice_setting": {
             "voice_id": voice,
-            "speed": 1.0,
+            "speed": speed,
             "vol": 1.0,
-            "pitch": 0,
-            "emotion": "neutral"
+            "pitch": 0
         },
         "audio_setting": {
             "sample_rate": 32000,
@@ -403,7 +408,7 @@ async fn synthesize_minimax(
         }
     });
     let resp = client
-        .post(format!("{MINIMAX_TTS_URL}?GroupId={group_id}"))
+        .post(url)
         .bearer_auth(api_key.trim())
         .json(&payload)
         .send()
@@ -447,6 +452,7 @@ pub async fn tts_synthesize_cloud(
             group_id.as_deref().unwrap_or(""),
             &text,
             &voice,
+            1.0,
         )),
         other => return Err(format!("不支持的 TTS 服务商: {}", other)),
     };
@@ -475,6 +481,7 @@ pub async fn tts_test_connection(
             group_id.as_deref().unwrap_or(""),
             text,
             &voice,
+            1.0,
         )),
         "volcengine" => Box::pin(synthesize_volcengine(&key, text, &voice, 1.0)),
         "mimo" => Box::pin(synthesize_mimo(&key, text, &voice, 1.0)),
@@ -801,6 +808,7 @@ pub async fn tts_synthesize_v3(
             group_id.as_deref().unwrap_or(""),
             &text,
             &voice,
+            rate,
         )),
         "volcengine" => Box::pin(synthesize_volcengine(&key, &text, &voice, rate)),
         "mimo" => Box::pin(synthesize_mimo(&key, &text, &voice, rate)),

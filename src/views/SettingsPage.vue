@@ -352,6 +352,7 @@
               :placeholder="t('settings.ttsMinimaxGroupId')"
               @change="onTtsKeyChange"
             />
+            <span class="backup-hint inline-hint">{{ t('settings.ttsMinimaxGroupIdHint') }}</span>
           </el-form-item>
           <el-form-item v-if="ttsProviderLocal === 'volcengine'" :label="t('settings.ttsVolcKey')">
             <el-input
