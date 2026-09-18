@@ -443,11 +443,18 @@ async function startTts(): Promise<void> {
   const spans = sentenceSpans.value
   const sentences = spans.map((s) => s.text)
   if (sentences.length === 0) return
-  // 对白分音色：角色面板开启且配置了角色音色时，按说话人覆盖每句音色
-  const overrides =
-    dialogueVoiceEnabled.value && Object.keys(charVoices.value).length > 0
-      ? buildVoiceOverrides(spans, fullText.value, charVoices.value)
-      : undefined
+  // 对白分音色：角色面板开启时，按说话人覆盖每句音色
+  //（显式指派音色 > 性别默认音色 > 主音色）
+  const overrides = dialogueVoiceEnabled.value
+    ? buildVoiceOverrides(
+        spans,
+        fullText.value,
+        charVoices.value,
+        charGenders.value,
+        { male: settingsStore.ttsMaleVoice, female: settingsStore.ttsFemaleVoice },
+        settingsStore.ttsQuoteStyles,
+      )
+    : undefined
   await ttsPlayer.start(
     sentences,
     currentTtsSettings(),
@@ -465,18 +472,59 @@ async function startTts(): Promise<void> {
   )
 }
 
-// ---------- 角色分音色（CharacterVoicePanel 回传） ----------
+// ---------- 角色分音色（自加载 + CharacterVoicePanel 回传） ----------
 const charPanel = ref<InstanceType<typeof CharacterVoicePanel> | null>(null)
 const charVoices = ref<Record<string, string>>({})
+const charGenders = ref<Record<string, 'male' | 'female' | 'unknown'>>({})
 const dialogueVoiceEnabled = ref(false)
+
+/** 面板未打开也要生效：挂载/换书时自行加载角色信息 */
+async function loadCharacters(): Promise<void> {
+  if (props.novelId == null) return
+  try {
+    const saved = await invoke<
+      Array<{ name: string; gender: string; voice: string }>
+    >('list_novel_characters', { novelId: props.novelId })
+    applyCharacters(saved)
+  } catch {
+    /* 静默：朗读走主音色 */
+  }
+}
+
+function applyCharacters(
+  saved: Array<{ name: string; gender: string; voice: string }>,
+): void {
+  const voices: Record<string, string> = {}
+  const genders: Record<string, 'male' | 'female' | 'unknown'> = {}
+  for (const c of saved) {
+    if (c.voice) voices[c.name] = c.voice
+    genders[c.name] = (c.gender as 'male' | 'female' | 'unknown') ?? 'unknown'
+  }
+  charVoices.value = voices
+  charGenders.value = genders
+}
 
 function onCharVoicesUpdated(payload: {
   charVoices: Record<string, string>
+  charGenders: Record<string, 'male' | 'female' | 'unknown'>
   dialogueEnabled: boolean
 }): void {
   charVoices.value = payload.charVoices
+  charGenders.value = payload.charGenders
   dialogueVoiceEnabled.value = payload.dialogueEnabled
 }
+
+onMounted(() => {
+  if (props.novelId != null) {
+    dialogueVoiceEnabled.value =
+      localStorage.getItem(`dialogue-voice-enabled-${props.novelId}`) === '1'
+  }
+  void loadCharacters()
+})
+watch(
+  () => props.novelId,
+  () => void loadCharacters(),
+)
 
 function stopTts(): void {
   autoRestart.value = false

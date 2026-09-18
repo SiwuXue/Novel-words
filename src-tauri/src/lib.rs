@@ -70,7 +70,7 @@ use commands::vocab_word::{
 };
 use dictionary::{dict_lookup_chinese, dict_lookup_english, DictDbState};
 use dict_online::{dict_online_cambridge, dict_online_youdao, dict_translate_sentence};
-use tts::{tts_cloud_voices, tts_synthesize, tts_synthesize_cloud, tts_voices};
+use tts::{tts_cloud_voices, tts_synthesize, tts_synthesize_cloud, tts_test_connection, tts_voices};
 
 /// Android packages resources as APK assets, represented by an `asset://` URI.
 /// The SQLite and import code works with normal filesystem paths, so materialize
@@ -350,6 +350,7 @@ pub fn run() {
                 tts_voices,
                 tts_synthesize_cloud,
                 tts_cloud_voices,
+                tts_test_connection,
                 list_novel_characters,
                 upsert_novel_character,
                 delete_novel_character,

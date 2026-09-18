@@ -307,13 +307,43 @@
             <el-select v-model="ttsVoiceLocal" filterable allow-create default-first-option style="width: 280px" @change="onTtsVoiceChange">
               <el-option v-for="v in voiceOptions" :key="v.id" :value="v.id" :label="v.label" />
             </el-select>
+            <el-button size="small" link type="primary" @click="previewVoice(ttsVoiceLocal)">
+              {{ t('settings.ttsPreviewPlay') }}
+            </el-button>
             <span v-if="isCloudProvider" class="backup-hint inline-hint">{{ t('settings.ttsVoiceCustomHint') }}</span>
+          </el-form-item>
+          <el-form-item :label="t('settings.ttsMaleVoice')">
+            <el-select v-model="ttsMaleVoiceLocal" filterable allow-create default-first-option clearable style="width: 280px" @change="onTtsGenderVoiceChange">
+              <el-option value="" :label="t('settings.ttsVoiceOff')" />
+              <el-option v-for="v in voiceOptions" :key="v.id" :value="v.id" :label="v.label" />
+            </el-select>
+            <el-button v-if="ttsMaleVoiceLocal" size="small" link type="primary" @click="previewVoice(ttsMaleVoiceLocal)">
+              {{ t('settings.ttsPreviewPlay') }}
+            </el-button>
+            <span class="backup-hint inline-hint">{{ t('settings.ttsGenderVoiceHint') }}</span>
+          </el-form-item>
+          <el-form-item :label="t('settings.ttsFemaleVoice')">
+            <el-select v-model="ttsFemaleVoiceLocal" filterable allow-create default-first-option clearable style="width: 280px" @change="onTtsGenderVoiceChange">
+              <el-option value="" :label="t('settings.ttsVoiceOff')" />
+              <el-option v-for="v in voiceOptions" :key="v.id" :value="v.id" :label="v.label" />
+            </el-select>
+            <el-button v-if="ttsFemaleVoiceLocal" size="small" link type="primary" @click="previewVoice(ttsFemaleVoiceLocal)">
+              {{ t('settings.ttsPreviewPlay') }}
+            </el-button>
+          </el-form-item>
+          <el-form-item :label="t('settings.ttsQuoteStyles')">
+            <el-checkbox-group v-model="ttsQuoteStylesLocal" @change="onTtsQuoteStylesChange">
+              <el-checkbox value="“">{{ t('settings.ttsQuoteDouble') }}</el-checkbox>
+              <el-checkbox value="‘">{{ t('settings.ttsQuoteSingle') }}</el-checkbox>
+              <el-checkbox value="「">{{ t('settings.ttsQuoteCorner') }}</el-checkbox>
+              <el-checkbox value="『">{{ t('settings.ttsQuoteDoubleCorner') }}</el-checkbox>
+            </el-checkbox-group>
           </el-form-item>
           <el-form-item :label="t('settings.ttsRate')">
             <el-slider v-model="ttsRateLocal" :min="0.5" :max="2" :step="0.05" style="width: 280px" @change="onTtsParamsChange" />
           </el-form-item>
           <el-form-item :label="t('settings.ttsPitch')">
-            <el-slider v-model="ttsPitchLocal" :min="0.5" :max="1.5" :step="0.05" style="width: 280px" @change="onTtsParamsChange" />
+            <el-slider v-model="ttsPitchLocal" :min="0.5" :max="2" :step="0.05" style="width: 280px" @change="onTtsParamsChange" />
           </el-form-item>
           <el-form-item :label="t('settings.ttsVolume')">
             <el-slider v-model="ttsVolumeLocal" :min="0" :max="100" :step="5" style="width: 280px" @change="onTtsParamsChange" />
@@ -332,6 +362,12 @@
               @change="onTtsPauseChange"
             />
             <span class="backup-hint inline-hint">{{ ttsPauseSentenceLocal === 0 ? t('settings.ttsPauseOff') : `${ttsPauseSentenceLocal}ms` }}</span>
+          </el-form-item>
+          <el-form-item :label="t('settings.ttsTestConn')">
+            <el-button type="primary" plain size="small" :loading="ttsTesting" @click="testTtsConnection">
+              {{ t('settings.ttsTestConn') }}
+            </el-button>
+            <span class="backup-hint inline-hint">{{ t('settings.ttsTestHint') }}</span>
           </el-form-item>
           <el-form-item :label="t('settings.ttsPreview')">
             <el-button type="primary" plain size="small" :loading="ttsPreviewing" @click="previewTts">
@@ -514,6 +550,10 @@ const ttsPitchLocal = ref(settingsStore.ttsPitch)
 const ttsVolumeLocal = ref(settingsStore.ttsVolume)
 const ttsAutoNextLocal = ref(settingsStore.ttsAutoNext)
 const ttsPauseSentenceLocal = ref(settingsStore.ttsPauseSentence)
+const ttsMaleVoiceLocal = ref(settingsStore.ttsMaleVoice)
+const ttsFemaleVoiceLocal = ref(settingsStore.ttsFemaleVoice)
+const ttsQuoteStylesLocal = ref<string[]>([...settingsStore.ttsQuoteStyles])
+const ttsTesting = ref(false)
 const ttsDashKeyLocal = ref(settingsStore.ttsDashKey)
 const ttsMinimaxKeyLocal = ref(settingsStore.ttsMinimaxKey)
 const ttsMinimaxGroupIdLocal = ref(settingsStore.ttsMinimaxGroupId)
@@ -600,8 +640,49 @@ function onTtsPauseChange(): void {
   void settingsStore.setTtsSettings({ ttsPauseSentence: ttsPauseSentenceLocal.value })
 }
 
+function onTtsGenderVoiceChange(): void {
+  void settingsStore.setTtsSettings({
+    ttsMaleVoice: ttsMaleVoiceLocal.value,
+    ttsFemaleVoice: ttsFemaleVoiceLocal.value,
+  })
+}
+
+function onTtsQuoteStylesChange(v: string[]): void {
+  // 至少保留一个样式（复选框组允许清空，这里回退为全启用）
+  const value = v.length ? [...v] : ['“', '‘', '「', '『']
+  ttsQuoteStylesLocal.value = value
+  void settingsStore.setTtsSettings({ ttsQuoteStyles: value })
+}
+
+async function testTtsConnection(): Promise<void> {
+  if (ttsProviderLocal.value === 'system') {
+    const ok = 'speechSynthesis' in window
+    if (ok) ElMessage.success(t('settings.ttsTestOk'))
+    else ElMessage.error(t('settings.ttsTestFail'))
+    return
+  }
+  ttsTesting.value = true
+  try {
+    await invoke('tts_test_connection', {
+      provider: ttsProviderLocal.value,
+      apiKey: ttsDashKeyLocal.value.trim() || ttsMinimaxKeyLocal.value.trim(),
+      groupId: ttsMinimaxGroupIdLocal.value.trim(),
+      voice: ttsVoiceLocal.value,
+    })
+    ElMessage.success(t('settings.ttsTestOk'))
+  } catch (e) {
+    ElMessage.error(`${t('settings.ttsTestFail')}: ${String(e)}`)
+  } finally {
+    ttsTesting.value = false
+  }
+}
+
 async function previewTts(): Promise<void> {
-  const voice = ttsVoiceLocal.value
+  await previewVoice(ttsVoiceLocal.value)
+}
+
+/** 指定音色试听一句（主音色/男声/女声默认音色共用） */
+async function previewVoice(voice: string): Promise<void> {
   const sample =
     ttsProviderLocal.value === 'minimax' || ttsProviderLocal.value === 'dashscope'
       ? '你好，这是词阅的语音朗读试听。'

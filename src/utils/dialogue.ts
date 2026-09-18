@@ -27,12 +27,31 @@ const QUOTE_PAIRS: ReadonlyArray<{ open: string; close: string }> = [
   { open: '"', close: '"' },
 ]
 
-const CLOSERS: Record<string, string> = Object.fromEntries(
+const ALL_CLOSERS: Record<string, string> = Object.fromEntries(
   QUOTE_PAIRS.map((p) => [p.open, p.close]),
 )
 
+/** 英文双引号恒定计入对白。 */
+const ALWAYS_ON_OPEN = '"'
+
+/** 按启用开符集合构建开→闭映射；未传 = 全部启用。 */
+function closersFor(enabledOpens?: ReadonlyArray<string>): Record<string, string> {
+  if (!enabledOpens) return ALL_CLOSERS
+  const set = new Set(enabledOpens)
+  set.add(ALWAYS_ON_OPEN)
+  const out: Record<string, string> = {}
+  for (const p of QUOTE_PAIRS) {
+    if (set.has(p.open)) out[p.open] = p.close
+  }
+  return out
+}
+
 /** 对白切分：按引号对切出对白段，段间为旁白（对白内只找当前引号的闭符）。 */
-export function splitDialogueSegments(text: string): DialogueSegment[] {
+export function splitDialogueSegments(
+  text: string,
+  enabledOpens?: ReadonlyArray<string>,
+): DialogueSegment[] {
+  const CLOSERS = closersFor(enabledOpens)
   const segments: DialogueSegment[] = []
   let narrationStart = 0
   let i = 0
@@ -133,6 +152,17 @@ function attributeSpeaker(text: string, openIdx: number, endIdx: number): string
       if (name) return name
     }
   }
+  // 英文对白后缀·名字在前："…," Tom said.
+  for (const verb of EN_VERBS) {
+    const re = new RegExp(
+      `^\\s*,?\\s*([A-Z][A-Za-z]*(?:\\s[A-Z][A-Za-z]*)?)\\s+${verb}\\b`,
+    )
+    const m = after.match(re)
+    if (m && m[1]) {
+      const name = cleanName(m[1])
+      if (name) return name
+    }
+  }
 
   // --- 对白前：开头引号前的 30 字窗口（允许结尾残留冒号/引号） ---
   const before = text.slice(Math.max(0, openIdx - 30), openIdx)
@@ -189,9 +219,10 @@ export function speakerForSpan(
 /** 章节内说话人统计（角色面板：按对白条数排序）。 */
 export function collectSpeakers(
   text: string,
+  enabledOpens?: ReadonlyArray<string>,
 ): Array<{ name: string; count: number }> {
   const counts = new Map<string, number>()
-  for (const seg of splitDialogueSegments(text)) {
+  for (const seg of splitDialogueSegments(text, enabledOpens)) {
     if (seg.type !== 'dialogue' || !seg.speaker) continue
     counts.set(seg.speaker, (counts.get(seg.speaker) ?? 0) + 1)
   }
@@ -200,20 +231,38 @@ export function collectSpeakers(
     .sort((a, b) => b.count - a.count)
 }
 
+export interface GenderDefaults {
+  male?: string
+  female?: string
+}
+
 /**
- * 构建逐句音色覆盖：句子落在某说话人的对白段内且该角色配置了音色 → 覆盖。
- * 与 ttsPlayer.start 的 voiceOverrides 参数对齐；无映射的句子返回 undefined。
+ * 构建逐句音色覆盖：句子落在某说话人的对白段内时，
+ * 显式指派的音色 > 按 gender 套用男/女默认音色 > undefined（走主音色）。
+ * 与 ttsPlayer.start 的 voiceOverrides 参数对齐。
  */
 export function buildVoiceOverrides(
   spans: Array<{ start: number; end: number }>,
   fullText: string,
   charVoices: Record<string, string>,
+  charGenders?: Record<string, 'male' | 'female' | 'unknown'>,
+  genderDefaults?: GenderDefaults,
+  enabledOpens?: ReadonlyArray<string>,
 ): Array<string | undefined> {
-  if (spans.length === 0 || Object.keys(charVoices).length === 0) return []
-  const segments = splitDialogueSegments(fullText)
+  const hasCharInfo =
+    Object.keys(charVoices).length > 0 ||
+    Object.keys(charGenders ?? {}).length > 0 ||
+    Boolean(genderDefaults?.male || genderDefaults?.female)
+  if (spans.length === 0 || !hasCharInfo) return []
+  const segments = splitDialogueSegments(fullText, enabledOpens)
   return spans.map((span) => {
     const speaker = speakerForSpan(segments, span.start, span.end)
     if (!speaker) return undefined
-    return charVoices[speaker] || undefined
+    const explicit = charVoices[speaker]
+    if (explicit) return explicit
+    const gender = charGenders?.[speaker]
+    if (gender === 'male') return genderDefaults?.male || undefined
+    if (gender === 'female') return genderDefaults?.female || undefined
+    return undefined
   })
 }

@@ -399,6 +399,35 @@ pub async fn tts_synthesize_cloud(
         .map_err(|_| format!("{} 合成超时（将回退系统语音）", provider))?
 }
 
+/// 连接测试：按当前服务商合成一句短文本验证连通性，成功返回音频字节数描述。
+#[tauri::command]
+pub async fn tts_test_connection(
+    provider: String,
+    api_key: Option<String>,
+    group_id: Option<String>,
+    voice: String,
+) -> Result<String, String> {
+    let text = "你好";
+    let key = api_key.unwrap_or_default();
+    let fut: std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<u8>, String>> + Send>,
+    > = match provider.as_str() {
+        "edge" => Box::pin(synthesize(text, &voice, 0, 0, 0)),
+        "dashscope" => Box::pin(synthesize_dashscope(&key, text, &voice)),
+        "minimax" => Box::pin(synthesize_minimax(
+            &key,
+            group_id.as_deref().unwrap_or(""),
+            text,
+            &voice,
+        )),
+        other => return Err(format!("不支持的 TTS 服务商: {}", other)),
+    };
+    let bytes = tokio::time::timeout(std::time::Duration::from_secs(30), fut)
+        .await
+        .map_err(|_| format!("{} 连接测试超时", provider))??;
+    Ok(format!("ok {}B", bytes.len()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

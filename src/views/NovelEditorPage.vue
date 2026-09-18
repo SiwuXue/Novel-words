@@ -433,16 +433,42 @@ function currentTtsSettings() {
   }
 }
 
-// ---------- 角色分音色（CharacterVoicePanel 回传） ----------
+// ---------- 角色分音色（自加载 + CharacterVoicePanel 回传） ----------
 const charPanel = ref<InstanceType<typeof CharacterVoicePanel> | null>(null)
 const charVoices = ref<Record<string, string>>({})
+const charGenders = ref<Record<string, 'male' | 'female' | 'unknown'>>({})
 const dialogueVoiceEnabled = ref(false)
+
+/** 面板未打开也要生效：进入编辑页时自行加载角色信息 */
+async function loadCharacters(): Promise<void> {
+  const novel = store.currentNovel
+  if (!novel) return
+  try {
+    const saved = await invoke<
+      Array<{ name: string; gender: string; voice: string }>
+    >('list_novel_characters', { novelId: novel.id })
+    const voices: Record<string, string> = {}
+    const genders: Record<string, 'male' | 'female' | 'unknown'> = {}
+    for (const c of saved) {
+      if (c.voice) voices[c.name] = c.voice
+      genders[c.name] = (c.gender as 'male' | 'female' | 'unknown') ?? 'unknown'
+    }
+    charVoices.value = voices
+    charGenders.value = genders
+  } catch {
+    /* 静默：朗读走主音色 */
+  }
+}
+
+void onMounted(loadCharacters)
 
 function onCharVoicesUpdated(payload: {
   charVoices: Record<string, string>
+  charGenders: Record<string, 'male' | 'female' | 'unknown'>
   dialogueEnabled: boolean
 }): void {
   charVoices.value = payload.charVoices
+  charGenders.value = payload.charGenders
   dialogueVoiceEnabled.value = payload.dialogueEnabled
 }
 
@@ -463,10 +489,16 @@ async function startTtsReading(): Promise<void> {
   const spans = splitSentenceSpans(fullText)
   const sentences = spans.map((s) => s.text)
   if (sentences.length === 0) return
-  const overrides =
-    dialogueVoiceEnabled.value && Object.keys(charVoices.value).length > 0
-      ? buildVoiceOverrides(spans, fullText, charVoices.value)
-      : undefined
+  const overrides = dialogueVoiceEnabled.value
+    ? buildVoiceOverrides(
+        spans,
+        fullText,
+        charVoices.value,
+        charGenders.value,
+        { male: settingsStore.ttsMaleVoice, female: settingsStore.ttsFemaleVoice },
+        settingsStore.ttsQuoteStyles,
+      )
+    : undefined
   await ttsPlayer.start(
     sentences,
     currentTtsSettings(),

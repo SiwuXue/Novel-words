@@ -87,7 +87,11 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'updated', payload: { charVoices: Record<string, string>; dialogueEnabled: boolean }): void
+  (e: 'updated', payload: {
+    charVoices: Record<string, string>
+    charGenders: Record<string, 'male' | 'female' | 'unknown'>
+    dialogueEnabled: boolean
+  }): void
 }>()
 
 interface CharRow {
@@ -174,7 +178,7 @@ async function loadCharacters(): Promise<void> {
       console.error('[CharacterVoicePanel] load failed:', e)
     }
   }
-  for (const sp of collectSpeakers(props.chapterText)) {
+  for (const sp of collectSpeakers(props.chapterText, settingsStore.ttsQuoteStyles)) {
     const existing = rowsMap.get(sp.name)
     if (existing) existing.count = sp.count
     else rowsMap.set(sp.name, { name: sp.name, gender: 'unknown', voice: '', id: null, count: sp.count })
@@ -184,10 +188,12 @@ async function loadCharacters(): Promise<void> {
 
 function emitUpdated(): void {
   const charVoices: Record<string, string> = {}
+  const charGenders: Record<string, 'male' | 'female' | 'unknown'> = {}
   for (const r of rows.value) {
     if (r.voice) charVoices[r.name] = r.voice
+    charGenders[r.name] = r.gender
   }
-  emit('updated', { charVoices, dialogueEnabled: dialogueEnabled.value })
+  emit('updated', { charVoices, charGenders, dialogueEnabled: dialogueEnabled.value })
 }
 
 function onDialogueToggle(): void {

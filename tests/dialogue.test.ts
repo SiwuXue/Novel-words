@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildVoiceOverrides,
   collectSpeakers,
   speakerForSpan,
   splitDialogueSegments,
@@ -84,5 +85,70 @@ describe('splitDialogueSegments', () => {
     const speakers = collectSpeakers(text)
     expect(speakers[0]).toMatchObject({ name: '王小明', count: 2 })
     expect(speakers.map((s) => s.name)).toContain('李老师')
+  })
+
+  it('enabledOpens 过滤引号样式：禁用「」后直角引号不算对白，英文 " 恒定生效', () => {
+    const text = '「直角对白。」李老师说。"English quote," Tom said.'
+    const enabled = ['“', '‘', '『']
+    const segs = splitDialogueSegments(text, enabled)
+    const dialogues = segs.filter((s) => s.type === 'dialogue')
+    expect(dialogues).toHaveLength(1)
+    expect(dialogues[0].speaker).toBe('Tom')
+    // 直角引号内容留在旁白里
+    expect(text.slice(segs[0].start, segs[0].end)).toContain('直角对白')
+    // collectSpeakers 透传同一过滤
+    expect(collectSpeakers(text, enabled).map((s) => s.name)).toEqual(['Tom'])
+    // 未传 = 全部启用
+    expect(splitDialogueSegments(text).filter((s) => s.type === 'dialogue')).toHaveLength(2)
+  })
+})
+
+describe('buildVoiceOverrides', () => {
+  const text = '“你终于来了。”王小明说。他放下书包。'
+  const segs = splitDialogueSegments(text)
+  const dia = segs.find((s) => s.type === 'dialogue')!
+  const spans = [{ start: dia.start, end: dia.end }]
+
+  it('显式指派的音色优先于性别默认', () => {
+    const out = buildVoiceOverrides(
+      spans,
+      text,
+      { 王小明: 'custom-voice' },
+      { 王小明: 'male' },
+      { male: 'male-default', female: 'female-default' },
+    )
+    expect(out).toEqual(['custom-voice'])
+  })
+
+  it('无显式音色时按性别套用默认音色', () => {
+    const out = buildVoiceOverrides(spans, text, {}, { 王小明: 'male' }, { male: 'male-default' })
+    expect(out).toEqual(['male-default'])
+
+    const out2 = buildVoiceOverrides(
+      spans,
+      text,
+      {},
+      { 王小明: 'female' },
+      { female: 'female-default' },
+    )
+    expect(out2).toEqual(['female-default'])
+  })
+
+  it('unknown 性别或无默认音色时返回 undefined（走主音色）', () => {
+    expect(buildVoiceOverrides(spans, text, {}, { 王小明: 'unknown' }, { male: 'm' })).toEqual([
+      undefined,
+    ])
+    expect(buildVoiceOverrides(spans, text, {}, { 王小明: 'male' }, {})).toEqual([undefined])
+    // 旁白句
+    const nar = segs.find((s) => s.type === 'narration' && s.end > s.start)!
+    expect(
+      buildVoiceOverrides(
+        [{ start: nar.start, end: nar.end }],
+        text,
+        {},
+        { 王小明: 'male' },
+        { male: 'm' },
+      ),
+    ).toEqual([undefined])
   })
 })

@@ -18,6 +18,12 @@ interface TtsPrefs {
   ttsMinimaxGroupId: string
   /** 句间停顿毫秒（1x 语速基准），0 = 不停顿 */
   ttsPauseSentence: number
+  /** 对白角色默认男声音色（空 = 不套用） */
+  ttsMaleVoice: string
+  /** 对白角色默认女声音色（空 = 不套用） */
+  ttsFemaleVoice: string
+  /** 计入对白的引号开符集合（英文 " 恒定启用） */
+  ttsQuoteStyles: string[]
 }
 
 export type PdfBackground = 'grid' | 'dots' | 'none'
@@ -48,6 +54,11 @@ export const useSettingsStore = defineStore('settings', () => {
   const ttsMinimaxGroupId = ref('')
   /** 句间停顿毫秒（1x 语速基准，播放时随语速缩放） */
   const ttsPauseSentence = ref(200)
+  /** 对白角色默认男/女声音色（空 = 不套用，走主音色） */
+  const ttsMaleVoice = ref('')
+  const ttsFemaleVoice = ref('')
+  /** 计入对白的引号开符（英文 " 恒定启用，不在此列） */
+  const ttsQuoteStyles = ref<string[]>(['“', '‘', '「', '『'])
   /** DeepLX 翻译端点（空串 = 使用 Rust 端默认公共实例） */
   const deeplEndpoint = ref('')
   const loaded = ref(false)
@@ -124,7 +135,7 @@ export const useSettingsStore = defineStore('settings', () => {
               }
               case 'tts_pitch': {
                 const n = Number(s.value)
-                if (Number.isFinite(n) && n >= 0.5 && n <= 1.5) ttsPitch.value = n
+                if (Number.isFinite(n) && n >= 0.5 && n <= 2) ttsPitch.value = n
                 break
               }
               case 'tts_volume': {
@@ -148,6 +159,28 @@ export const useSettingsStore = defineStore('settings', () => {
                 const n = Number(s.value)
                 if (Number.isFinite(n) && n >= 0 && n <= 1200) {
                   ttsPauseSentence.value = Math.round(n)
+                }
+                break
+              }
+              case 'tts_male_voice':
+                ttsMaleVoice.value = s.value
+                break
+              case 'tts_female_voice':
+                ttsFemaleVoice.value = s.value
+                break
+              case 'tts_quote_styles': {
+                try {
+                  const arr = JSON.parse(s.value)
+                  const allowed = ['“', '‘', '「', '『']
+                  if (Array.isArray(arr)) {
+                    const picked = arr.filter((x): x is string =>
+                      typeof x === 'string' && allowed.includes(x),
+                    )
+                    // 空集合视为全部启用（避免用户全关后对白功能静默失效）
+                    ttsQuoteStyles.value = picked.length ? picked : [...allowed]
+                  }
+                } catch {
+                  /* 非法 JSON → 保持默认全启用 */
                 }
                 break
               }
@@ -267,6 +300,12 @@ export const useSettingsStore = defineStore('settings', () => {
       set ttsMinimaxGroupId(v: string) { ttsMinimaxGroupId.value = v },
       get ttsPauseSentence() { return ttsPauseSentence.value },
       set ttsPauseSentence(v: number) { ttsPauseSentence.value = v },
+      get ttsMaleVoice() { return ttsMaleVoice.value },
+      set ttsMaleVoice(v: string) { ttsMaleVoice.value = v },
+      get ttsFemaleVoice() { return ttsFemaleVoice.value },
+      set ttsFemaleVoice(v: string) { ttsFemaleVoice.value = v },
+      get ttsQuoteStyles() { return ttsQuoteStyles.value },
+      set ttsQuoteStyles(v: string[]) { ttsQuoteStyles.value = v },
     }
   }
 
@@ -283,11 +322,16 @@ export const useSettingsStore = defineStore('settings', () => {
       ttsMinimaxKey: 'tts_minimax_key',
       ttsMinimaxGroupId: 'tts_minimax_group_id',
       ttsPauseSentence: 'tts_pause_sentence',
+      ttsMaleVoice: 'tts_male_voice',
+      ttsFemaleVoice: 'tts_female_voice',
+      ttsQuoteStyles: 'tts_quote_styles',
     }
     try {
       for (const [k, v] of Object.entries(patch)) {
         const settingKey = keyMap[k as keyof TtsPrefs]
-        if (settingKey) await invoke('set_setting', { key: settingKey, value: String(v) })
+        if (!settingKey) continue
+        const value = Array.isArray(v) ? JSON.stringify(v) : String(v)
+        await invoke('set_setting', { key: settingKey, value })
       }
     } catch (e) {
       console.error('[settingsStore] setTtsSettings failed:', e)
@@ -341,6 +385,9 @@ export const useSettingsStore = defineStore('settings', () => {
     ttsMinimaxKey,
     ttsMinimaxGroupId,
     ttsPauseSentence,
+    ttsMaleVoice,
+    ttsFemaleVoice,
+    ttsQuoteStyles,
     deeplEndpoint,
     loaded,
     load,
