@@ -355,7 +355,7 @@ import ChapterList from '@/components/novel/ChapterList.vue'
 import PreviewPanel from '@/components/novel/PreviewPanel.vue'
 import { buildHtml as buildPreviewHtml } from '@/utils/pdfPreview'
 import { ttsPlayer, splitSentenceSpans } from '@/utils/ttsPlayer'
-import { buildVoiceOverrides } from '@/utils/dialogue'
+import { buildSpeechUnits } from '@/utils/dialogue'
 import CharacterVoicePanel from '@/components/novel/CharacterVoicePanel.vue'
 import { useSplitLayout } from '@/composables/useSplitLayout'
 import { t } from '@/i18n'
@@ -509,19 +509,25 @@ async function toggleTtsReading(): Promise<void> {
 async function startTtsReading(): Promise<void> {
   const fullText = plainChapterText.value
   const spans = splitSentenceSpans(fullText)
-  const sentences = spans.map((s) => s.text)
-  if (sentences.length === 0) return
-  const overrides =
-    dialogueVoiceEnabled.value && settingsStore.ttsVoiceMode === 'dialogue'
-      ? buildVoiceOverrides(
-        spans,
-        fullText,
-        charVoices.value,
-        charGenders.value,
-        { male: settingsStore.ttsMaleVoice, female: settingsStore.ttsFemaleVoice },
-        settingsStore.ttsQuoteStyles,
-      )
-    : undefined
+  if (spans.length === 0) return
+  // 对白分音色：句子内再切旁白/对白片段——旁白走主音色，对白按说话人分音色
+  const useDialogue = dialogueVoiceEnabled.value && settingsStore.ttsVoiceMode === 'dialogue'
+  let sentences: string[]
+  let overrides: Array<string | undefined> | undefined
+  if (useDialogue) {
+    const units = buildSpeechUnits(
+      spans,
+      fullText,
+      charVoices.value,
+      charGenders.value,
+      { male: settingsStore.ttsMaleVoice, female: settingsStore.ttsFemaleVoice },
+      settingsStore.ttsQuoteStyles,
+    )
+    sentences = units.map((u) => u.text)
+    overrides = units.map((u) => u.voice)
+  } else {
+    sentences = spans.map((s) => s.text)
+  }
   await ttsPlayer.start(
     sentences,
     currentTtsSettings(),

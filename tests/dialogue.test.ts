@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildSpeechUnits,
   buildVoiceOverrides,
   collectSpeakers,
   guessGenders,
@@ -194,5 +195,65 @@ describe('归因窗口不跨行', () => {
     })
     expect(ov[0]).toBe('m-voice')
     expect(ov[1]).toBe('f-voice')
+  })
+})
+
+describe('buildSpeechUnits（旁白/对白片段级分音色）', () => {
+  it('句子内切分：旁白前缀走主音色，对白走角色音色', () => {
+    const text = '女生淡淡道："你人还怪好的嘞。"'
+    const units = buildSpeechUnits(
+      [{ start: 0, end: text.length }],
+      text,
+      {},
+      guessGenders(text),
+      { male: 'm-voice', female: 'f-voice' },
+    )
+    // 第一片段 = 旁白前缀「女生淡淡道：」→ 主音色
+    expect(units[0].voice).toBeUndefined()
+    expect(units[0].text).toContain('女生淡淡道')
+    expect(units[0].text).not.toContain('你人还怪好')
+    // 第二片段 = 对白 → 女声
+    const dia = units.find((u) => u.voice !== undefined)
+    expect(dia?.voice).toBe('f-voice')
+    expect(dia?.text).toContain('你人还怪好的嘞')
+  })
+
+  it('三句试听样例：每句切旁白+对白，贾君鹏句对白无性别走主音色', () => {
+    const text =
+      '男生一脸关切的问道："身体不舒服吗？要多喝热水。"\n' +
+      '女生淡淡道："你人还怪好的嘞。"\n' +
+      '"贾君鹏，妈妈喊你回家吃饭！"这时外面传来一道声音。'
+    const units = buildSpeechUnits(
+      [{ start: 0, end: text.length }],
+      text,
+      {},
+      guessGenders(text),
+      { male: 'm-voice', female: 'f-voice' },
+    )
+    const voices = units.map((u) => u.voice ?? 'main')
+    // 男生旁白前缀 / 男声对白 / 女生旁白前缀 / 女声对白
+    // 贾君鹏句：对白无性别走主音色，与旁白后缀同音色 → 合并为一个片段
+    expect(voices).toEqual(['main', 'm-voice', 'main', 'f-voice', 'main'])
+    expect(units[0].text).toContain('男生一脸关切的问道')
+    expect(units[0].text).not.toContain('身体不舒服')
+    expect(units[4].text).toContain('贾君鹏')
+    expect(units[4].text).toContain('这时外面传来一道声音')
+  })
+
+  it('显式角色音色优先于性别默认；无角色信息时退化为逐句主音色', () => {
+    const text = '王小明说："你好。"'
+    const explicit = buildSpeechUnits(
+      [{ start: 0, end: text.length }],
+      text,
+      { 王小明: 'custom-voice' },
+      { 王小明: 'male' },
+      { male: 'm-voice' },
+    )
+    expect(explicit.find((u) => u.voice)?.voice).toBe('custom-voice')
+
+    const plain = buildSpeechUnits([{ start: 0, end: text.length }], text, {})
+    expect(plain).toHaveLength(1)
+    expect(plain[0].voice).toBeUndefined()
+    expect(plain[0].text).toBe(text)
   })
 })

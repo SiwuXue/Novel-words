@@ -288,3 +288,87 @@ export function buildVoiceOverrides(
     return undefined
   })
 }
+
+/** 解析说话人音色：显式指派 > 性别默认 > undefined（主音色）。 */
+function resolveSpeakerVoice(
+  speaker: string,
+  charVoices: Record<string, string>,
+  charGenders?: Record<string, 'male' | 'female' | 'unknown'>,
+  genderDefaults?: GenderDefaults,
+): string | undefined {
+  const explicit = charVoices[speaker]
+  if (explicit) return explicit
+  const gender = charGenders?.[speaker]
+  if (gender === 'male') return genderDefaults?.male || undefined
+  if (gender === 'female') return genderDefaults?.female || undefined
+  return undefined
+}
+
+/** 朗读单元：比句子更细——句子内再按引号切旁白/对白片段，各自独立音色。 */
+export interface SpeechUnit {
+  text: string
+  start: number
+  end: number
+  /** undefined = 主音色（旁白、未识别说话人或未配置对应默认音色） */
+  voice?: string
+}
+
+/**
+ * 构建朗读单元：对每个句子 span，按对白段再细分为旁白片段（主音色）与
+ * 对白片段（按说话人解析音色）。引号跨句时对白段与多个句子相交，同样正确。
+ * 旁白前缀（如「女生淡淡道：」）不再跟随对白音色，真正实现旁白/对白区分。
+ * 与 ttsPlayer.start 对齐：sentences = units.map(u => u.text)、
+ * voiceOverrides = units.map(u => u.voice)。
+ */
+export function buildSpeechUnits(
+  spans: Array<{ start: number; end: number }>,
+  fullText: string,
+  charVoices: Record<string, string>,
+  charGenders?: Record<string, 'male' | 'female' | 'unknown'>,
+  genderDefaults?: GenderDefaults,
+  enabledOpens?: ReadonlyArray<string>,
+): SpeechUnit[] {
+  const hasCharInfo =
+    Object.keys(charVoices).length > 0 ||
+    Object.keys(charGenders ?? {}).length > 0 ||
+    Boolean(genderDefaults?.male || genderDefaults?.female)
+  if (spans.length === 0) return []
+  // 无任何角色/性别信息：退化为逐句朗读，全部走主音色
+  if (!hasCharInfo) {
+    return spans.map((s) => ({ text: fullText.slice(s.start, s.end), start: s.start, end: s.end }))
+  }
+  const segments = splitDialogueSegments(fullText, enabledOpens)
+  const units: SpeechUnit[] = []
+  for (const span of spans) {
+    // 同一句内的相邻同音色片段合并（如相邻两个引号间仅空白）；跨句不合并不影响逐句粒度
+    const parts: SpeechUnit[] = []
+    const push = (rawStart: number, rawEnd: number, voice: string | undefined): void => {
+      let start = rawStart
+      let end = rawEnd
+      while (start < end && /\s/.test(fullText[start])) start++
+      while (end > start && /\s/.test(fullText[end - 1])) end--
+      if (start >= end) return
+      const last = parts[parts.length - 1]
+      if (last && (last.voice ?? undefined) === (voice ?? undefined)) {
+        last.end = end
+        return
+      }
+      parts.push({ text: '', start, end, voice })
+    }
+    for (const seg of segments) {
+      const s = Math.max(seg.start, span.start)
+      const e = Math.min(seg.end, span.end)
+      if (e <= s) continue
+      push(
+        s,
+        e,
+        seg.type === 'dialogue' && seg.speaker
+          ? resolveSpeakerVoice(seg.speaker, charVoices, charGenders, genderDefaults)
+          : undefined,
+      )
+    }
+    units.push(...parts)
+  }
+  for (const u of units) u.text = fullText.slice(u.start, u.end)
+  return units
+}

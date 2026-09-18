@@ -122,8 +122,8 @@ import CharacterVoicePanel from './CharacterVoicePanel.vue'
 import { useDictionaryStore } from '@/stores/dictionaryStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { speakWord } from '@/utils/speech'
-import { ttsPlayer, splitSentenceSpans, type SentenceSpan } from '@/utils/ttsPlayer'
-import { buildVoiceOverrides } from '@/utils/dialogue'
+import { ttsPlayer, splitSentenceSpans } from '@/utils/ttsPlayer'
+import { buildSpeechUnits } from '@/utils/dialogue'
 import {
   parseWordTapBlocks,
   collectWordKeys,
@@ -401,9 +401,8 @@ function isSpeaking(token: SerialToken): boolean {
   return token.serial >= speakingRange.value.from && token.serial <= speakingRange.value.to
 }
 
-function highlightSentence(index: number): void {
-  const span: SentenceSpan | undefined = sentenceSpans.value[index]
-  if (!span) {
+function highlightSentence(unit: { start: number; end: number } | undefined): void {
+  if (!unit) {
     speakingRange.value = null
     return
   }
@@ -412,7 +411,7 @@ function highlightSentence(index: number): void {
   for (const block of renderInfo.value.blocks) {
     for (const token of block.tokens) {
       if (token.serial === undefined) continue
-      if (token.start < span.end && token.end > span.start) {
+      if (token.start < unit.end && token.end > unit.start) {
         if (from === -1) from = token.serial
         to = token.serial
       }
@@ -463,26 +462,33 @@ async function toggleTts(): Promise<void> {
 
 async function startTts(): Promise<void> {
   const spans = sentenceSpans.value
-  const sentences = spans.map((s) => s.text)
-  if (sentences.length === 0) return
-  // 对白分音色：朗读方案为多音色模式且角色面板开启时，按说话人覆盖每句音色
-  //（显式指派音色 > 性别默认音色 > 主音色）
-  const overrides =
-    dialogueVoiceEnabled.value && settingsStore.ttsVoiceMode === 'dialogue'
-      ? buildVoiceOverrides(
-        spans,
-        fullText.value,
-        charVoices.value,
-        charGenders.value,
-        { male: settingsStore.ttsMaleVoice, female: settingsStore.ttsFemaleVoice },
-        settingsStore.ttsQuoteStyles,
-      )
-    : undefined
+  if (spans.length === 0) return
+  // 对白分音色：朗读方案为多音色模式且角色面板开启时，句子内再切旁白/对白片段
+  //（旁白走主音色；对白按说话人：显式指派音色 > 性别默认音色 > 主音色）
+  const useDialogue = dialogueVoiceEnabled.value && settingsStore.ttsVoiceMode === 'dialogue'
+  let sentences: string[]
+  let overrides: Array<string | undefined> | undefined
+  let units: Array<{ start: number; end: number }> = spans
+  if (useDialogue) {
+    const built = buildSpeechUnits(
+      spans,
+      fullText.value,
+      charVoices.value,
+      charGenders.value,
+      { male: settingsStore.ttsMaleVoice, female: settingsStore.ttsFemaleVoice },
+      settingsStore.ttsQuoteStyles,
+    )
+    sentences = built.map((u) => u.text)
+    overrides = built.map((u) => u.voice)
+    units = built
+  } else {
+    sentences = spans.map((s) => s.text)
+  }
   await ttsPlayer.start(
     sentences,
     currentTtsSettings(),
     {
-      onSentenceStart: (i) => highlightSentence(i),
+      onSentenceStart: (i) => highlightSentence(units[i]),
       onFinish: (completed) => {
         speakingRange.value = null
         if (completed && settingsStore.ttsAutoNext) {

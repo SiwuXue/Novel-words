@@ -589,7 +589,7 @@ import { useVocabBookStore } from '@/stores/vocabBookStore'
 import { type StepNum } from '@/types/pdfSteps'
 import { speakWord, type SpeechAccent } from '@/utils/speech'
 import { ttsPlayer, splitSentenceSpans, type TtsProvider } from '@/utils/ttsPlayer'
-import { buildVoiceOverrides, guessGenders } from '@/utils/dialogue'
+import { buildSpeechUnits, guessGenders } from '@/utils/dialogue'
 import {
   getVoices,
   groupVoices,
@@ -1153,9 +1153,8 @@ async function previewSampleText(lang: 'zh' | 'en'): Promise<void> {
   const text = (lang === 'zh' ? previewZhLocal.value : previewEnLocal.value).trim()
   if (!text) return
   const spans = splitSentenceSpans(text)
-  const sentences = spans.map((s) => s.text)
-  if (sentences.length === 0) return
-  // 多音色模式：对白按说话人称呼词启发式套用男/女默认音色，旁白走主音色
+  let sentences: string[]
+  // 多音色模式：句子内再切旁白/对白片段——旁白走主音色，对白按说话人套用男/女默认音色
   let overrides: Array<string | undefined> | undefined
   if (ttsModeLocal.value === 'dialogue') {
     const missing: string[] = []
@@ -1165,7 +1164,7 @@ async function previewSampleText(lang: 'zh' | 'en'): Promise<void> {
       // 缺哪个性别提示哪个（对应性别的对白走主音色），其余正常分音色
       ElMessage.warning(t('settings.ttsModeDialogueNeedGenders', { genders: missing.join('/') }))
     }
-    overrides = buildVoiceOverrides(
+    const units = buildSpeechUnits(
       spans,
       text,
       {},
@@ -1173,7 +1172,12 @@ async function previewSampleText(lang: 'zh' | 'en'): Promise<void> {
       { male: ttsMaleVoiceLocal.value, female: ttsFemaleVoiceLocal.value },
       ttsQuoteStylesLocal.value,
     )
+    sentences = units.map((u) => u.text)
+    overrides = units.map((u) => u.voice)
+  } else {
+    sentences = spans.map((s) => s.text)
   }
+  if (sentences.length === 0) return
   previewLang.value = lang
   try {
     await ttsPlayer.start(
