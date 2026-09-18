@@ -468,6 +468,7 @@ async function startTts(): Promise<void> {
   const useDialogue = dialogueVoiceEnabled.value && settingsStore.ttsVoiceMode === 'dialogue'
   let sentences: string[]
   let overrides: Array<string | undefined> | undefined
+  let pauseBefore: Array<number | undefined> | undefined
   let units: Array<{ start: number; end: number }> = spans
   if (useDialogue) {
     const built = buildSpeechUnits(
@@ -480,6 +481,8 @@ async function startTts(): Promise<void> {
     )
     sentences = built.map((u) => u.text)
     overrides = built.map((u) => u.voice)
+    // 句内片段（旁白前缀 ↔ 对白）无缝衔接，只在实际句末保留句间停顿
+    pauseBefore = built.map((u, idx) => (idx === 0 || u.startsSentence ? undefined : 0))
     units = built
   } else {
     sentences = spans.map((s) => s.text)
@@ -498,6 +501,7 @@ async function startTts(): Promise<void> {
       },
     },
     overrides,
+    { pauseBeforeMs: pauseBefore },
   )
 }
 

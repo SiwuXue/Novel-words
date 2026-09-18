@@ -1156,6 +1156,7 @@ async function previewSampleText(lang: 'zh' | 'en'): Promise<void> {
   let sentences: string[]
   // 多音色模式：句子内再切旁白/对白片段——旁白走主音色，对白按说话人套用男/女默认音色
   let overrides: Array<string | undefined> | undefined
+  let pauseBefore: Array<number | undefined> | undefined
   if (ttsModeLocal.value === 'dialogue') {
     const missing: string[] = []
     if (!ttsMaleVoiceLocal.value) missing.push(t('settings.ttsGenderMale'))
@@ -1174,6 +1175,8 @@ async function previewSampleText(lang: 'zh' | 'en'): Promise<void> {
     )
     sentences = units.map((u) => u.text)
     overrides = units.map((u) => u.voice)
+    // 句内片段（旁白前缀 ↔ 对白）无缝衔接，只在实际句末保留句间停顿
+    pauseBefore = units.map((u, idx) => (idx === 0 || u.startsSentence ? undefined : 0))
   } else {
     sentences = spans.map((s) => s.text)
   }
@@ -1194,6 +1197,7 @@ async function previewSampleText(lang: 'zh' | 'en'): Promise<void> {
       },
       {},
       overrides,
+      { pauseBeforeMs: pauseBefore },
     )
   } catch (e) {
     ElMessage.error(String(e && (e as Error).message ? (e as Error).message : e))

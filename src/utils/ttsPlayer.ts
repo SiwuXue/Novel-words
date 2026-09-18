@@ -1,17 +1,22 @@
 /**
- * TTS 朗读引擎：句子队列 + 播放令牌。
+ * TTS 朗读引擎：单元队列 + Web Audio 时间线调度（参考 ColorTxt voiceReadLinePlayer）。
  *
- * - 服务商：edge / dashscope / minimax / volcengine / mimo / sapi（在线或本地合成，
- *   统一经 Rust `tts_synthesize_v3`）+ system（浏览器 speechSynthesis 兜底）。
- * - start(sentences, settings, handlers)：开始播放队列；任何 start/stop 都会使
- *   旧队列的令牌失效，实现"切章即停"。
- * - pause/resume：在线后端暂停 audio 元素；系统后端暂停 speechSynthesis。
- * - onSentenceStart(index, text)：当前句开始（高亮/滚动跟随用）。
+ * 播放管线（在线服务商）：
+ * - 生产者滚动预取：播放单元 i 时，i+1..i+PRELOAD_UNITS-1 已并发合成并解码（并发上限
+ *   MAX_INFLIGHT_SYNTH），缓冲就绪后消费者按 `startAt = max(now, scheduledEnd + 停顿)`
+ *   调度 AudioBufferSourceNode —— 片段间零间隙，多音色旁白/对白切换不再等合成。
+ * - system / Web Audio 不可用 / 解码失败：回退串行队列（合成 → 播放 → 下一段）。
+ *
+ * - start(sentences, settings, handlers, voiceOverrides)：任何 start/stop 都使旧队列令牌失效。
+ * - pause/resume：在线走 AudioContext.suspend/resume（时间线冻结，无需重排），系统语音走
+ *   speechSynthesis.pause/resume。
+ * - onSentenceStart(index, total, text)：单元真正开始播放时触发（高亮/滚动跟随用）。
  * - onFinish(completed)：队列播完（completed=false 表示被中断）。
  */
 
 import { invoke } from '@tauri-apps/api/core'
 import { ref } from 'vue'
+import { QUOTE_OPEN_TO_CLOSE } from './dialogue'
 
 export type TtsProvider = 'edge' | 'system' | 'dashscope' | 'minimax' | 'volcengine' | 'mimo' | 'sapi'
 
@@ -54,13 +59,17 @@ export function ttsCacheKey(settings: TtsSettings, voice: string, text: string):
 }
 
 const AUDIO_CACHE_LIMIT = 64
+/** 滚动预取窗口：同时保持就绪/在飞的单元数（参考 ColorTxt EDGE_BUFFER_SIZE） */
+const PRELOAD_UNITS = 4
+/** 并发合成请求上限，避免触发服务端限流 */
+const MAX_INFLIGHT_SYNTH = 3
 
-/** 在线合成结果缓存（data URL）：LRU 限长 + inflight 去重（参考 ColorTxt）。 */
+/** 在线合成结果缓存（原始音频字节）：LRU 限长 + inflight 去重（参考 ColorTxt）。 */
 class SynthCache {
-  private readonly cache = new Map<string, string>()
-  private readonly inflight = new Map<string, Promise<string>>()
+  private readonly cache = new Map<string, Uint8Array>()
+  private readonly inflight = new Map<string, Promise<Uint8Array>>()
 
-  async getOrFetch(key: string, fetcher: () => Promise<string>): Promise<string> {
+  async getOrFetch(key: string, fetcher: () => Promise<Uint8Array>): Promise<Uint8Array> {
     const hit = this.cache.get(key)
     if (hit) {
       // LRU touch
@@ -71,15 +80,15 @@ class SynthCache {
     const running = this.inflight.get(key)
     if (running) return running
     const request = fetcher()
-      .then((url) => {
+      .then((bytes) => {
         this.cache.delete(key)
-        this.cache.set(key, url)
+        this.cache.set(key, bytes)
         while (this.cache.size > AUDIO_CACHE_LIMIT) {
           const oldest = this.cache.keys().next().value
           if (oldest === undefined) break
           this.cache.delete(oldest)
         }
-        return url
+        return bytes
       })
       .finally(() => {
         this.inflight.delete(key)
@@ -92,6 +101,15 @@ class SynthCache {
 export interface TtsHandlers {
   onSentenceStart?: (index: number, total: number, text: string) => void
   onFinish?: (completed: boolean) => void
+}
+
+export interface TtsQueueOptions {
+  /**
+   * 逐单元「开始前停顿」（毫秒，1x 语速基准，播放时随语速缩放）。
+   * 与 sentences 对齐，缺省项与整体缺省都走 settings.sentencePauseMs。
+   * 分音色场景用它让句内片段无缝衔接（0），只在真实句末保留停顿。
+   */
+  pauseBeforeMs?: Array<number | undefined>
 }
 
 /** 句子切分：中英句末标点断句，短句合并、超长硬切。 */
@@ -122,44 +140,84 @@ export interface SentenceSpan {
   end: number
 }
 
-/** 句子切分（带原文偏移）：供高亮映射使用；切分规则与 splitSentences 一致。 */
+/** 句末标点（中文；英文 ./!/? 另判后接空白+大写/引号） */
+const CN_END_CHARS = new Set(['。', '！', '？', '；', '…', '!', '?', ';'])
+
+/**
+ * 句子切分（带原文偏移）：供高亮映射与朗读队列使用。
+ * 关键：**引号内的句末标点不切句**——否则一句对白（「"身体不舒服吗？要多喝热水。"」）
+ * 会被切成 3 段，产生多余的合成请求与段间停顿（多音色下切换点翻倍、听感变慢）。
+ */
 export function splitSentenceSpans(text: string, maxLen = 300): SentenceSpan[] {
-  const boundary = /(?<=[。！？!?；;…])\s*|(?<=[.!?])\s+(?=["“''(A-Z])/g
   const raw: Array<{ start: number; end: number }> = []
-  let match: RegExpExecArray | null
-  let last = 0
-  while ((match = boundary.exec(text)) !== null) {
-    if (match.index > last) {
-      raw.push({ start: last, end: match.index })
-      last = match.index + match[0].length
+  let start = 0
+  let i = 0
+  /** 当前所处引号的闭符；null = 不在引号内 */
+  let quoteCloser: string | null = null
+  while (i < text.length) {
+    const ch = text[i]
+    // 换行是硬边界（段落/行），并重置引号态：避免跨行未闭合引号吞掉后续内容
+    if (ch === '\n') {
+      if (i > start) raw.push({ start, end: i })
+      start = i + 1
+      i = i + 1
+      quoteCloser = null
+      continue
     }
-    if (match[0] === '') boundary.lastIndex++
+    if (quoteCloser) {
+      if (ch === quoteCloser) quoteCloser = null
+      i++
+      continue
+    }
+    const closer = QUOTE_OPEN_TO_CLOSE[ch]
+    if (closer) {
+      quoteCloser = closer
+      i++
+      continue
+    }
+    let cut = false
+    if (CN_END_CHARS.has(ch)) {
+      cut = true
+    } else if (ch === '.') {
+      // 英文句号：仅在后接空白 + 大写/引号/括号时断句（避免 Mr. / 3.14）
+      const rest = text.slice(i + 1)
+      cut = i + 1 >= text.length || /^\s+["“''(\[A-Z]/.test(rest)
+    }
+    if (cut) {
+      let next = i + 1
+      while (next < text.length && /\s/.test(text[next])) next++
+      if (next > start) raw.push({ start, end: i + 1 })
+      start = next
+      i = next
+      continue
+    }
+    i++
   }
-  if (last < text.length) raw.push({ start: last, end: text.length })
+  if (start < text.length) raw.push({ start, end: text.length })
 
   // trim 边缘空白 + 硬切超长（逐句返回，不合并）
   const spans: SentenceSpan[] = []
   for (const seg of raw) {
-    let { start, end } = seg
-    while (start < end && /\s/.test(text[start])) start++
-    while (end > start && /\s/.test(text[end - 1])) end--
-    const piece = text.slice(start, end)
+    let { start: s, end } = seg
+    while (s < end && /\s/.test(text[s])) s++
+    while (end > s && /\s/.test(text[end - 1])) end--
+    const piece = text.slice(s, end)
     if (!piece) continue
     if (piece.length > maxLen) {
-      for (let i = start; i < end; i += maxLen) {
+      for (let i = s; i < end; i += maxLen) {
         spans.push({ text: text.slice(i, i + maxLen), start: i, end: Math.min(i + maxLen, end) })
       }
     } else {
-      spans.push({ text: piece, start, end })
+      spans.push({ text: piece, start: s, end })
     }
   }
   return spans
 }
 
-function bytesToDataUrl(bytes: number[]): string {
+function bytesToDataUrl(bytes: Uint8Array): string {
   let binary = ''
   for (let i = 0; i < bytes.length; i += 0x8000) {
-    binary += String.fromCharCode(...bytes.slice(i, i + 0x8000))
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
   }
   // 按字节头判型：RIFF → WAV（火山/MiMo/SAPI），否则按 MP3 处理（Edge/DashScope/MiniMax）
   const isWav =
@@ -172,6 +230,11 @@ function bytesToDataUrl(bytes: number[]): string {
   return `data:${mime};base64,${btoa(binary)}`
 }
 
+/** 系统语音可用性（无 speechSynthesis 的测试/浏览器环境直接回退串行） */
+function hasSpeechSynthesis(): boolean {
+  return typeof window !== 'undefined' && 'speechSynthesis' in window
+}
+
 class TtsPlayer {
   /** 播放令牌：start/stop 递增；旧队列检测到令牌变化即中断 */
   private token = 0
@@ -179,6 +242,13 @@ class TtsPlayer {
   private audio: HTMLAudioElement | null = null
   private currentUtterance: SpeechSynthesisUtterance | null = null
   private readonly synthCache = new SynthCache()
+
+  // --- Web Audio 时间线（参考 ColorTxt）---
+  private audioCtx: AudioContext | null = null
+  private gain: GainNode | null = null
+  /** 时间线上已排播的结束时间（下一段 startAt 的基准） */
+  private scheduledEnd = 0
+  private readonly liveSources = new Set<AudioBufferSourceNode>()
 
   /** idle / playing / paused（响应式） */
   private _state = ref<'idle' | 'playing' | 'paused'>('idle')
@@ -194,6 +264,7 @@ class TtsPlayer {
     handlers: TtsHandlers = {},
     /** 逐句音色覆盖（角色分音色）：与 sentences 对齐，空/缺省走 settings.voice */
     voiceOverrides?: Array<string | undefined>,
+    options?: TtsQueueOptions,
   ): Promise<void> {
     this.stop(true)
     const myToken = ++this.token
@@ -206,6 +277,158 @@ class TtsPlayer {
     this.totalSentences.value = sentences.length
     this.currentIndex.value = -1
 
+    // 在线服务商优先走 Web Audio 时间线；不可用（无 AudioContext/系统语音）时回退串行队列
+    const timeline = settings.provider !== 'system' ? this.ensureAudioContext() : null
+    if (timeline) {
+      await this.runTimeline(timeline, sentences, settings, handlers, voiceOverrides, myToken, options)
+    } else {
+      await this.runSerial(sentences, settings, handlers, voiceOverrides, myToken, options)
+    }
+
+    if (myToken === this.token) {
+      this._state.value = 'idle'
+      this.currentIndex.value = -1
+      handlers.onFinish?.(true)
+    }
+  }
+
+  /** 单元 i 开始前的停顿（毫秒）：优先用逐单元覆盖，缺省走设置。 */
+  private pauseBeforeMs(
+    i: number,
+    settings: TtsSettings,
+    options: TtsQueueOptions | undefined,
+  ): number {
+    if (i <= 0) return 0
+    const custom = options?.pauseBeforeMs?.[i]
+    if (typeof custom === 'number') return scaledPauseMs(custom, settings.rate)
+    return scaledPauseMs(settings.sentencePauseMs, settings.rate)
+  }
+
+  /**
+   * Web Audio 时间线播放：生产者滚动预取 + 消费者按 scheduledEnd 无缝排播。
+   * 关键是"下一段在上一段播完前就已解码就绪"，因此多音色切换不产生等待间隙。
+   */
+  private async runTimeline(
+    ctx: AudioContext,
+    sentences: string[],
+    settings: TtsSettings,
+    handlers: TtsHandlers,
+    voiceOverrides: Array<string | undefined> | undefined,
+    myToken: number,
+    options?: TtsQueueOptions,
+  ): Promise<void> {
+    const gain = this.gain
+    if (!gain) {
+      await this.runSerial(sentences, settings, handlers, voiceOverrides, myToken, options)
+      return
+    }
+    try {
+      await ctx.resume()
+    } catch {
+      /* 自动播放策略拒绝时：调度仍会在 resume 后生效 */
+    }
+    gain.gain.value = Math.min(1, Math.max(0, settings.volume / 100))
+
+    // 生产者：把 i..i+PRELOAD_UNITS-1 的合成提前发出（并发受限），结果放 ready
+    const ready = new Map<number, Promise<AudioBuffer | null>>()
+    const pending: Array<Promise<unknown>> = []
+    let queued = 0
+    const track = (task: Promise<unknown>): void => {
+      const wrapped = task
+        .catch(() => {})
+        .then(() => {
+          const idx = pending.indexOf(wrapped)
+          if (idx >= 0) pending.splice(idx, 1)
+        })
+      pending.push(wrapped)
+    }
+    const fill = async (until: number): Promise<void> => {
+      while (queued <= until && queued < sentences.length) {
+        if (myToken !== this.token) return
+        if (pending.length >= MAX_INFLIGHT_SYNTH) await Promise.race(pending)
+        if (myToken !== this.token) return
+        const i = queued++
+        const voice = voiceOverrides?.[i] || settings.voice
+        const task = this.decodeUnit(sentences[i], settings, voice)
+        ready.set(i, task)
+        track(task)
+      }
+    }
+
+    this.scheduledEnd = ctx.currentTime
+    for (let i = 0; i < sentences.length; i++) {
+      if (myToken !== this.token) return
+      while (this.paused && myToken === this.token) {
+        await this.sleep(80)
+        if (myToken !== this.token) return
+      }
+      // 滚动预取：本段播放期间，窗口内的后续段已在合成/解码
+      await fill(Math.min(sentences.length - 1, i + PRELOAD_UNITS - 1))
+      if (myToken !== this.token) return
+
+      const buffer = await ready.get(i)
+      ready.delete(i)
+      if (myToken !== this.token) return
+
+      this.currentIndex.value = i
+      handlers.onSentenceStart?.(i, sentences.length, sentences[i])
+
+      if (buffer) {
+        // 排播到时间线：上段结束（+停顿）后立即接上，可感知间隙 ≈ 0
+        const pauseSec = this.pauseBeforeMs(i, settings, options) / 1000
+        const startAt = Math.max(ctx.currentTime + 0.01, this.scheduledEnd + pauseSec)
+        gain.gain.value = Math.min(1, Math.max(0, settings.volume / 100))
+        const src = ctx.createBufferSource()
+        src.buffer = buffer
+        src.connect(gain)
+        this.liveSources.add(src)
+        src.onended = () => this.liveSources.delete(src)
+        try {
+          src.start(startAt)
+        } catch {
+          this.liveSources.delete(src)
+          this.scheduledEnd = ctx.currentTime
+          continue
+        }
+        this.scheduledEnd = startAt + buffer.duration
+        await this.waitUntilTime(ctx, this.scheduledEnd, myToken)
+      } else {
+        // 合成/解码失败：回退系统语音播一遍，并让时间线重新对齐
+        try {
+          await this.speakSystem(sentences[i], settings)
+        } catch {
+          /* 彻底失败，跳过该单元 */
+        }
+        if (myToken !== this.token) return
+        this.scheduledEnd = ctx.currentTime
+      }
+    }
+    await this.waitUntilTime(ctx, this.scheduledEnd, myToken)
+  }
+
+  /** 等时间线推进到 target（暂停时 AudioContext 冻结，currentTime 不再增长）。 */
+  private async waitUntilTime(ctx: AudioContext, target: number, myToken: number): Promise<void> {
+    for (;;) {
+      if (myToken !== this.token) return
+      if (this.paused || ctx.state === 'suspended') {
+        await this.sleep(60)
+        continue
+      }
+      const remainMs = (target - ctx.currentTime) * 1000
+      if (remainMs <= 0) return
+      await this.sleep(Math.min(40, Math.max(5, remainMs)))
+    }
+  }
+
+  /** 串行队列（system 后端或 Web Audio 不可用时的回退）：合成 → 播放 → 下一段。 */
+  private async runSerial(
+    sentences: string[],
+    settings: TtsSettings,
+    handlers: TtsHandlers,
+    voiceOverrides: Array<string | undefined> | undefined,
+    myToken: number,
+    options?: TtsQueueOptions,
+  ): Promise<void> {
     for (let i = 0; i < sentences.length; i++) {
       if (myToken !== this.token) return // 被新的 start/stop 中断
       while (this.paused && myToken === this.token) {
@@ -229,11 +452,9 @@ class TtsPlayer {
       handlers.onSentenceStart?.(i, sentences.length, sentences[i])
 
       // 边播边预合成下一句（inflight 去重，播放前调用会直接命中同一 Promise）
-      let prefetch: Promise<string> | null = null
       if (i + 1 < sentences.length && settings.provider !== 'system') {
         const nextVoice = voiceOverrides?.[i + 1] || settings.voice
-        prefetch = this.prepareSynth(sentences[i + 1], settings, nextVoice)
-        prefetch.catch(() => {}) // 预取失败在真正使用时处理，避免 unhandled rejection
+        this.prepareSynth(sentences[i + 1], settings, nextVoice).catch(() => {})
       }
 
       try {
@@ -255,27 +476,48 @@ class TtsPlayer {
         }
       }
 
-      // 句间停顿（1x 语速基准，随语速缩放；暂停时等暂停结束再继续计时判断）
+      // 段后停顿 = 下一段的「开始前停顿」（1x 语速基准，随语速缩放）
       if (i < sentences.length - 1 && myToken === this.token) {
-        const pause = scaledPauseMs(settings.sentencePauseMs, settings.rate)
+        const pause = this.pauseBeforeMs(i + 1, settings, options)
         if (pause > 0) {
           await this.sleep(pause)
           if (myToken !== this.token) return
         }
       }
     }
-    if (myToken === this.token) {
-      this._state.value = 'idle'
-      this.currentIndex.value = -1
-      handlers.onFinish?.(true)
+  }
+
+  /** 在线合成单段 → 解码为 AudioBuffer（缓存 + inflight 去重；失败返回 null 走回退） */
+  private async decodeUnit(
+    text: string,
+    settings: TtsSettings,
+    voice: string,
+  ): Promise<AudioBuffer | null> {
+    const ctx = this.ensureAudioContext()
+    if (!ctx) return null
+    let bytes: Uint8Array
+    try {
+      bytes = await this.synthBytes(text, settings, voice)
+    } catch {
+      return null
+    }
+    try {
+      // decodeAudioData 会 detach 传入的 ArrayBuffer，故拷贝一份
+      return await ctx.decodeAudioData(bytes.slice().buffer)
+    } catch {
+      return null
     }
   }
 
-  /** 在线合成单句 → data URL（缓存 + inflight 去重；系统语音不适用） */
-  private prepareSynth(text: string, settings: TtsSettings, voice: string): Promise<string> {
+  /** 在线合成单段 → data URL（串行回退路径用） */
+  private async prepareSynth(text: string, settings: TtsSettings, voice: string): Promise<string> {
+    return bytesToDataUrl(await this.synthBytes(text, settings, voice))
+  }
+
+  /** 在线合成单段 → 原始字节（统一走 v3 入口：rate/pitch 传倍率、volume 传 0–100） */
+  private synthBytes(text: string, settings: TtsSettings, voice: string): Promise<Uint8Array> {
     const key = ttsCacheKey(settings, voice, text)
     return this.synthCache.getOrFetch(key, async () => {
-      // 统一走 v3 入口：rate/pitch 传原始倍率，volume 传 0–100，偏移换算由 Rust 端按服务商内部完成
       const bytes = await invoke<number[]>('tts_synthesize_v3', {
         provider: settings.provider,
         apiKey: settings.apiKey ?? null,
@@ -286,7 +528,7 @@ class TtsPlayer {
         pitch: settings.pitch,
         volume: settings.volume,
       })
-      return bytesToDataUrl(bytes)
+      return Uint8Array.from(bytes)
     })
   }
 
@@ -319,7 +561,7 @@ class TtsPlayer {
 
   private speakSystem(text: string, settings: TtsSettings): Promise<void> {
     return new Promise((resolve, reject) => {
-      if (!('speechSynthesis' in window)) {
+      if (!hasSpeechSynthesis()) {
         reject(new Error('当前环境不支持系统语音'))
         return
       }
@@ -349,11 +591,33 @@ class TtsPlayer {
     })
   }
 
+  /** 惰性创建 AudioContext + 音量节点（不可用时返回 null → 回退串行） */
+  private ensureAudioContext(): AudioContext | null {
+    if (this.audioCtx) return this.audioCtx
+    if (typeof window === 'undefined') return null
+    const Ctor =
+      window.AudioContext ??
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!Ctor) return null
+    try {
+      const ctx = new Ctor()
+      const gain = ctx.createGain()
+      gain.connect(ctx.destination)
+      this.audioCtx = ctx
+      this.gain = gain
+      return ctx
+    } catch {
+      return null
+    }
+  }
+
   pause(): void {
     if (this._state.value !== 'playing') return
     this.paused = true
     this._state.value = 'paused'
     this.audio?.pause()
+    // 时间线冻结：已排播的音频节点保持位置，resume 后继续（无需重排）
+    void this.audioCtx?.suspend().catch(() => {})
     window.speechSynthesis?.pause()
   }
 
@@ -361,6 +625,7 @@ class TtsPlayer {
     if (this._state.value !== 'paused') return
     this.paused = false
     this._state.value = 'playing'
+    void this.audioCtx?.resume().catch(() => {})
     this.audio?.play()
     window.speechSynthesis?.resume()
   }
@@ -375,6 +640,17 @@ class TtsPlayer {
       this.audio.pause()
       this.audio = null
     }
+    // 掐断时间线上已排播的音频（再次 start 会重新初始化 scheduledEnd）
+    for (const src of this.liveSources) {
+      try {
+        src.stop()
+      } catch {
+        /* 已结束 */
+      }
+    }
+    this.liveSources.clear()
+    this.scheduledEnd = 0
+    if (this.audioCtx?.state === 'suspended') void this.audioCtx.resume().catch(() => {})
     window.speechSynthesis?.cancel()
     this.currentUtterance = null
     if (!silent) {

@@ -36,6 +36,27 @@ describe('sentence splitting', () => {
   it('splitSentences returns plain strings', () => {
     expect(splitSentences('第一句。第二句！')).toEqual(['第一句。', '第二句！'])
   })
+
+  it('引号内的句末标点不切句（对白不被切碎）', () => {
+    const text = '女生淡淡道："身体不舒服吗？要多喝热水。"'
+    const spans = splitSentenceSpans(text)
+    // 整句一个 span：旁白前缀 + 完整对白（引号内两个句号不切）
+    expect(spans).toHaveLength(1)
+    expect(spans[0].text).toBe(text)
+
+    const multi = '他说："第一句。第二句。第三句。"然后离开了。'
+    expect(splitSentenceSpans(multi).map((s) => s.text)).toEqual([
+      '他说："第一句。第二句。第三句。"然后离开了。',
+    ])
+  })
+
+  it('引号后的句末标点仍正常切句', () => {
+    const text = '"你终于来了。"王小明说。他放下书包。'
+    expect(splitSentenceSpans(text).map((s) => s.text)).toEqual([
+      '"你终于来了。"王小明说。',
+      '他放下书包。',
+    ])
+  })
 })
 
 describe('ttsPlayer queue', () => {
@@ -97,11 +118,15 @@ describe('ttsPlayer queue', () => {
     const settings = { provider: 'edge', voice: 'v', rate: 1, pitch: 1, volume: 100 }
     // 第一遍：两句各合成一次 + 预取
     await ttsPlayer.start(['same', 'same'], settings, {})
-    const callsAfterFirst = invoke.mock.calls.filter((c) => c[0] === 'tts_synthesize').length
+    const callsAfterFirst = invoke.mock.calls.filter((c) =>
+      String(c[0]).startsWith('tts_synthesize'),
+    ).length
     expect(callsAfterFirst).toBeGreaterThanOrEqual(1)
     // 第二遍：全部命中缓存，不再发起新合成
     await ttsPlayer.start(['same', 'same'], settings, {})
-    const callsAfterSecond = invoke.mock.calls.filter((c) => c[0] === 'tts_synthesize').length
+    const callsAfterSecond = invoke.mock.calls.filter((c) =>
+      String(c[0]).startsWith('tts_synthesize'),
+    ).length
     expect(callsAfterSecond).toBe(callsAfterFirst)
   })
 

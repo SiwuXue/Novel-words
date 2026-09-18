@@ -31,6 +31,9 @@ const ALL_CLOSERS: Record<string, string> = Object.fromEntries(
   QUOTE_PAIRS.map((p) => [p.open, p.close]),
 )
 
+/** 开 → 闭 引号映射（供句子切分等复用，保证对白切分与句子边界一致）。 */
+export const QUOTE_OPEN_TO_CLOSE: Readonly<Record<string, string>> = ALL_CLOSERS
+
 /** 英文双引号恒定计入对白。 */
 const ALWAYS_ON_OPEN = '"'
 
@@ -311,6 +314,8 @@ export interface SpeechUnit {
   end: number
   /** undefined = 主音色（旁白、未识别说话人或未配置对应默认音色） */
   voice?: string
+  /** 是否为所在句子的第一个片段（句内片段之间不加句间停顿，衔接更顺） */
+  startsSentence?: boolean
 }
 
 /**
@@ -335,7 +340,12 @@ export function buildSpeechUnits(
   if (spans.length === 0) return []
   // 无任何角色/性别信息：退化为逐句朗读，全部走主音色
   if (!hasCharInfo) {
-    return spans.map((s) => ({ text: fullText.slice(s.start, s.end), start: s.start, end: s.end }))
+    return spans.map((s) => ({
+      text: fullText.slice(s.start, s.end),
+      start: s.start,
+      end: s.end,
+      startsSentence: true,
+    }))
   }
   const segments = splitDialogueSegments(fullText, enabledOpens)
   const units: SpeechUnit[] = []
@@ -353,7 +363,7 @@ export function buildSpeechUnits(
         last.end = end
         return
       }
-      parts.push({ text: '', start, end, voice })
+      parts.push({ text: '', start, end, voice, startsSentence: parts.length === 0 })
     }
     for (const seg of segments) {
       const s = Math.max(seg.start, span.start)
