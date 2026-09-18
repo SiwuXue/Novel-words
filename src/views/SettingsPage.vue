@@ -1158,20 +1158,21 @@ async function previewSampleText(lang: 'zh' | 'en'): Promise<void> {
   // 多音色模式：对白按说话人称呼词启发式套用男/女默认音色，旁白走主音色
   let overrides: Array<string | undefined> | undefined
   if (ttsModeLocal.value === 'dialogue') {
-    const male = ttsMaleVoiceLocal.value
-    const female = ttsFemaleVoiceLocal.value
-    if (!male && !female) {
-      ElMessage.warning(t('settings.ttsModeDialogueNeedGenders'))
-    } else {
-      overrides = buildVoiceOverrides(
-        spans,
-        text,
-        {},
-        guessGenders(text, ttsQuoteStylesLocal.value),
-        { male, female },
-        ttsQuoteStylesLocal.value,
-      )
+    const missing: string[] = []
+    if (!ttsMaleVoiceLocal.value) missing.push(t('settings.ttsGenderMale'))
+    if (!ttsFemaleVoiceLocal.value) missing.push(t('settings.ttsGenderFemale'))
+    if (missing.length) {
+      // 缺哪个性别提示哪个（对应性别的对白走主音色），其余正常分音色
+      ElMessage.warning(t('settings.ttsModeDialogueNeedGenders', { genders: missing.join('/') }))
     }
+    overrides = buildVoiceOverrides(
+      spans,
+      text,
+      {},
+      guessGenders(text, ttsQuoteStylesLocal.value),
+      { male: ttsMaleVoiceLocal.value, female: ttsFemaleVoiceLocal.value },
+      ttsQuoteStylesLocal.value,
+    )
   }
   previewLang.value = lang
   try {

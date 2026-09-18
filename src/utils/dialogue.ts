@@ -132,8 +132,8 @@ const NAME_CHARS = '[\\u4e00-\\u9fff\\u3040-\\u30ffA-Za-z0-9·]{1,12}'
 
 /** 归因说话人：优先对白后缀（“……”，王小明说。），其次对白前缀（王小明说：“……”）。 */
 function attributeSpeaker(text: string, openIdx: number, endIdx: number): string | null {
-  // --- 对白后：结尾引号后的 30 字窗口 ---
-  const after = text.slice(endIdx, endIdx + 30)
+  // --- 对白后：结尾引号后的 30 字窗口（不跨行，避免串到下一段的"XX道"） ---
+  const after = text.slice(endIdx, endIdx + 30).split('\n')[0]
   for (const verb of CN_VERBS) {
     const re = new RegExp(`^\\s*[，,。、！]?\\s*(${NAME_CHARS}?)${verb}`)
     const m = after.match(re)
@@ -164,8 +164,8 @@ function attributeSpeaker(text: string, openIdx: number, endIdx: number): string
     }
   }
 
-  // --- 对白前：开头引号前的 30 字窗口（允许结尾残留冒号/引号） ---
-  const before = text.slice(Math.max(0, openIdx - 30), openIdx)
+  // --- 对白前：开头引号前的 30 字窗口（不跨行，只看当前行；允许结尾残留冒号/引号） ---
+  const before = text.slice(Math.max(0, openIdx - 30), openIdx).split('\n').pop() ?? ''
   for (const verb of CN_VERBS) {
     const re = new RegExp(`(${NAME_CHARS})${verb}\\s*[:：“"]?\\s*$`)
     const m = before.match(re)

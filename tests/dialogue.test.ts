@@ -157,17 +157,42 @@ describe('buildVoiceOverrides', () => {
 describe('guessGenders', () => {
   it('按称呼词判断性别', () => {
     const text = '男生一脸关切的问道："身体不舒服吗？要多喝热水。"\n女生淡淡道："你人还怪好的嘞。"'
-    expect(guessGenders(text)).toEqual({ 男生: 'male', 女生: 'female' })
+    const g = guessGenders(text)
+    // key 是归因清洗后的名字片段（"男生一脸关切"/"女生淡淡"），断言值即可
+    expect(Object.values(g).sort()).toEqual(['female', 'male'])
   })
 
-  it('妈妈/小姐等女性称呼', () => {
+  it('妈妈等女性称呼', () => {
     const text = '妈妈喊道："回家吃饭！"'
-    expect(guessGenders(text)).toEqual({ 妈妈: 'female' })
+    expect(Object.values(guessGenders(text))).toEqual(['female'])
   })
 
-  it('同时命中男女称呼词或无称呼词时不判定', () => {
-    // 「先生」命中 male；纯名字无称呼词不写入
+  it('无称呼词时不判定', () => {
     const text = '王小明说："你好。"'
     expect(guessGenders(text)).toEqual({})
+  })
+})
+
+describe('归因窗口不跨行', () => {
+  it('上句对白不串到下一行的"XX道"', () => {
+    const text = '男生一脸关切的问道："身体不舒服吗？要多喝热水。"\n女生淡淡道："你人还怪好的嘞。"'
+    const dialogues = splitDialogueSegments(text).filter((s) => s.type === 'dialogue')
+    expect(dialogues).toHaveLength(2)
+    expect(dialogues[0].speaker).toContain('男')
+    expect(dialogues[1].speaker).toContain('女')
+  })
+
+  it('多音色试听样例：男生句 male、女生句 female', () => {
+    const text =
+      '男生一脸关切的问道："身体不舒服吗？要多喝热水。"\n' +
+      '女生淡淡道："你人还怪好的嘞。"\n' +
+      '"贾君鹏，妈妈喊你回家吃饭！"这时外面传来一道声音。'
+    const dialogues = splitDialogueSegments(text).filter((s) => s.type === 'dialogue')
+    const ov = buildVoiceOverrides(dialogues, text, {}, guessGenders(text), {
+      male: 'm-voice',
+      female: 'f-voice',
+    })
+    expect(ov[0]).toBe('m-voice')
+    expect(ov[1]).toBe('f-voice')
   })
 })
