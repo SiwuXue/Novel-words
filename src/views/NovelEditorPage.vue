@@ -87,6 +87,21 @@
         >
           {{ t('wordTap.toggle') }}
         </el-button>
+        <el-select
+          v-if="!wordTapMode && settingsStore.ttsProfiles.length"
+          :model-value="settingsStore.ttsActiveProfile"
+          :placeholder="t('settings.ttsProfileNone')"
+          size="small"
+          class="tts-profile-select"
+          @change="onSwitchProfile"
+        >
+          <el-option
+            v-for="p in settingsStore.ttsProfiles"
+            :key="p.id"
+            :value="p.id"
+            :label="p.name"
+          />
+        </el-select>
         <el-button
           v-if="!wordTapMode"
           size="small"
@@ -467,6 +482,16 @@ function onCharVoicesUpdated(payload: {
   charVoices.value = payload.charVoices
   charGenders.value = payload.charGenders
   dialogueVoiceEnabled.value = payload.dialogueEnabled
+}
+
+/** 朗读方案快速切换（套用后立即生效，激活选择已持久化） */
+async function onSwitchProfile(id: string | undefined): Promise<void> {
+  if (!id) return
+  try {
+    await settingsStore.applyTtsProfile(id)
+  } catch (e) {
+    console.error('[NovelEditorPage] switch profile failed:', e)
+  }
 }
 
 async function toggleTtsReading(): Promise<void> {
@@ -1423,6 +1448,9 @@ function attachScrollListener() {
   border-bottom: 1px solid var(--border-color, #ebeef5);
   background: var(--bg-secondary, #fafafa);
   flex-shrink: 0;
+}
+.tts-profile-select {
+  width: 170px;
 }
 .novel-title {
   font-size: 15px;

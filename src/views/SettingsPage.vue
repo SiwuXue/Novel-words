@@ -265,6 +265,44 @@
       <!-- TTS 朗读 tab -->
       <el-tab-pane :label="t('settings.ttsTab')" name="tts">
         <el-form class="settings-form" label-width="140px">
+          <el-form-item :label="t('settings.ttsProfile')">
+            <div class="profile-row">
+              <el-select
+                v-model="profileActiveLocal"
+                :placeholder="t('settings.ttsProfileNone')"
+                clearable
+                class="profile-select"
+                @change="onApplyProfile"
+              >
+                <el-option
+                  v-for="p in settingsStore.ttsProfiles"
+                  :key="p.id"
+                  :value="p.id"
+                  :label="p.name"
+                />
+              </el-select>
+              <el-button
+                :icon="Plus"
+                :title="t('settings.ttsProfileSave')"
+                @click="onSaveProfile"
+              />
+              <el-button
+                :icon="EditPen"
+                :disabled="!profileActiveLocal"
+                :title="t('settings.ttsProfileUpdate')"
+                @click="onUpdateProfile"
+              />
+              <el-button
+                :icon="Delete"
+                type="danger"
+                plain
+                :disabled="!profileActiveLocal"
+                :title="t('settings.ttsProfileDelete')"
+                @click="onDeleteProfile"
+              />
+            </div>
+            <span class="backup-hint inline-hint">{{ t('settings.ttsProfileHint') }}</span>
+          </el-form-item>
           <el-form-item :label="t('settings.ttsProvider')">
             <el-select v-model="ttsProviderLocal" style="width: 320px" @change="onTtsProviderChange">
               <el-option value="edge" :label="t('settings.ttsEdge')" />
@@ -533,6 +571,7 @@ import LicensePanel from '@/components/license/LicensePanel.vue'
 import PageHeader from '@/components/common/PageHeader.vue'
 import { computed, ref, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, EditPen, Delete } from '@element-plus/icons-vue'
 import { invoke } from '@tauri-apps/api/core'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -548,6 +587,7 @@ import {
   type TtsVoice,
   type VoiceGroup,
 } from '@/utils/ttsVoices'
+import { ttsProfileAutoLabel } from '@/utils/ttsProfile'
 import { isAndroid } from '@/utils/platform'
 import { currentLocale, t, setLocale, type Locale } from '@/i18n'
 import { AI_PROVIDER_PRESETS, getAiProvider } from '@/config/aiProviders'
@@ -825,6 +865,122 @@ function onTtsKeyChange(): void {
     ttsVolcKey: ttsVolcKeyLocal.value.trim(),
     ttsMimoKey: ttsMimoKeyLocal.value.trim(),
   })
+}
+
+// ===== 朗读方案（配置方案）管理 =====
+const profileActiveLocal = ref(settingsStore.ttsActiveProfile)
+
+watch(
+  () => settingsStore.ttsActiveProfile,
+  (v) => {
+    profileActiveLocal.value = v
+  },
+)
+
+/** 套用方案后把 store 当前值同步回本地编辑态 */
+function syncTtsLocals(): void {
+  ttsProviderLocal.value = settingsStore.ttsProvider
+  ttsVoiceLocal.value = settingsStore.ttsVoice
+  ttsRateLocal.value = settingsStore.ttsRate
+  ttsPitchLocal.value = settingsStore.ttsPitch
+  ttsVolumeLocal.value = settingsStore.ttsVolume
+  ttsMaleVoiceLocal.value = settingsStore.ttsMaleVoice
+  ttsFemaleVoiceLocal.value = settingsStore.ttsFemaleVoice
+  ttsQuoteStylesLocal.value = [...settingsStore.ttsQuoteStyles]
+}
+
+/** 当前设置的自动标签（保存方案时的默认名） */
+function currentAutoLabel(): string {
+  return ttsProfileAutoLabel({
+    settings: {
+      provider: ttsProviderLocal.value,
+      voice: ttsVoiceLocal.value,
+      rate: ttsRateLocal.value,
+      pitch: ttsPitchLocal.value,
+      volume: ttsVolumeLocal.value,
+      maleVoice: ttsMaleVoiceLocal.value,
+      femaleVoice: ttsFemaleVoiceLocal.value,
+      quoteStyles: ttsQuoteStylesLocal.value,
+    },
+  })
+}
+
+async function onApplyProfile(id: string | undefined): Promise<void> {
+  if (!id) {
+    // 清空选择无意义：回显当前激活方案
+    profileActiveLocal.value = settingsStore.ttsActiveProfile
+    return
+  }
+  try {
+    await settingsStore.applyTtsProfile(id)
+    syncTtsLocals()
+    void loadVoiceOptions()
+    ElMessage.success(t('settings.ttsProfileApplied'))
+  } catch (e) {
+    ElMessage.error(String(e))
+  }
+}
+
+async function onSaveProfile(): Promise<void> {
+  let name = ''
+  try {
+    const r = await ElMessageBox.prompt(
+      t('settings.ttsProfileNamePrompt'),
+      t('settings.ttsProfileNameTitle'),
+      {
+        inputValue: currentAutoLabel(),
+        confirmButtonText: t('settings.ttsProfileSave'),
+        cancelButtonText: t('preset.cancel'),
+        inputPattern: /\S+/,
+        inputErrorMessage: t('settings.ttsProfileNameRequired'),
+      },
+    )
+    name = (r.value ?? '').trim()
+  } catch {
+    return
+  }
+  try {
+    await settingsStore.saveTtsProfile(name)
+    profileActiveLocal.value = settingsStore.ttsActiveProfile
+    ElMessage.success(t('settings.ttsProfileSaved'))
+  } catch (e) {
+    ElMessage.error(String(e))
+  }
+}
+
+async function onUpdateProfile(): Promise<void> {
+  const id = profileActiveLocal.value
+  if (!id) return
+  try {
+    await settingsStore.updateTtsProfile(id)
+    ElMessage.success(t('settings.ttsProfileUpdated'))
+  } catch (e) {
+    ElMessage.error(String(e))
+  }
+}
+
+async function onDeleteProfile(): Promise<void> {
+  const id = profileActiveLocal.value
+  if (!id) return
+  try {
+    await ElMessageBox.confirm(
+      t('settings.ttsProfileDeleteConfirm'),
+      t('settings.ttsProfileDelete'),
+      {
+        type: 'warning',
+        confirmButtonText: t('settings.ttsProfileDelete'),
+        cancelButtonText: t('preset.cancel'),
+      },
+    )
+  } catch {
+    return
+  }
+  try {
+    await settingsStore.deleteTtsProfile(id)
+    profileActiveLocal.value = settingsStore.ttsActiveProfile
+  } catch (e) {
+    ElMessage.error(String(e))
+  }
 }
 
 function onTtsParamsChange(): void {
@@ -1283,6 +1439,16 @@ onMounted(() => {
 .preview-actions {
   display: flex;
   gap: 8px;
+}
+.profile-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+.profile-select {
+  flex: 1;
+  min-width: 200px;
 }
 .voice-row {
   display: flex;

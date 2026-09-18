@@ -5,6 +5,12 @@ import type { StepNum } from '@/types/pdfSteps'
 import { normalizeSteps, serializeSteps } from '@/types/pdfSteps'
 import type { SpeechAccent } from '@/utils/speech'
 import type { TtsProvider } from '@/utils/ttsPlayer'
+import {
+  newProfileId,
+  normalizeProfileSettings,
+  parseTtsProfiles,
+  type TtsProfile,
+} from '@/utils/ttsProfile'
 
 interface TtsPrefs {
   ttsProvider: TtsProvider
@@ -65,6 +71,10 @@ export const useSettingsStore = defineStore('settings', () => {
   const ttsFemaleVoice = ref('')
   /** 计入对白的引号开符（英文 " 恒定启用，不在此列） */
   const ttsQuoteStyles = ref<string[]>(['“', '‘', '「', '『'])
+  /** 朗读方案（配置方案）：多套参数组合，快速切换即生效 */
+  const ttsProfiles = ref<TtsProfile[]>([])
+  /** 当前激活的方案 id（空 = 未选择） */
+  const ttsActiveProfile = ref('')
   /** DeepLX 翻译端点（空串 = 使用 Rust 端默认公共实例） */
   const deeplEndpoint = ref('')
   const loaded = ref(false)
@@ -200,6 +210,12 @@ export const useSettingsStore = defineStore('settings', () => {
                 }
                 break
               }
+              case 'tts_profiles':
+                ttsProfiles.value = parseTtsProfiles(s.value)
+                break
+              case 'tts_active_profile':
+                ttsActiveProfile.value = s.value
+                break
               case 'deepl_endpoint':
                 deeplEndpoint.value = s.value
                 break
@@ -308,6 +324,92 @@ export const useSettingsStore = defineStore('settings', () => {
       default:
         return ''
     }
+  }
+
+  // ===== 朗读方案（配置方案）管理 =====
+
+  /** 由当前朗读设置生成方案快照 */
+  function ttsProfileSnapshot() {
+    return {
+      provider: ttsProvider.value,
+      voice: ttsVoice.value,
+      rate: ttsRate.value,
+      pitch: ttsPitch.value,
+      volume: ttsVolume.value,
+      maleVoice: ttsMaleVoice.value,
+      femaleVoice: ttsFemaleVoice.value,
+      quoteStyles: [...ttsQuoteStyles.value],
+    }
+  }
+
+  async function persistTtsProfiles(): Promise<void> {
+    try {
+      await invoke('set_setting', {
+        key: 'tts_profiles',
+        value: JSON.stringify(ttsProfiles.value),
+      })
+    } catch (e) {
+      console.error('[settingsStore] persist tts_profiles failed:', e)
+    }
+  }
+
+  async function persistActiveProfile(): Promise<void> {
+    try {
+      await invoke('set_setting', { key: 'tts_active_profile', value: ttsActiveProfile.value })
+    } catch (e) {
+      console.error('[settingsStore] persist tts_active_profile failed:', e)
+    }
+  }
+
+  /** 保存当前设置为 新方案，返回新方案 id（失败返回 null） */
+  async function saveTtsProfile(name: string): Promise<string | null> {
+    const trimmed = name.trim()
+    if (!trimmed) return null
+    const profile: TtsProfile = { id: newProfileId(), name: trimmed, settings: ttsProfileSnapshot() }
+    ttsProfiles.value = [...ttsProfiles.value, profile]
+    ttsActiveProfile.value = profile.id
+    await persistTtsProfiles()
+    await persistActiveProfile()
+    return profile.id
+  }
+
+  /** 将当前设置覆盖写入指定方案 */
+  async function updateTtsProfile(id: string): Promise<void> {
+    const idx = ttsProfiles.value.findIndex((p) => p.id === id)
+    if (idx < 0) return
+    const next = [...ttsProfiles.value]
+    next[idx] = { ...next[idx], settings: ttsProfileSnapshot() }
+    ttsProfiles.value = next
+    await persistTtsProfiles()
+  }
+
+  /** 删除方案；若删除的是激活方案则清空激活态（当前设置保持不变） */
+  async function deleteTtsProfile(id: string): Promise<void> {
+    ttsProfiles.value = ttsProfiles.value.filter((p) => p.id !== id)
+    if (ttsActiveProfile.value === id) ttsActiveProfile.value = ''
+    await persistTtsProfiles()
+    await persistActiveProfile()
+  }
+
+  /** 套用方案：写入各项设置（立即生效并持久化），记住为当前选择 */
+  async function applyTtsProfile(id: string): Promise<void> {
+    const profile = ttsProfiles.value.find((p) => p.id === id)
+    if (!profile) return
+    const s = normalizeProfileSettings(profile.settings)
+    if (!s) return
+    await setTtsSettings({
+      ttsProvider: s.provider,
+      ttsVoice: s.voice,
+      ttsRate: s.rate,
+      ttsPitch: s.pitch,
+      ttsVolume: s.volume,
+      ttsMaleVoice: s.maleVoice,
+      ttsFemaleVoice: s.femaleVoice,
+      // 空集合视为全启用（与 tts_quote_styles 加载逻辑一致）
+      ttsQuoteStyles: s.quoteStyles.length ? s.quoteStyles : ['“', '‘', '「', '『'],
+    })
+    ttsActiveProfile.value = id
+    await persistActiveProfile()
   }
 
   function ttsPrefsTarget(): TtsPrefs {
@@ -428,6 +530,8 @@ export const useSettingsStore = defineStore('settings', () => {
     ttsMaleVoice,
     ttsFemaleVoice,
     ttsQuoteStyles,
+    ttsProfiles,
+    ttsActiveProfile,
     deeplEndpoint,
     loaded,
     load,
@@ -443,5 +547,9 @@ export const useSettingsStore = defineStore('settings', () => {
     setDailyNewWordLimit,
     setTtsSettings,
     ttsApiKey,
+    saveTtsProfile,
+    updateTtsProfile,
+    deleteTtsProfile,
+    applyTtsProfile,
   }
 })

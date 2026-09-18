@@ -3,6 +3,21 @@
     <!-- 计数条 + 短语操作 + 读完操作 -->
     <div class="wt-toolbar">
       <span class="wt-tts-controls">
+        <el-select
+          v-if="settingsStore.ttsProfiles.length"
+          :model-value="settingsStore.ttsActiveProfile"
+          :placeholder="t('settings.ttsProfileNone')"
+          size="small"
+          class="wt-tts-profile"
+          @change="onSwitchProfile"
+        >
+          <el-option
+            v-for="p in settingsStore.ttsProfiles"
+            :key="p.id"
+            :value="p.id"
+            :label="p.name"
+          />
+        </el-select>
         <el-button
           size="small"
           :type="ttsState === 'idle' ? 'default' : 'warning'"
@@ -424,6 +439,16 @@ function currentTtsSettings() {
   }
 }
 
+/** 朗读方案快速切换（套用后立即生效，激活选择已持久化） */
+async function onSwitchProfile(id: string | undefined): Promise<void> {
+  if (!id) return
+  try {
+    await settingsStore.applyTtsProfile(id)
+  } catch (e) {
+    console.error('[WordTapReader] switch profile failed:', e)
+  }
+}
+
 async function toggleTts(): Promise<void> {
   if (ttsPlayer.state === 'playing') {
     ttsPlayer.pause()
@@ -696,6 +721,9 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
+.wt-tts-profile {
+  width: 170px;
+}
 .wt-toolbar {
   display: flex;
   align-items: center;
