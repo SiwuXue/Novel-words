@@ -5,6 +5,7 @@ mod dictionary;
 mod license;
 mod models;
 mod pdf;
+mod sapi;
 mod tts;
 mod preset_catalog;
 mod user_vocab;
@@ -70,7 +71,10 @@ use commands::vocab_word::{
 };
 use dictionary::{dict_lookup_chinese, dict_lookup_english, DictDbState};
 use dict_online::{dict_online_cambridge, dict_online_youdao, dict_translate_sentence};
-use tts::{tts_cloud_voices, tts_synthesize, tts_synthesize_cloud, tts_test_connection, tts_voices};
+use tts::{
+    tts_cloud_voices, tts_sapi_voices, tts_synthesize, tts_synthesize_cloud, tts_synthesize_v3,
+    tts_test_connection, tts_voices, tts_voices_v3,
+};
 
 /// Android packages resources as APK assets, represented by an `asset://` URI.
 /// The SQLite and import code works with normal filesystem paths, so materialize
@@ -351,6 +355,9 @@ pub fn run() {
                 tts_synthesize_cloud,
                 tts_cloud_voices,
                 tts_test_connection,
+                tts_synthesize_v3,
+                tts_voices_v3,
+                tts_sapi_voices,
                 list_novel_characters,
                 upsert_novel_character,
                 delete_novel_character,

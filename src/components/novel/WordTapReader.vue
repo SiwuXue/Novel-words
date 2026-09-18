@@ -418,10 +418,7 @@ function currentTtsSettings() {
     rate: settingsStore.ttsRate,
     pitch: settingsStore.ttsPitch,
     volume: settingsStore.ttsVolume,
-    apiKey:
-      settingsStore.ttsProvider === 'dashscope'
-        ? settingsStore.ttsDashKey
-        : settingsStore.ttsMinimaxKey,
+    apiKey: settingsStore.ttsApiKey(),
     groupId: settingsStore.ttsMinimaxGroupId,
     sentencePauseMs: settingsStore.ttsPauseSentence,
   }

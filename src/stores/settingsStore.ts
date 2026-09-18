@@ -16,6 +16,10 @@ interface TtsPrefs {
   ttsDashKey: string
   ttsMinimaxKey: string
   ttsMinimaxGroupId: string
+  /** 火山引擎 TTS API Key */
+  ttsVolcKey: string
+  /** 小米 MiMo TTS API Key */
+  ttsMimoKey: string
   /** 句间停顿毫秒（1x 语速基准），0 = 不停顿 */
   ttsPauseSentence: number
   /** 对白角色默认男声音色（空 = 不套用） */
@@ -48,10 +52,12 @@ export const useSettingsStore = defineStore('settings', () => {
   const ttsPitch = ref(1)
   const ttsVolume = ref(100)
   const ttsAutoNext = ref(true)
-  /** 云服务商密钥：DashScope / MiniMax */
+  /** 云服务商密钥：DashScope / MiniMax / 火山引擎 / 小米 MiMo */
   const ttsDashKey = ref('')
   const ttsMinimaxKey = ref('')
   const ttsMinimaxGroupId = ref('')
+  const ttsVolcKey = ref('')
+  const ttsMimoKey = ref('')
   /** 句间停顿毫秒（1x 语速基准，播放时随语速缩放） */
   const ttsPauseSentence = ref(200)
   /** 对白角色默认男/女声音色（空 = 不套用，走主音色） */
@@ -121,7 +127,11 @@ export const useSettingsStore = defineStore('settings', () => {
                 break
               }
               case 'tts_provider':
-                if (['edge', 'system', 'dashscope', 'minimax'].includes(s.value)) {
+                if (
+                  ['edge', 'system', 'dashscope', 'minimax', 'volcengine', 'mimo', 'sapi'].includes(
+                    s.value,
+                  )
+                ) {
                   ttsProvider.value = s.value as TtsProvider
                 }
                 break
@@ -154,6 +164,12 @@ export const useSettingsStore = defineStore('settings', () => {
                 break
               case 'tts_minimax_group_id':
                 ttsMinimaxGroupId.value = s.value
+                break
+              case 'tts_volcengine_key':
+                ttsVolcKey.value = s.value
+                break
+              case 'tts_mimo_key':
+                ttsMimoKey.value = s.value
                 break
               case 'tts_pause_sentence': {
                 const n = Number(s.value)
@@ -278,6 +294,22 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
+  /** 当前服务商对应的 API Key（edge/system/sapi 返回空） */
+  function ttsApiKey(): string {
+    switch (ttsProvider.value) {
+      case 'dashscope':
+        return ttsDashKey.value
+      case 'minimax':
+        return ttsMinimaxKey.value
+      case 'volcengine':
+        return ttsVolcKey.value
+      case 'mimo':
+        return ttsMimoKey.value
+      default:
+        return ''
+    }
+  }
+
   function ttsPrefsTarget(): TtsPrefs {
     return {
       get ttsProvider() { return ttsProvider.value },
@@ -298,6 +330,10 @@ export const useSettingsStore = defineStore('settings', () => {
       set ttsMinimaxKey(v: string) { ttsMinimaxKey.value = v },
       get ttsMinimaxGroupId() { return ttsMinimaxGroupId.value },
       set ttsMinimaxGroupId(v: string) { ttsMinimaxGroupId.value = v },
+      get ttsVolcKey() { return ttsVolcKey.value },
+      set ttsVolcKey(v: string) { ttsVolcKey.value = v },
+      get ttsMimoKey() { return ttsMimoKey.value },
+      set ttsMimoKey(v: string) { ttsMimoKey.value = v },
       get ttsPauseSentence() { return ttsPauseSentence.value },
       set ttsPauseSentence(v: number) { ttsPauseSentence.value = v },
       get ttsMaleVoice() { return ttsMaleVoice.value },
@@ -321,6 +357,8 @@ export const useSettingsStore = defineStore('settings', () => {
       ttsDashKey: 'tts_dashscope_key',
       ttsMinimaxKey: 'tts_minimax_key',
       ttsMinimaxGroupId: 'tts_minimax_group_id',
+      ttsVolcKey: 'tts_volcengine_key',
+      ttsMimoKey: 'tts_mimo_key',
       ttsPauseSentence: 'tts_pause_sentence',
       ttsMaleVoice: 'tts_male_voice',
       ttsFemaleVoice: 'tts_female_voice',
@@ -384,6 +422,8 @@ export const useSettingsStore = defineStore('settings', () => {
     ttsDashKey,
     ttsMinimaxKey,
     ttsMinimaxGroupId,
+    ttsVolcKey,
+    ttsMimoKey,
     ttsPauseSentence,
     ttsMaleVoice,
     ttsFemaleVoice,
@@ -402,5 +442,6 @@ export const useSettingsStore = defineStore('settings', () => {
     setDeeplEndpoint,
     setDailyNewWordLimit,
     setTtsSettings,
+    ttsApiKey,
   }
 })

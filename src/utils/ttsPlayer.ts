@@ -1,9 +1,11 @@
 /**
- * TTS 朗读引擎：句子队列 + 播放令牌，双后端（Edge TTS 在线合成 / 系统语音）。
+ * TTS 朗读引擎：句子队列 + 播放令牌。
  *
+ * - 服务商：edge / dashscope / minimax / volcengine / mimo / sapi（在线或本地合成，
+ *   统一经 Rust `tts_synthesize_v3`）+ system（浏览器 speechSynthesis 兜底）。
  * - start(sentences, settings, handlers)：开始播放队列；任何 start/stop 都会使
  *   旧队列的令牌失效，实现"切章即停"。
- * - pause/resume：Edge 后端暂停 audio 元素；系统后端暂停 speechSynthesis。
+ * - pause/resume：在线后端暂停 audio 元素；系统后端暂停 speechSynthesis。
  * - onSentenceStart(index, text)：当前句开始（高亮/滚动跟随用）。
  * - onFinish(completed)：队列播完（completed=false 表示被中断）。
  */
@@ -11,18 +13,18 @@
 import { invoke } from '@tauri-apps/api/core'
 import { ref } from 'vue'
 
-export type TtsProvider = 'edge' | 'system' | 'dashscope' | 'minimax'
+export type TtsProvider = 'edge' | 'system' | 'dashscope' | 'minimax' | 'volcengine' | 'mimo' | 'sapi'
 
 export interface TtsSettings {
   provider: TtsProvider
   voice: string
   /** 倍率 0.5–2.0，1.0 正常 */
   rate: number
-  /** 倍率 0.5–1.5，1.0 正常 */
+  /** 倍率 0.5–2.0，1.0 正常 */
   pitch: number
   /** 0–100 */
   volume: number
-  /** 云服务商 API Key（dashscope/minimax 必填，缺省回退系统语音） */
+  /** 云服务商 API Key（在线服务商必填，缺省回退系统语音） */
   apiKey?: string
   /** MiniMax GroupId（minimax 必填） */
   groupId?: string
@@ -159,7 +161,15 @@ function bytesToDataUrl(bytes: number[]): string {
   for (let i = 0; i < bytes.length; i += 0x8000) {
     binary += String.fromCharCode(...bytes.slice(i, i + 0x8000))
   }
-  return `data:audio/mpeg;base64,${btoa(binary)}`
+  // 按字节头判型：RIFF → WAV（火山/MiMo/SAPI），否则按 MP3 处理（Edge/DashScope/MiniMax）
+  const isWav =
+    bytes.length >= 4 &&
+    bytes[0] === 0x52 && // R
+    bytes[1] === 0x49 && // I
+    bytes[2] === 0x46 && // F
+    bytes[3] === 0x46 // F
+  const mime = isWav ? 'audio/wav' : 'audio/mpeg'
+  return `data:${mime};base64,${btoa(binary)}`
 }
 
 class TtsPlayer {
@@ -265,22 +275,16 @@ class TtsPlayer {
   private prepareSynth(text: string, settings: TtsSettings, voice: string): Promise<string> {
     const key = ttsCacheKey(settings, voice, text)
     return this.synthCache.getOrFetch(key, async () => {
-      if (settings.provider === 'edge') {
-        const bytes = await invoke<number[]>('tts_synthesize', {
-          text,
-          voice,
-          rate: Math.round((settings.rate - 1) * 100),
-          pitch: Math.round((settings.pitch - 1) * 100),
-          volume: settings.volume - 100,
-        })
-        return bytesToDataUrl(bytes)
-      }
-      const bytes = await invoke<number[]>('tts_synthesize_cloud', {
+      // 统一走 v3 入口：rate/pitch 传原始倍率，volume 传 0–100，偏移换算由 Rust 端按服务商内部完成
+      const bytes = await invoke<number[]>('tts_synthesize_v3', {
         provider: settings.provider,
-        apiKey: settings.apiKey ?? '',
+        apiKey: settings.apiKey ?? null,
         groupId: settings.groupId ?? null,
         text,
         voice,
+        rate: settings.rate,
+        pitch: settings.pitch,
+        volume: settings.volume,
       })
       return bytesToDataUrl(bytes)
     })

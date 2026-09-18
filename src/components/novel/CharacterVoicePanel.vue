@@ -78,6 +78,7 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { collectSpeakers } from '@/utils/dialogue'
 import { t } from '@/i18n'
 import type { TtsProvider } from '@/utils/ttsPlayer'
+import { getVoices, voiceOptionLabel } from '@/utils/ttsVoices'
 
 const settingsStore = useSettingsStore()
 
@@ -141,15 +142,34 @@ defineExpose({ open })
 async function loadVoiceOptions(): Promise<void> {
   const provider: TtsProvider = settingsStore.ttsProvider
   try {
-    if (provider === 'edge') {
-      const list = await invoke<Array<[string, string, string]>>('tts_voices')
-      voiceOptions.value = list.map(([id, name, lang]) => ({ id, label: `${name} (${lang})` }))
-    } else if (provider === 'dashscope' || provider === 'minimax') {
-      const list = await invoke<Array<[string, string, string]>>('tts_cloud_voices', { provider })
-      voiceOptions.value = list.map(([id, name, lang]) => ({ id, label: `${name} (${lang})` }))
-    } else {
+    if (provider === 'sapi') {
+      // SAPI5 本机音色动态枚举（仅 Windows）
+      const list = await invoke<Array<[string, string, string, string]>>('tts_sapi_voices')
+      voiceOptions.value = list.map(([id, label, locale]) => ({
+        id,
+        label: `${label} (${locale})`,
+      }))
+    } else if (provider === 'system') {
       const voices = window.speechSynthesis ? window.speechSynthesis.getVoices() : []
       voiceOptions.value = voices.map((v) => ({ id: v.name, label: `${v.name} (${v.lang})` }))
+    } else {
+      let list = getVoices(provider)
+      if (provider === 'minimax' && settingsStore.ttsMinimaxKey.trim()) {
+        // MiniMax 有 Key 时优先动态拉取（含克隆音色），失败静默回退静态表
+        try {
+          const rows = await invoke<Array<[string, string, string]>>('tts_voices_v3', {
+            provider: 'minimax',
+            apiKey: settingsStore.ttsMinimaxKey.trim(),
+          })
+          if (rows.length) {
+            voiceOptions.value = rows.map(([id, label]) => ({ id, label }))
+            return
+          }
+        } catch {
+          /* 回退静态表 */
+        }
+      }
+      voiceOptions.value = list.map((v) => ({ id: v.id, label: voiceOptionLabel(v) }))
     }
   } catch {
     voiceOptions.value = []

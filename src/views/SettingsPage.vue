@@ -266,13 +266,16 @@
       <el-tab-pane :label="t('settings.ttsTab')" name="tts">
         <el-form class="settings-form" label-width="140px">
           <el-form-item :label="t('settings.ttsProvider')">
-            <el-select v-model="ttsProviderLocal" style="width: 280px" @change="onTtsProviderChange">
+            <el-select v-model="ttsProviderLocal" style="width: 320px" @change="onTtsProviderChange">
               <el-option value="edge" :label="t('settings.ttsEdge')" />
               <el-option value="system" :label="t('settings.ttsSystem')" />
               <el-option value="dashscope" :label="t('settings.ttsDashscope')" />
               <el-option value="minimax" :label="t('settings.ttsMinimax')" />
+              <el-option value="volcengine" :label="t('settings.ttsVolcengine')" />
+              <el-option value="mimo" :label="t('settings.ttsMimo')" />
+              <el-option value="sapi" :label="t('settings.ttsSapi')" />
             </el-select>
-            <span class="backup-hint inline-hint">{{ t('settings.ttsProviderHint') }}</span>
+            <span class="backup-hint inline-hint">{{ ttsProviderHint }}</span>
           </el-form-item>
           <el-form-item v-if="ttsProviderLocal === 'dashscope'" :label="t('settings.ttsDashKey')">
             <el-input
@@ -303,9 +306,50 @@
               @change="onTtsKeyChange"
             />
           </el-form-item>
+          <el-form-item v-if="ttsProviderLocal === 'volcengine'" :label="t('settings.ttsVolcKey')">
+            <el-input
+              v-model="ttsVolcKeyLocal"
+              type="password"
+              show-password
+              style="width: 280px"
+              :placeholder="t('settings.ttsVolcKey')"
+              @change="onTtsKeyChange"
+            />
+            <span class="backup-hint inline-hint">{{ t('settings.ttsKeyHint') }}</span>
+          </el-form-item>
+          <el-form-item v-if="ttsProviderLocal === 'mimo'" :label="t('settings.ttsMimoKey')">
+            <el-input
+              v-model="ttsMimoKeyLocal"
+              type="password"
+              show-password
+              style="width: 280px"
+              :placeholder="t('settings.ttsMimoKey')"
+              @change="onTtsKeyChange"
+            />
+            <span class="backup-hint inline-hint">{{ t('settings.ttsKeyHint') }}</span>
+          </el-form-item>
           <el-form-item :label="t('settings.ttsVoice')">
-            <el-select v-model="ttsVoiceLocal" filterable allow-create default-first-option style="width: 280px" @change="onTtsVoiceChange">
-              <el-option v-for="v in voiceOptions" :key="v.id" :value="v.id" :label="v.label" />
+            <el-select
+              v-model="ttsVoiceLocal"
+              filterable
+              allow-create
+              default-first-option
+              style="width: 320px"
+              @change="onTtsVoiceChange"
+            >
+              <el-option-group v-for="g in voiceGroups" :key="g.label" :label="g.label">
+                <el-option
+                  v-for="v in g.voices"
+                  :key="v.id"
+                  :value="v.id"
+                  :label="voiceOptionLabel(v)"
+                >
+                  <span class="voice-row">
+                    <span>{{ voiceOptionLabel(v) }}</span>
+                    <span v-if="v.description" class="voice-desc">{{ v.description }}</span>
+                  </span>
+                </el-option>
+              </el-option-group>
             </el-select>
             <el-button size="small" link type="primary" @click="previewVoice(ttsVoiceLocal)">
               {{ t('settings.ttsPreviewPlay') }}
@@ -313,9 +357,24 @@
             <span v-if="isCloudProvider" class="backup-hint inline-hint">{{ t('settings.ttsVoiceCustomHint') }}</span>
           </el-form-item>
           <el-form-item :label="t('settings.ttsMaleVoice')">
-            <el-select v-model="ttsMaleVoiceLocal" filterable allow-create default-first-option clearable style="width: 280px" @change="onTtsGenderVoiceChange">
+            <el-select
+              v-model="ttsMaleVoiceLocal"
+              filterable
+              allow-create
+              default-first-option
+              clearable
+              style="width: 320px"
+              @change="onTtsGenderVoiceChange"
+            >
               <el-option value="" :label="t('settings.ttsVoiceOff')" />
-              <el-option v-for="v in voiceOptions" :key="v.id" :value="v.id" :label="v.label" />
+              <el-option-group v-for="g in voiceGroups" :key="g.label" :label="g.label">
+                <el-option
+                  v-for="v in g.voices"
+                  :key="v.id"
+                  :value="v.id"
+                  :label="voiceOptionLabel(v)"
+                />
+              </el-option-group>
             </el-select>
             <el-button v-if="ttsMaleVoiceLocal" size="small" link type="primary" @click="previewVoice(ttsMaleVoiceLocal)">
               {{ t('settings.ttsPreviewPlay') }}
@@ -323,9 +382,24 @@
             <span class="backup-hint inline-hint">{{ t('settings.ttsGenderVoiceHint') }}</span>
           </el-form-item>
           <el-form-item :label="t('settings.ttsFemaleVoice')">
-            <el-select v-model="ttsFemaleVoiceLocal" filterable allow-create default-first-option clearable style="width: 280px" @change="onTtsGenderVoiceChange">
+            <el-select
+              v-model="ttsFemaleVoiceLocal"
+              filterable
+              allow-create
+              default-first-option
+              clearable
+              style="width: 320px"
+              @change="onTtsGenderVoiceChange"
+            >
               <el-option value="" :label="t('settings.ttsVoiceOff')" />
-              <el-option v-for="v in voiceOptions" :key="v.id" :value="v.id" :label="v.label" />
+              <el-option-group v-for="g in voiceGroups" :key="g.label" :label="g.label">
+                <el-option
+                  v-for="v in g.voices"
+                  :key="v.id"
+                  :value="v.id"
+                  :label="voiceOptionLabel(v)"
+                />
+              </el-option-group>
             </el-select>
             <el-button v-if="ttsFemaleVoiceLocal" size="small" link type="primary" @click="previewVoice(ttsFemaleVoiceLocal)">
               {{ t('settings.ttsPreviewPlay') }}
@@ -369,10 +443,63 @@
             </el-button>
             <span class="backup-hint inline-hint">{{ t('settings.ttsTestHint') }}</span>
           </el-form-item>
-          <el-form-item :label="t('settings.ttsPreview')">
-            <el-button type="primary" plain size="small" :loading="ttsPreviewing" @click="previewTts">
-              {{ t('settings.ttsPreviewPlay') }}
-            </el-button>
+          <el-form-item label=" ">
+            <div class="preview-block">
+              <div class="preview-row-title">{{ t('settings.ttsPreviewZh') }}</div>
+              <el-input
+                v-model="previewZhLocal"
+                type="textarea"
+                :rows="3"
+                :placeholder="DEFAULT_PREVIEW_ZH"
+              />
+              <div class="preview-actions">
+                <el-button
+                  type="primary"
+                  plain
+                  size="small"
+                  :loading="previewLang === 'zh'"
+                  :disabled="ttsPreviewBusy"
+                  @click="previewSampleText('zh')"
+                >
+                  {{ t('settings.ttsPreviewPlay') }}
+                </el-button>
+                <el-button size="small" @click="resetPreviewText('zh')">
+                  {{ t('settings.ttsPreviewReset') }}
+                </el-button>
+              </div>
+              <div class="preview-row-title">{{ t('settings.ttsPreviewEn') }}</div>
+              <el-input
+                v-model="previewEnLocal"
+                type="textarea"
+                :rows="3"
+                :placeholder="DEFAULT_PREVIEW_EN"
+              />
+              <div class="preview-actions">
+                <el-button
+                  type="primary"
+                  plain
+                  size="small"
+                  :loading="previewLang === 'en'"
+                  :disabled="ttsPreviewBusy"
+                  @click="previewSampleText('en')"
+                >
+                  {{ t('settings.ttsPreviewPlay') }}
+                </el-button>
+                <el-button size="small" @click="resetPreviewText('en')">
+                  {{ t('settings.ttsPreviewReset') }}
+                </el-button>
+                <el-button
+                  v-if="ttsPreviewBusy"
+                  type="warning"
+                  plain
+                  size="small"
+                  @click="stopPreview"
+                >
+                  {{ t('settings.ttsPreviewStop') }}
+                </el-button>
+              </div>
+              <span class="backup-hint">{{ t('settings.ttsPreviewHint') }}</span>
+            </div>
           </el-form-item>
         </el-form>
       </el-tab-pane>
@@ -413,7 +540,14 @@ import type { PdfBackground, AutoBackup } from '@/stores/settingsStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
 import { type StepNum } from '@/types/pdfSteps'
 import { speakWord, type SpeechAccent } from '@/utils/speech'
-import { ttsPlayer, type TtsProvider } from '@/utils/ttsPlayer'
+import { ttsPlayer, splitSentences, type TtsProvider } from '@/utils/ttsPlayer'
+import {
+  getVoices,
+  groupVoices,
+  voiceOptionLabel,
+  type TtsVoice,
+  type VoiceGroup,
+} from '@/utils/ttsVoices'
 import { isAndroid } from '@/utils/platform'
 import { currentLocale, t, setLocale, type Locale } from '@/i18n'
 import { AI_PROVIDER_PRESETS, getAiProvider } from '@/config/aiProviders'
@@ -557,10 +691,19 @@ const ttsTesting = ref(false)
 const ttsDashKeyLocal = ref(settingsStore.ttsDashKey)
 const ttsMinimaxKeyLocal = ref(settingsStore.ttsMinimaxKey)
 const ttsMinimaxGroupIdLocal = ref(settingsStore.ttsMinimaxGroupId)
-const voiceOptions = ref<Array<{ id: string; label: string }>>([])
-const ttsPreviewing = ref(false)
+const ttsVolcKeyLocal = ref(settingsStore.ttsVolcKey)
+const ttsMimoKeyLocal = ref(settingsStore.ttsMimoKey)
+/** 当前服务商音色目录（TtsVoice 结构，含分组/性别/描述） */
+const catalogVoices = ref<TtsVoice[]>([])
+const previewLang = ref<'' | 'zh' | 'en'>('')
 
-const isCloudProvider = computed(() => ttsProviderLocal.value === 'dashscope' || ttsProviderLocal.value === 'minimax')
+const isCloudProvider = computed(() =>
+  ['dashscope', 'minimax', 'volcengine', 'mimo'].includes(ttsProviderLocal.value),
+)
+
+const ttsProviderHint = computed(() =>
+  ttsProviderLocal.value === 'sapi' ? t('settings.ttsSapiOnlyWindows') : t('settings.ttsProviderHint'),
+)
 
 /** 音色按服务商记忆（localStorage），切换服务商自动带回上次选择 */
 const DEFAULT_VOICE: Record<TtsProvider, string> = {
@@ -568,37 +711,95 @@ const DEFAULT_VOICE: Record<TtsProvider, string> = {
   system: '',
   dashscope: 'Cherry',
   minimax: 'female-shaonv',
+  volcengine: 'zh_female_vv_uranus_bigtts',
+  mimo: 'mimo_default',
+  sapi: '',
 }
 const VOICE_KEY_PREFIX = 'tts-voice-'
 function saveProviderVoice(provider: TtsProvider, voice: string): void {
   localStorage.setItem(VOICE_KEY_PREFIX + provider, voice)
 }
 
+/** 分组渲染：火山音色多，非中英分组折叠进「更多语言」 */
+const voiceGroups = computed<VoiceGroup[]>(() => {
+  const groups = groupVoices(catalogVoices.value)
+  if (ttsProviderLocal.value !== 'volcengine') return groups
+  const main: VoiceGroup[] = []
+  const rest: TtsVoice[] = []
+  for (const g of groups) {
+    if (g.label.startsWith('中文') || g.label.startsWith('普通话') || g.label.startsWith('方言') || g.label.startsWith('英语')) {
+      main.push(g)
+    } else {
+      rest.push(...g.voices)
+    }
+  }
+  if (rest.length) main.push({ label: t('settings.ttsVoicesMore'), voices: rest })
+  return main
+})
+
 async function loadVoiceOptions(): Promise<void> {
-  if (ttsProviderLocal.value === 'edge') {
-    try {
-      const list = await invoke<Array<[string, string, string]>>('tts_voices')
-      voiceOptions.value = list.map(([id, name, lang]) => ({ id, label: `${name} (${lang})` }))
-    } catch {
-      voiceOptions.value = []
-    }
-  } else if (ttsProviderLocal.value === 'dashscope' || ttsProviderLocal.value === 'minimax') {
-    try {
-      const list = await invoke<Array<[string, string, string]>>('tts_cloud_voices', {
-        provider: ttsProviderLocal.value,
-      })
-      voiceOptions.value = list.map(([id, name, lang]) => ({ id, label: `${name} (${lang})` }))
-    } catch {
-      voiceOptions.value = []
-    }
-  } else {
+  const provider = ttsProviderLocal.value
+  if (provider === 'system') {
     const synth = window.speechSynthesis
     const voices = synth ? synth.getVoices() : []
-    voiceOptions.value = [
-      { id: '', label: t('settings.ttsSystemDefault') },
-      ...voices.map((v) => ({ id: v.name, label: `${v.name} (${v.lang})` })),
+    catalogVoices.value = [
+      { id: '', label: t('settings.ttsSystemDefault'), group: t('settings.ttsSystem'), gender: 'unknown' },
+      ...voices.map((v) => ({
+        id: v.name,
+        label: v.name,
+        group: t('settings.ttsSystem'),
+        gender: 'unknown' as const,
+        description: v.lang,
+      })),
     ]
+    return
   }
+  if (provider === 'sapi') {
+    catalogVoices.value = []
+    try {
+      const list = await invoke<Array<[string, string, string, string]>>('tts_sapi_voices')
+      catalogVoices.value = list.map(([id, label, locale, gender]) => ({
+        id,
+        label,
+        group: locale || 'SAPI5',
+        gender: gender === 'male' || gender === 'female' ? gender : 'unknown',
+        description: locale,
+      }))
+      if (catalogVoices.value.length === 0) ElMessage.warning(t('settings.ttsSapiNoVoices'))
+    } catch (e) {
+      ElMessage.error(String(e))
+    }
+    return
+  }
+  // 静态全量目录（edge/dashscope/volcengine/mimo/minimax 兜底）
+  let list = getVoices(provider)
+  if (provider === 'minimax') {
+    // MiniMax 有 Key 时优先动态拉取（含克隆音色），失败静默回退静态表
+    const key = ttsMinimaxKeyLocal.value.trim()
+    if (key) {
+      try {
+        const rows = await invoke<Array<[string, string, string]>>('tts_voices_v3', {
+          provider: 'minimax',
+          apiKey: key,
+        })
+        if (rows.length) {
+          list = rows.map(([id, label, groupDesc]) => {
+            const idx = groupDesc.indexOf(' · ')
+            return {
+              id,
+              label,
+              group: idx >= 0 ? groupDesc.slice(0, idx) : groupDesc,
+              gender: 'unknown' as const,
+              description: idx >= 0 ? groupDesc.slice(idx + 3) : '',
+            }
+          })
+        }
+      } catch {
+        /* 拉取失败：保留静态表 */
+      }
+    }
+  }
+  catalogVoices.value = list
 }
 
 function onTtsProviderChange(v: TtsProvider): void {
@@ -621,6 +822,8 @@ function onTtsKeyChange(): void {
     ttsDashKey: ttsDashKeyLocal.value.trim(),
     ttsMinimaxKey: ttsMinimaxKeyLocal.value.trim(),
     ttsMinimaxGroupId: ttsMinimaxGroupIdLocal.value.trim(),
+    ttsVolcKey: ttsVolcKeyLocal.value.trim(),
+    ttsMimoKey: ttsMimoKeyLocal.value.trim(),
   })
 }
 
@@ -654,6 +857,26 @@ function onTtsQuoteStylesChange(v: string[]): void {
   void settingsStore.setTtsSettings({ ttsQuoteStyles: value })
 }
 
+/** 当前服务商对应的 API Key（edge/system/sapi 无需 Key） */
+function providerApiKey(): string {
+  switch (ttsProviderLocal.value) {
+    case 'dashscope':
+      return ttsDashKeyLocal.value.trim()
+    case 'minimax':
+      return ttsMinimaxKeyLocal.value.trim()
+    case 'volcengine':
+      return ttsVolcKeyLocal.value.trim()
+    case 'mimo':
+      return ttsMimoKeyLocal.value.trim()
+    default:
+      return ''
+  }
+}
+
+function currentGroupId(): string | null {
+  return ttsProviderLocal.value === 'minimax' ? ttsMinimaxGroupIdLocal.value.trim() : null
+}
+
 async function testTtsConnection(): Promise<void> {
   if (ttsProviderLocal.value === 'system') {
     const ok = 'speechSynthesis' in window
@@ -665,8 +888,8 @@ async function testTtsConnection(): Promise<void> {
   try {
     await invoke('tts_test_connection', {
       provider: ttsProviderLocal.value,
-      apiKey: ttsDashKeyLocal.value.trim() || ttsMinimaxKeyLocal.value.trim(),
-      groupId: ttsMinimaxGroupIdLocal.value.trim(),
+      apiKey: providerApiKey(),
+      groupId: currentGroupId(),
       voice: ttsVoiceLocal.value,
     })
     ElMessage.success(t('settings.ttsTestOk'))
@@ -677,18 +900,11 @@ async function testTtsConnection(): Promise<void> {
   }
 }
 
-async function previewTts(): Promise<void> {
-  await previewVoice(ttsVoiceLocal.value)
-}
-
 /** 指定音色试听一句（主音色/男声/女声默认音色共用） */
 async function previewVoice(voice: string): Promise<void> {
-  const sample =
-    ttsProviderLocal.value === 'minimax' || ttsProviderLocal.value === 'dashscope'
-      ? '你好，这是词阅的语音朗读试听。'
-      : voice.startsWith('zh')
-        ? '你好，这是词阅的语音朗读试听。'
-        : 'Hello, this is a voice reading preview from CiYue.'
+  const sample = voice.startsWith('zh')
+    ? '你好，这是词阅的语音朗读试听。'
+    : 'Hello, this is a voice reading preview from CiYue.'
   ttsPreviewing.value = true
   try {
     await ttsPlayer.start([sample], {
@@ -697,8 +913,8 @@ async function previewVoice(voice: string): Promise<void> {
       rate: ttsRateLocal.value,
       pitch: ttsPitchLocal.value,
       volume: ttsVolumeLocal.value,
-      apiKey: ttsDashKeyLocal.value.trim() || ttsMinimaxKeyLocal.value.trim(),
-      groupId: ttsMinimaxGroupIdLocal.value.trim(),
+      apiKey: providerApiKey(),
+      groupId: currentGroupId() ?? undefined,
       sentencePauseMs: 0,
     })
   } catch (e) {
@@ -706,6 +922,77 @@ async function previewVoice(voice: string): Promise<void> {
   } finally {
     ttsPreviewing.value = false
   }
+}
+
+// ===== 试听文本（可编辑，localStorage 持久化） =====
+const DEFAULT_PREVIEW_ZH =
+  '男生一脸关切的问道："身体不舒服吗？要多喝热水。"\n' +
+  '女生淡淡道："你人还怪好的嘞。"\n' +
+  '"贾君鹏，妈妈喊你回家吃饭！"这时外面传来一道声音。'
+const DEFAULT_PREVIEW_EN =
+  'Tom said, "The weather is lovely today."\n' +
+  'Mary replied, "Yes, let\'s go for a walk in the park."\n' +
+  '"Look out!" someone shouted from across the street.'
+const PREVIEW_ZH_KEY = 'tts-preview-zh'
+const PREVIEW_EN_KEY = 'tts-preview-en'
+
+const previewZhLocal = ref(localStorage.getItem(PREVIEW_ZH_KEY) ?? DEFAULT_PREVIEW_ZH)
+const previewEnLocal = ref(localStorage.getItem(PREVIEW_EN_KEY) ?? DEFAULT_PREVIEW_EN)
+
+function resetPreviewText(lang: 'zh' | 'en'): void {
+  if (lang === 'zh') {
+    previewZhLocal.value = DEFAULT_PREVIEW_ZH
+    localStorage.removeItem(PREVIEW_ZH_KEY)
+  } else {
+    previewEnLocal.value = DEFAULT_PREVIEW_EN
+    localStorage.removeItem(PREVIEW_EN_KEY)
+  }
+}
+
+function persistPreviewText(lang: 'zh' | 'en'): void {
+  if (lang === 'zh') {
+    if (previewZhLocal.value.trim() === DEFAULT_PREVIEW_ZH.trim()) {
+      localStorage.removeItem(PREVIEW_ZH_KEY)
+    } else {
+      localStorage.setItem(PREVIEW_ZH_KEY, previewZhLocal.value)
+    }
+  } else if (previewEnLocal.value.trim() === DEFAULT_PREVIEW_EN.trim()) {
+    localStorage.removeItem(PREVIEW_EN_KEY)
+  } else {
+    localStorage.setItem(PREVIEW_EN_KEY, previewEnLocal.value)
+  }
+}
+
+/** 是否正在播放试听（任一来源：textarea 试听或音色试听） */
+const ttsPreviewing = ref(false)
+const ttsPreviewBusy = computed(() => ttsPlayer.state !== 'idle')
+
+/** 按试听区文本合成朗读（切句后交给播放队列，含句间停顿） */
+async function previewSampleText(lang: 'zh' | 'en'): Promise<void> {
+  persistPreviewText(lang)
+  const text = (lang === 'zh' ? previewZhLocal.value : previewEnLocal.value).trim()
+  if (!text) return
+  previewLang.value = lang
+  try {
+    await ttsPlayer.start(splitSentences(text), {
+      provider: ttsProviderLocal.value,
+      voice: ttsVoiceLocal.value,
+      rate: ttsRateLocal.value,
+      pitch: ttsPitchLocal.value,
+      volume: ttsVolumeLocal.value,
+      apiKey: providerApiKey(),
+      groupId: currentGroupId() ?? undefined,
+      sentencePauseMs: ttsPauseSentenceLocal.value,
+    })
+  } catch (e) {
+    ElMessage.error(String(e && (e as Error).message ? (e as Error).message : e))
+  } finally {
+    previewLang.value = ''
+  }
+}
+
+function stopPreview(): void {
+  ttsPlayer.stop()
 }
 
 /** DeepLX 端点本地编辑态（change 时持久化，留空恢复默认） */
@@ -980,6 +1267,36 @@ onMounted(() => {
 .backup-hint {
   font-size: 12px;
   color: var(--text-secondary, #909399);
+}
+.preview-block {
+  width: 100%;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.preview-row-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #303133);
+}
+.preview-actions {
+  display: flex;
+  gap: 8px;
+}
+.voice-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  max-width: 460px;
+}
+.voice-desc {
+  font-size: 12px;
+  color: var(--text-secondary, #909399);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .field-hint {
   width: 100%;
