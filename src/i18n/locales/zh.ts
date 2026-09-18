@@ -398,6 +398,7 @@ export default {
   'settings.ttsModeSingleHint': '全书使用同一音色',
   'settings.ttsModeDialogue': '旁白/对白多音色',
   'settings.ttsModeDialogueHint': '旁白与对白可使用不同音色',
+  'settings.ttsModeDialogueNeedGenders': '多音色模式：未配置男声/女声默认音色，对白将使用主音色',
   'settings.ttsVoiceOnly': '音色',
   'settings.ttsProfileNone': '未选择方案',
   'settings.ttsProfileSave': '保存为新方案',

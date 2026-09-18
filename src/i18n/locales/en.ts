@@ -398,6 +398,7 @@ export default {
   'settings.ttsModeSingleHint': 'One voice for the whole book',
   'settings.ttsModeDialogue': 'Narration/dialogue voices',
   'settings.ttsModeDialogueHint': 'Narration and dialogue can use different voices',
+  'settings.ttsModeDialogueNeedGenders': 'Dialogue mode: no male/female default voice configured, dialogue will use the main voice',
   'settings.ttsVoiceOnly': 'Voice',
   'settings.ttsProfileNone': 'No profile selected',
   'settings.ttsProfileSave': 'Save as new profile',

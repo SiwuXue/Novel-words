@@ -231,6 +231,28 @@ export function collectSpeakers(
     .sort((a, b) => b.count - a.count)
 }
 
+/** 性别关键词：称呼词判断（「男生」→男、「妈妈」→女）。 */
+const MALE_HINTS = ['男', '父', '爸', '哥', '弟', '叔', '伯', '爷', '舅', '郎', '先生', '少爷']
+const FEMALE_HINTS = ['女', '母', '妈', '娘', '姐', '妹', '婆', '姨', '姑', '嫂', '夫人', '太太', '小姐']
+
+/**
+ * 说话人性别启发式（无角色库时的兜底，如设置页试听）：
+ * 名字含男性称呼词 → male，含女性称呼词 → female，两者都含或都不含 → 不写入（走主音色）。
+ */
+export function guessGenders(
+  text: string,
+  enabledOpens?: ReadonlyArray<string>,
+): Record<string, 'male' | 'female'> {
+  const out: Record<string, 'male' | 'female'> = {}
+  for (const { name } of collectSpeakers(text, enabledOpens)) {
+    const male = MALE_HINTS.some((k) => name.includes(k))
+    const female = FEMALE_HINTS.some((k) => name.includes(k))
+    if (male === female) continue // 都命中或都没命中：不确定
+    out[name] = male ? 'male' : 'female'
+  }
+  return out
+}
+
 export interface GenderDefaults {
   male?: string
   female?: string

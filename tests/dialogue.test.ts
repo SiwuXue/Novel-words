@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildVoiceOverrides,
   collectSpeakers,
+  guessGenders,
   speakerForSpan,
   splitDialogueSegments,
 } from '@/utils/dialogue'
@@ -150,5 +151,23 @@ describe('buildVoiceOverrides', () => {
         { male: 'm' },
       ),
     ).toEqual([undefined])
+  })
+})
+
+describe('guessGenders', () => {
+  it('按称呼词判断性别', () => {
+    const text = '男生一脸关切的问道："身体不舒服吗？要多喝热水。"\n女生淡淡道："你人还怪好的嘞。"'
+    expect(guessGenders(text)).toEqual({ 男生: 'male', 女生: 'female' })
+  })
+
+  it('妈妈/小姐等女性称呼', () => {
+    const text = '妈妈喊道："回家吃饭！"'
+    expect(guessGenders(text)).toEqual({ 妈妈: 'female' })
+  })
+
+  it('同时命中男女称呼词或无称呼词时不判定', () => {
+    // 「先生」命中 male；纯名字无称呼词不写入
+    const text = '王小明说："你好。"'
+    expect(guessGenders(text)).toEqual({})
   })
 })

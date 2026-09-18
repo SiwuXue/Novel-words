@@ -588,7 +588,8 @@ import type { PdfBackground, AutoBackup } from '@/stores/settingsStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
 import { type StepNum } from '@/types/pdfSteps'
 import { speakWord, type SpeechAccent } from '@/utils/speech'
-import { ttsPlayer, splitSentences, type TtsProvider } from '@/utils/ttsPlayer'
+import { ttsPlayer, splitSentenceSpans, type TtsProvider } from '@/utils/ttsPlayer'
+import { buildVoiceOverrides, guessGenders } from '@/utils/dialogue'
 import {
   getVoices,
   groupVoices,
@@ -1151,18 +1152,44 @@ async function previewSampleText(lang: 'zh' | 'en'): Promise<void> {
   persistPreviewText(lang)
   const text = (lang === 'zh' ? previewZhLocal.value : previewEnLocal.value).trim()
   if (!text) return
+  const spans = splitSentenceSpans(text)
+  const sentences = spans.map((s) => s.text)
+  if (sentences.length === 0) return
+  // 多音色模式：对白按说话人称呼词启发式套用男/女默认音色，旁白走主音色
+  let overrides: Array<string | undefined> | undefined
+  if (ttsModeLocal.value === 'dialogue') {
+    const male = ttsMaleVoiceLocal.value
+    const female = ttsFemaleVoiceLocal.value
+    if (!male && !female) {
+      ElMessage.warning(t('settings.ttsModeDialogueNeedGenders'))
+    } else {
+      overrides = buildVoiceOverrides(
+        spans,
+        text,
+        {},
+        guessGenders(text, ttsQuoteStylesLocal.value),
+        { male, female },
+        ttsQuoteStylesLocal.value,
+      )
+    }
+  }
   previewLang.value = lang
   try {
-    await ttsPlayer.start(splitSentences(text), {
-      provider: ttsProviderLocal.value,
-      voice: ttsVoiceLocal.value,
-      rate: ttsRateLocal.value,
-      pitch: ttsPitchLocal.value,
-      volume: ttsVolumeLocal.value,
-      apiKey: providerApiKey(),
-      groupId: currentGroupId() ?? undefined,
-      sentencePauseMs: ttsPauseSentenceLocal.value,
-    })
+    await ttsPlayer.start(
+      sentences,
+      {
+        provider: ttsProviderLocal.value,
+        voice: ttsVoiceLocal.value,
+        rate: ttsRateLocal.value,
+        pitch: ttsPitchLocal.value,
+        volume: ttsVolumeLocal.value,
+        apiKey: providerApiKey(),
+        groupId: currentGroupId() ?? undefined,
+        sentencePauseMs: ttsPauseSentenceLocal.value,
+      },
+      {},
+      overrides,
+    )
   } catch (e) {
     ElMessage.error(String(e && (e as Error).message ? (e as Error).message : e))
   } finally {
