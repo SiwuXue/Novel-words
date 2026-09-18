@@ -6,7 +6,8 @@
  * - speakerForSpan(segments, start, end)：句子 span → 说话人（按重叠长度归因）。
  * - collectSpeakers(text)：章节内出现的说话人及对白数（角色面板用）。
  *
- * 纯函数无依赖；引号支持中文 “” 与英文 " "（同字符配对）。
+ * 纯函数无依赖；引号支持四种配对（参考 ColorTxt）：
+ * “” 双引号 / ‘’ 单引号 / 「」 直角引号 / 『』 双直角引号，以及英文 " "。
  */
 
 export interface DialogueSegment {
@@ -17,13 +18,20 @@ export interface DialogueSegment {
   end: number
 }
 
-/** 引号配对：中文开/闭引号字符不同，英文同字符配对。 */
-const CLOSERS: Record<string, string> = {
-  '“': '”',
-  '"': '"',
-}
+/** 引号配对定义：open → close 字符映射 */
+const QUOTE_PAIRS: ReadonlyArray<{ open: string; close: string }> = [
+  { open: '“', close: '”' },
+  { open: '‘', close: '’' },
+  { open: '「', close: '」' },
+  { open: '『', close: '』' },
+  { open: '"', close: '"' },
+]
 
-/** 对白切分：按引号对切出对白段，段间为旁白。 */
+const CLOSERS: Record<string, string> = Object.fromEntries(
+  QUOTE_PAIRS.map((p) => [p.open, p.close]),
+)
+
+/** 对白切分：按引号对切出对白段，段间为旁白（对白内只找当前引号的闭符）。 */
 export function splitDialogueSegments(text: string): DialogueSegment[] {
   const segments: DialogueSegment[] = []
   let narrationStart = 0

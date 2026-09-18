@@ -26,6 +26,65 @@ export interface TtsSettings {
   apiKey?: string
   /** MiniMax GroupId（minimax 必填） */
   groupId?: string
+  /** 句间停顿毫秒数（1x 语速基准，播放时随语速缩放），0 = 不停顿 */
+  sentencePauseMs?: number
+}
+
+/** 停顿为 1x 语速下的绝对时长，播放时除以当前语速，使整体节奏随语速缩放。 */
+export function scaledPauseMs(configuredMs: number | undefined, rate: number): number {
+  if (!Number.isFinite(configuredMs) || !configuredMs || configuredMs <= 0) return 0
+  const r = Number.isFinite(rate) && rate > 0 ? rate : 1
+  return Math.min(10000, configuredMs / r)
+}
+
+/** 缓存 key：服务商 + 音色 + 合成参数 + 文本（文本空白归一）。 */
+export function ttsCacheKey(settings: TtsSettings, voice: string, text: string): string {
+  return [
+    settings.provider,
+    voice.trim(),
+    settings.rate,
+    settings.pitch,
+    settings.volume,
+    settings.apiKey ?? '',
+    settings.groupId ?? '',
+    text.replace(/\s+/g, ' ').trim(),
+  ].join('\u0001')
+}
+
+const AUDIO_CACHE_LIMIT = 64
+
+/** 在线合成结果缓存（data URL）：LRU 限长 + inflight 去重（参考 ColorTxt）。 */
+class SynthCache {
+  private readonly cache = new Map<string, string>()
+  private readonly inflight = new Map<string, Promise<string>>()
+
+  async getOrFetch(key: string, fetcher: () => Promise<string>): Promise<string> {
+    const hit = this.cache.get(key)
+    if (hit) {
+      // LRU touch
+      this.cache.delete(key)
+      this.cache.set(key, hit)
+      return hit
+    }
+    const running = this.inflight.get(key)
+    if (running) return running
+    const request = fetcher()
+      .then((url) => {
+        this.cache.delete(key)
+        this.cache.set(key, url)
+        while (this.cache.size > AUDIO_CACHE_LIMIT) {
+          const oldest = this.cache.keys().next().value
+          if (oldest === undefined) break
+          this.cache.delete(oldest)
+        }
+        return url
+      })
+      .finally(() => {
+        this.inflight.delete(key)
+      })
+    this.inflight.set(key, request)
+    return request
+  }
 }
 
 export interface TtsHandlers {
@@ -109,6 +168,7 @@ class TtsPlayer {
   private paused = false
   private audio: HTMLAudioElement | null = null
   private currentUtterance: SpeechSynthesisUtterance | null = null
+  private readonly synthCache = new SynthCache()
 
   /** idle / playing / paused（响应式） */
   private _state = ref<'idle' | 'playing' | 'paused'>('idle')
@@ -142,21 +202,55 @@ class TtsPlayer {
         await this.sleep(120)
         if (myToken !== this.token) return
       }
+      const voice = voiceOverrides?.[i] || settings.voice
+
+      // 在线后端：先取（或等待预取好的）音频，再进入播放
+      let preparedUrl: string | null = null
+      if (settings.provider !== 'system') {
+        try {
+          preparedUrl = await this.prepareSynth(sentences[i], settings, voice)
+        } catch {
+          preparedUrl = null // 合成失败 → 下方回退系统语音
+        }
+        if (myToken !== this.token) return
+      }
+
       this.currentIndex.value = i
       handlers.onSentenceStart?.(i, sentences.length, sentences[i])
-      const voice = voiceOverrides?.[i] || settings.voice
+
+      // 边播边预合成下一句（inflight 去重，播放前调用会直接命中同一 Promise）
+      let prefetch: Promise<string> | null = null
+      if (i + 1 < sentences.length && settings.provider !== 'system') {
+        const nextVoice = voiceOverrides?.[i + 1] || settings.voice
+        prefetch = this.prepareSynth(sentences[i + 1], settings, nextVoice)
+        prefetch.catch(() => {}) // 预取失败在真正使用时处理，避免 unhandled rejection
+      }
+
       try {
-        await this.speakOne(sentences[i], settings, voice, myToken)
+        if (preparedUrl) {
+          await this.playAudioUrl(preparedUrl, myToken, settings.volume / 100)
+        } else {
+          await this.speakSystem(sentences[i], settings)
+        }
       } catch (e) {
         if (myToken !== this.token) return
         console.error('[ttsPlayer] sentence failed:', e)
-        // 合成失败：跳过该句继续（在线后端失败时回退系统语音播一遍）
+        // 合成/播放失败：跳过该句继续（在线后端失败时回退系统语音播一遍）
         if (settings.provider !== 'system') {
           try {
             await this.speakSystem(sentences[i], settings)
           } catch {
             /* 彻底失败，跳过 */
           }
+        }
+      }
+
+      // 句间停顿（1x 语速基准，随语速缩放；暂停时等暂停结束再继续计时判断）
+      if (i < sentences.length - 1 && myToken === this.token) {
+        const pause = scaledPauseMs(settings.sentencePauseMs, settings.rate)
+        if (pause > 0) {
+          await this.sleep(pause)
+          if (myToken !== this.token) return
         }
       }
     }
@@ -167,60 +261,29 @@ class TtsPlayer {
     }
   }
 
-  /** 单句合成并等待播放结束 */
-  private speakOne(
-    text: string,
-    settings: TtsSettings,
-    voice: string,
-    myToken: number,
-  ): Promise<void> {
-    if (settings.provider === 'edge') {
-      return this.speakEdge(text, settings, voice, myToken)
-    }
-    if (settings.provider === 'dashscope' || settings.provider === 'minimax') {
-      return this.speakCloud(text, settings, voice, myToken)
-    }
-    return this.speakSystem(text, settings)
-  }
-
-  private async speakEdge(
-    text: string,
-    settings: TtsSettings,
-    voice: string,
-    myToken: number,
-  ): Promise<void> {
-    const rate = Math.round((settings.rate - 1) * 100)
-    const pitch = Math.round((settings.pitch - 1) * 100)
-    const volume = settings.volume - 100
-    const bytes = await invoke<number[]>('tts_synthesize', {
-      text,
-      voice,
-      rate,
-      pitch,
-      volume,
+  /** 在线合成单句 → data URL（缓存 + inflight 去重；系统语音不适用） */
+  private prepareSynth(text: string, settings: TtsSettings, voice: string): Promise<string> {
+    const key = ttsCacheKey(settings, voice, text)
+    return this.synthCache.getOrFetch(key, async () => {
+      if (settings.provider === 'edge') {
+        const bytes = await invoke<number[]>('tts_synthesize', {
+          text,
+          voice,
+          rate: Math.round((settings.rate - 1) * 100),
+          pitch: Math.round((settings.pitch - 1) * 100),
+          volume: settings.volume - 100,
+        })
+        return bytesToDataUrl(bytes)
+      }
+      const bytes = await invoke<number[]>('tts_synthesize_cloud', {
+        provider: settings.provider,
+        apiKey: settings.apiKey ?? '',
+        groupId: settings.groupId ?? null,
+        text,
+        voice,
+      })
+      return bytesToDataUrl(bytes)
     })
-    if (myToken !== this.token) return
-    const url = bytesToDataUrl(bytes)
-    await this.playAudioUrl(url, myToken, settings.volume / 100)
-  }
-
-  /** 云服务商（DashScope / MiniMax）：REST 合成 → audio 播放；失败抛出由上层回退 */
-  private async speakCloud(
-    text: string,
-    settings: TtsSettings,
-    voice: string,
-    myToken: number,
-  ): Promise<void> {
-    const bytes = await invoke<number[]>('tts_synthesize_cloud', {
-      provider: settings.provider,
-      apiKey: settings.apiKey ?? '',
-      groupId: settings.groupId ?? null,
-      text,
-      voice,
-    })
-    if (myToken !== this.token) return
-    const url = bytesToDataUrl(bytes)
-    await this.playAudioUrl(url, myToken, settings.volume / 100)
   }
 
   private playAudioUrl(url: string, myToken: number, volumeScale: number): Promise<void> {

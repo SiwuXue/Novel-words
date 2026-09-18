@@ -47,6 +47,26 @@ describe('splitDialogueSegments', () => {
     expect(splitDialogueSegments(unclosed).every((s) => s.type === 'narration')).toBe(true)
   })
 
+  it('支持单引号与直角引号对白（参考 ColorTxt 四种样式）', () => {
+    const single = '‘你终于来了。’王小明说。'
+    expect(splitDialogueSegments(single).find((s) => s.type === 'dialogue')?.speaker).toBe('王小明')
+
+    const corner = '「今天天气不错。」李老师说。'
+    expect(splitDialogueSegments(corner).find((s) => s.type === 'dialogue')?.speaker).toBe('李老师')
+
+    const doubleCorner = '『请进。』门卫喊道。'
+    expect(splitDialogueSegments(doubleCorner).find((s) => s.type === 'dialogue')?.speaker).toBe('门卫')
+  })
+
+  it('双引号内嵌套单引号/直角引号不误切', () => {
+    const text = '王小明说：“他刚才念了‘静夜思’，还写了「床前明月光」。”'
+    const segs = splitDialogueSegments(text)
+    const dialogues = segs.filter((s) => s.type === 'dialogue')
+    expect(dialogues).toHaveLength(1)
+    expect(dialogues[0].speaker).toBe('王小明')
+    expect(text.slice(dialogues[0].start, dialogues[0].end)).toContain('静夜思')
+  })
+
   it('speakerForSpan：对白句归因，旁白句为 null', () => {
     const text = '“你终于来了。”王小明说。他放下书包。'
     const segs = splitDialogueSegments(text)

@@ -16,6 +16,8 @@ interface TtsPrefs {
   ttsDashKey: string
   ttsMinimaxKey: string
   ttsMinimaxGroupId: string
+  /** 句间停顿毫秒（1x 语速基准），0 = 不停顿 */
+  ttsPauseSentence: number
 }
 
 export type PdfBackground = 'grid' | 'dots' | 'none'
@@ -44,6 +46,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const ttsDashKey = ref('')
   const ttsMinimaxKey = ref('')
   const ttsMinimaxGroupId = ref('')
+  /** 句间停顿毫秒（1x 语速基准，播放时随语速缩放） */
+  const ttsPauseSentence = ref(200)
   /** DeepLX 翻译端点（空串 = 使用 Rust 端默认公共实例） */
   const deeplEndpoint = ref('')
   const loaded = ref(false)
@@ -140,6 +144,13 @@ export const useSettingsStore = defineStore('settings', () => {
               case 'tts_minimax_group_id':
                 ttsMinimaxGroupId.value = s.value
                 break
+              case 'tts_pause_sentence': {
+                const n = Number(s.value)
+                if (Number.isFinite(n) && n >= 0 && n <= 1200) {
+                  ttsPauseSentence.value = Math.round(n)
+                }
+                break
+              }
               case 'deepl_endpoint':
                 deeplEndpoint.value = s.value
                 break
@@ -254,6 +265,8 @@ export const useSettingsStore = defineStore('settings', () => {
       set ttsMinimaxKey(v: string) { ttsMinimaxKey.value = v },
       get ttsMinimaxGroupId() { return ttsMinimaxGroupId.value },
       set ttsMinimaxGroupId(v: string) { ttsMinimaxGroupId.value = v },
+      get ttsPauseSentence() { return ttsPauseSentence.value },
+      set ttsPauseSentence(v: number) { ttsPauseSentence.value = v },
     }
   }
 
@@ -269,6 +282,7 @@ export const useSettingsStore = defineStore('settings', () => {
       ttsDashKey: 'tts_dashscope_key',
       ttsMinimaxKey: 'tts_minimax_key',
       ttsMinimaxGroupId: 'tts_minimax_group_id',
+      ttsPauseSentence: 'tts_pause_sentence',
     }
     try {
       for (const [k, v] of Object.entries(patch)) {
@@ -326,6 +340,7 @@ export const useSettingsStore = defineStore('settings', () => {
     ttsDashKey,
     ttsMinimaxKey,
     ttsMinimaxGroupId,
+    ttsPauseSentence,
     deeplEndpoint,
     loaded,
     load,

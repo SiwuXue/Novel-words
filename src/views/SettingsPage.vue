@@ -322,6 +322,17 @@
             <el-switch v-model="ttsAutoNextLocal" @change="onTtsAutoNextChange" />
             <span class="backup-hint inline-hint">{{ t('settings.ttsAutoNextHint') }}</span>
           </el-form-item>
+          <el-form-item :label="t('settings.ttsPauseSentence')">
+            <el-slider
+              v-model="ttsPauseSentenceLocal"
+              :min="0"
+              :max="1200"
+              :step="50"
+              style="width: 280px"
+              @change="onTtsPauseChange"
+            />
+            <span class="backup-hint inline-hint">{{ ttsPauseSentenceLocal === 0 ? t('settings.ttsPauseOff') : `${ttsPauseSentenceLocal}ms` }}</span>
+          </el-form-item>
           <el-form-item :label="t('settings.ttsPreview')">
             <el-button type="primary" plain size="small" :loading="ttsPreviewing" @click="previewTts">
               {{ t('settings.ttsPreviewPlay') }}
@@ -502,6 +513,7 @@ const ttsRateLocal = ref(settingsStore.ttsRate)
 const ttsPitchLocal = ref(settingsStore.ttsPitch)
 const ttsVolumeLocal = ref(settingsStore.ttsVolume)
 const ttsAutoNextLocal = ref(settingsStore.ttsAutoNext)
+const ttsPauseSentenceLocal = ref(settingsStore.ttsPauseSentence)
 const ttsDashKeyLocal = ref(settingsStore.ttsDashKey)
 const ttsMinimaxKeyLocal = ref(settingsStore.ttsMinimaxKey)
 const ttsMinimaxGroupIdLocal = ref(settingsStore.ttsMinimaxGroupId)
@@ -584,6 +596,10 @@ function onTtsAutoNextChange(v: boolean | string | number | undefined): void {
   void settingsStore.setTtsSettings({ ttsAutoNext: Boolean(v) })
 }
 
+function onTtsPauseChange(): void {
+  void settingsStore.setTtsSettings({ ttsPauseSentence: ttsPauseSentenceLocal.value })
+}
+
 async function previewTts(): Promise<void> {
   const voice = ttsVoiceLocal.value
   const sample =
@@ -602,6 +618,7 @@ async function previewTts(): Promise<void> {
       volume: ttsVolumeLocal.value,
       apiKey: ttsDashKeyLocal.value.trim() || ttsMinimaxKeyLocal.value.trim(),
       groupId: ttsMinimaxGroupIdLocal.value.trim(),
+      sentencePauseMs: 0,
     })
   } catch (e) {
     ElMessage.error(String(e && (e as Error).message ? (e as Error).message : e))

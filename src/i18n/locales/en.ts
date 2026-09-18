@@ -362,6 +362,8 @@ export default {
   'settings.ttsVolume': 'Volume',
   'settings.ttsAutoNext': 'Auto-play next chapter',
   'settings.ttsAutoNextHint': 'Automatically play the next chapter when the current one finishes',
+  'settings.ttsPauseSentence': 'Sentence pause',
+  'settings.ttsPauseOff': 'No pause',
   'settings.ttsPreview': 'Preview',
   'settings.ttsPreviewPlay': 'Preview',
   'characters.title': 'Character voices',

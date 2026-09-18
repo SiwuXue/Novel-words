@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { splitSentenceSpans, splitSentences, ttsPlayer } from '@/utils/ttsPlayer'
+import {
+  scaledPauseMs,
+  splitSentenceSpans,
+  splitSentences,
+  ttsCacheKey,
+  ttsPlayer,
+} from '@/utils/ttsPlayer'
 
 const invoke = vi.hoisted(() => vi.fn())
 vi.mock('@tauri-apps/api/core', () => ({ invoke }))
@@ -84,6 +90,37 @@ describe('ttsPlayer queue', () => {
     )
     await p1
     expect(firstFinish).not.toHaveBeenCalled()
+  })
+
+  it('caches online synthesis: identical sentence synthesizes once', async () => {
+    invoke.mockImplementation(async () => new Array(64).fill(65))
+    const settings = { provider: 'edge', voice: 'v', rate: 1, pitch: 1, volume: 100 }
+    // 第一遍：两句各合成一次 + 预取
+    await ttsPlayer.start(['same', 'same'], settings, {})
+    const callsAfterFirst = invoke.mock.calls.filter((c) => c[0] === 'tts_synthesize').length
+    expect(callsAfterFirst).toBeGreaterThanOrEqual(1)
+    // 第二遍：全部命中缓存，不再发起新合成
+    await ttsPlayer.start(['same', 'same'], settings, {})
+    const callsAfterSecond = invoke.mock.calls.filter((c) => c[0] === 'tts_synthesize').length
+    expect(callsAfterSecond).toBe(callsAfterFirst)
+  })
+
+  it('different voices produce different cache keys', () => {
+    const settings = { provider: 'dashscope', voice: '', rate: 1, pitch: 1, volume: 100 }
+    const a = ttsCacheKey(settings, 'Cherry', ' 你好。 ')
+    const b = ttsCacheKey(settings, 'Ethan', '你好。')
+    const c = ttsCacheKey(settings, 'Cherry', '你好。')
+    expect(a).not.toBe(b)
+    // 文本空白归一 → 同 key
+    expect(a).toBe(c)
+  })
+
+  it('scaledPauseMs divides by rate and clamps', () => {
+    expect(scaledPauseMs(0, 1)).toBe(0)
+    expect(scaledPauseMs(undefined, 1)).toBe(0)
+    expect(scaledPauseMs(400, 2)).toBe(200)
+    expect(scaledPauseMs(400, 0.5)).toBe(800)
+    expect(scaledPauseMs(999999, 0.5)).toBeLessThanOrEqual(10000)
   })
 })
 

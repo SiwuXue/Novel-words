@@ -362,6 +362,8 @@ export default {
   'settings.ttsVolume': '音量',
   'settings.ttsAutoNext': '自动连播下一章',
   'settings.ttsAutoNextHint': '读完当前章自动播放下一章',
+  'settings.ttsPauseSentence': '句间停顿',
+  'settings.ttsPauseOff': '不停顿',
   'settings.ttsPreview': '试听',
   'settings.ttsPreviewPlay': '试听',
   'characters.title': '角色音色',

@@ -423,6 +423,7 @@ function currentTtsSettings() {
         ? settingsStore.ttsDashKey
         : settingsStore.ttsMinimaxKey,
     groupId: settingsStore.ttsMinimaxGroupId,
+    sentencePauseMs: settingsStore.ttsPauseSentence,
   }
 }
 
