@@ -465,10 +465,11 @@ async function startTts(): Promise<void> {
   const spans = sentenceSpans.value
   const sentences = spans.map((s) => s.text)
   if (sentences.length === 0) return
-  // 对白分音色：角色面板开启时，按说话人覆盖每句音色
+  // 对白分音色：朗读方案为多音色模式且角色面板开启时，按说话人覆盖每句音色
   //（显式指派音色 > 性别默认音色 > 主音色）
-  const overrides = dialogueVoiceEnabled.value
-    ? buildVoiceOverrides(
+  const overrides =
+    dialogueVoiceEnabled.value && settingsStore.ttsVoiceMode === 'dialogue'
+      ? buildVoiceOverrides(
         spans,
         fullText.value,
         charVoices.value,

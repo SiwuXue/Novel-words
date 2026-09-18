@@ -265,6 +265,15 @@
       <!-- TTS 朗读 tab -->
       <el-tab-pane :label="t('settings.ttsTab')" name="tts">
         <el-form class="settings-form" label-width="140px">
+          <el-form-item :label="t('settings.ttsVoiceMode')">
+            <el-select v-model="ttsModeLocal" style="width: 280px" @change="onTtsModeChange">
+              <el-option value="single" :label="t('settings.ttsModeSingle')" />
+              <el-option value="dialogue" :label="t('settings.ttsModeDialogue')" />
+            </el-select>
+            <span class="backup-hint inline-hint">
+              {{ ttsModeLocal === 'single' ? t('settings.ttsModeSingleHint') : t('settings.ttsModeDialogueHint') }}
+            </span>
+          </el-form-item>
           <el-form-item :label="t('settings.ttsProfile')">
             <div class="profile-row">
               <el-select
@@ -366,7 +375,7 @@
             />
             <span class="backup-hint inline-hint">{{ t('settings.ttsKeyHint') }}</span>
           </el-form-item>
-          <el-form-item :label="t('settings.ttsVoice')">
+          <el-form-item :label="ttsModeLocal === 'single' ? t('settings.ttsVoiceOnly') : t('settings.ttsVoice')">
             <el-select
               v-model="ttsVoiceLocal"
               filterable
@@ -394,7 +403,7 @@
             </el-button>
             <span v-if="isCloudProvider" class="backup-hint inline-hint">{{ t('settings.ttsVoiceCustomHint') }}</span>
           </el-form-item>
-          <el-form-item :label="t('settings.ttsMaleVoice')">
+          <el-form-item v-if="ttsModeLocal === 'dialogue'" :label="t('settings.ttsMaleVoice')">
             <el-select
               v-model="ttsMaleVoiceLocal"
               filterable
@@ -419,7 +428,7 @@
             </el-button>
             <span class="backup-hint inline-hint">{{ t('settings.ttsGenderVoiceHint') }}</span>
           </el-form-item>
-          <el-form-item :label="t('settings.ttsFemaleVoice')">
+          <el-form-item v-if="ttsModeLocal === 'dialogue'" :label="t('settings.ttsFemaleVoice')">
             <el-select
               v-model="ttsFemaleVoiceLocal"
               filterable
@@ -443,7 +452,7 @@
               {{ t('settings.ttsPreviewPlay') }}
             </el-button>
           </el-form-item>
-          <el-form-item :label="t('settings.ttsQuoteStyles')">
+          <el-form-item v-if="ttsModeLocal === 'dialogue'" :label="t('settings.ttsQuoteStyles')">
             <el-checkbox-group v-model="ttsQuoteStylesLocal" @change="onTtsQuoteStylesChange">
               <el-checkbox value="“">{{ t('settings.ttsQuoteDouble') }}</el-checkbox>
               <el-checkbox value="‘">{{ t('settings.ttsQuoteSingle') }}</el-checkbox>
@@ -587,7 +596,7 @@ import {
   type TtsVoice,
   type VoiceGroup,
 } from '@/utils/ttsVoices'
-import { ttsProfileAutoLabel } from '@/utils/ttsProfile'
+import { ttsProfileAutoLabel, type TtsVoiceMode } from '@/utils/ttsProfile'
 import { isAndroid } from '@/utils/platform'
 import { currentLocale, t, setLocale, type Locale } from '@/i18n'
 import { AI_PROVIDER_PRESETS, getAiProvider } from '@/config/aiProviders'
@@ -869,6 +878,18 @@ function onTtsKeyChange(): void {
 
 // ===== 朗读方案（配置方案）管理 =====
 const profileActiveLocal = ref(settingsStore.ttsActiveProfile)
+const ttsModeLocal = ref<TtsVoiceMode>(settingsStore.ttsVoiceMode)
+
+watch(
+  () => settingsStore.ttsVoiceMode,
+  (v) => {
+    ttsModeLocal.value = v
+  },
+)
+
+function onTtsModeChange(v: TtsVoiceMode): void {
+  void settingsStore.setTtsSettings({ ttsVoiceMode: v })
+}
 
 watch(
   () => settingsStore.ttsActiveProfile,
@@ -884,6 +905,7 @@ function syncTtsLocals(): void {
   ttsRateLocal.value = settingsStore.ttsRate
   ttsPitchLocal.value = settingsStore.ttsPitch
   ttsVolumeLocal.value = settingsStore.ttsVolume
+  ttsModeLocal.value = settingsStore.ttsVoiceMode
   ttsMaleVoiceLocal.value = settingsStore.ttsMaleVoice
   ttsFemaleVoiceLocal.value = settingsStore.ttsFemaleVoice
   ttsQuoteStylesLocal.value = [...settingsStore.ttsQuoteStyles]
@@ -898,6 +920,7 @@ function currentAutoLabel(): string {
       rate: ttsRateLocal.value,
       pitch: ttsPitchLocal.value,
       volume: ttsVolumeLocal.value,
+      voiceMode: ttsModeLocal.value,
       maleVoice: ttsMaleVoiceLocal.value,
       femaleVoice: ttsFemaleVoiceLocal.value,
       quoteStyles: ttsQuoteStylesLocal.value,

@@ -5,6 +5,7 @@ import type { StepNum } from '@/types/pdfSteps'
 import { normalizeSteps, serializeSteps } from '@/types/pdfSteps'
 import type { SpeechAccent } from '@/utils/speech'
 import type { TtsProvider } from '@/utils/ttsPlayer'
+import type { TtsVoiceMode } from '@/utils/ttsProfile'
 import {
   newProfileId,
   normalizeProfileSettings,
@@ -32,6 +33,8 @@ interface TtsPrefs {
   ttsMaleVoice: string
   /** 对白角色默认女声音色（空 = 不套用） */
   ttsFemaleVoice: string
+  /** 朗读方案模式：single = 单音色；dialogue = 旁白/对白分音色 */
+  ttsVoiceMode: TtsVoiceMode
   /** 计入对白的引号开符集合（英文 " 恒定启用） */
   ttsQuoteStyles: string[]
 }
@@ -69,6 +72,8 @@ export const useSettingsStore = defineStore('settings', () => {
   /** 对白角色默认男/女声音色（空 = 不套用，走主音色） */
   const ttsMaleVoice = ref('')
   const ttsFemaleVoice = ref('')
+  /** 朗读方案模式：single = 单音色；dialogue = 旁白/对白分音色（引号检测 + 性别默认音色生效） */
+  const ttsVoiceMode = ref<TtsVoiceMode>('dialogue')
   /** 计入对白的引号开符（英文 " 恒定启用，不在此列） */
   const ttsQuoteStyles = ref<string[]>(['“', '‘', '「', '『'])
   /** 朗读方案（配置方案）：多套参数组合，快速切换即生效 */
@@ -193,6 +198,9 @@ export const useSettingsStore = defineStore('settings', () => {
                 break
               case 'tts_female_voice':
                 ttsFemaleVoice.value = s.value
+                break
+              case 'tts_voice_mode':
+                ttsVoiceMode.value = s.value === 'single' ? 'single' : 'dialogue'
                 break
               case 'tts_quote_styles': {
                 try {
@@ -336,6 +344,7 @@ export const useSettingsStore = defineStore('settings', () => {
       rate: ttsRate.value,
       pitch: ttsPitch.value,
       volume: ttsVolume.value,
+      voiceMode: ttsVoiceMode.value,
       maleVoice: ttsMaleVoice.value,
       femaleVoice: ttsFemaleVoice.value,
       quoteStyles: [...ttsQuoteStyles.value],
@@ -403,6 +412,7 @@ export const useSettingsStore = defineStore('settings', () => {
       ttsRate: s.rate,
       ttsPitch: s.pitch,
       ttsVolume: s.volume,
+      ttsVoiceMode: s.voiceMode,
       ttsMaleVoice: s.maleVoice,
       ttsFemaleVoice: s.femaleVoice,
       // 空集合视为全启用（与 tts_quote_styles 加载逻辑一致）
@@ -442,6 +452,8 @@ export const useSettingsStore = defineStore('settings', () => {
       set ttsMaleVoice(v: string) { ttsMaleVoice.value = v },
       get ttsFemaleVoice() { return ttsFemaleVoice.value },
       set ttsFemaleVoice(v: string) { ttsFemaleVoice.value = v },
+      get ttsVoiceMode() { return ttsVoiceMode.value },
+      set ttsVoiceMode(v: TtsVoiceMode) { ttsVoiceMode.value = v },
       get ttsQuoteStyles() { return ttsQuoteStyles.value },
       set ttsQuoteStyles(v: string[]) { ttsQuoteStyles.value = v },
     }
@@ -464,6 +476,7 @@ export const useSettingsStore = defineStore('settings', () => {
       ttsPauseSentence: 'tts_pause_sentence',
       ttsMaleVoice: 'tts_male_voice',
       ttsFemaleVoice: 'tts_female_voice',
+      ttsVoiceMode: 'tts_voice_mode',
       ttsQuoteStyles: 'tts_quote_styles',
     }
     try {
@@ -529,6 +542,7 @@ export const useSettingsStore = defineStore('settings', () => {
     ttsPauseSentence,
     ttsMaleVoice,
     ttsFemaleVoice,
+    ttsVoiceMode,
     ttsQuoteStyles,
     ttsProfiles,
     ttsActiveProfile,

@@ -511,8 +511,9 @@ async function startTtsReading(): Promise<void> {
   const spans = splitSentenceSpans(fullText)
   const sentences = spans.map((s) => s.text)
   if (sentences.length === 0) return
-  const overrides = dialogueVoiceEnabled.value
-    ? buildVoiceOverrides(
+  const overrides =
+    dialogueVoiceEnabled.value && settingsStore.ttsVoiceMode === 'dialogue'
+      ? buildVoiceOverrides(
         spans,
         fullText,
         charVoices.value,

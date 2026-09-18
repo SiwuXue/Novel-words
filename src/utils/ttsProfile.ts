@@ -8,12 +8,16 @@
 import { t } from '@/i18n'
 import type { TtsProvider } from '@/utils/ttsPlayer'
 
+/** 朗读方案模式：单音色 = 全书同一音色；dialogue = 旁白/对白分音色 */
+export type TtsVoiceMode = 'single' | 'dialogue'
+
 export interface TtsProfileSettings {
   provider: TtsProvider
   voice: string
   rate: number
   pitch: number
   volume: number
+  voiceMode: TtsVoiceMode
   maleVoice: string
   femaleVoice: string
   quoteStyles: string[]
@@ -43,8 +47,10 @@ function providerShort(provider: TtsProvider): string {
 /** 方案自动标签：`Edge TTS · 旁白/对白` / `系统语音 · 单音色`（仿 ColorTxt） */
 export function ttsProfileAutoLabel(p: Pick<TtsProfile, 'settings'>): string {
   const provider = providerShort(p.settings.provider)
-  const multi = Boolean(p.settings.maleVoice || p.settings.femaleVoice)
-  const mode = multi ? t('settings.ttsProfileModeMulti') : t('settings.ttsProfileModeSingle')
+  const mode =
+    p.settings.voiceMode === 'dialogue'
+      ? t('settings.ttsProfileModeMulti')
+      : t('settings.ttsProfileModeSingle')
   return `${provider} · ${mode}`
 }
 
@@ -64,6 +70,7 @@ export function normalizeProfileSettings(
     rate: num(raw.rate, 0.5, 2, 1),
     pitch: num(raw.pitch, 0.5, 2, 1),
     volume: num(raw.volume, 0, 100, 100),
+    voiceMode: raw.voiceMode === 'single' ? 'single' : 'dialogue',
     maleVoice: typeof raw.maleVoice === 'string' ? raw.maleVoice : '',
     femaleVoice: typeof raw.femaleVoice === 'string' ? raw.femaleVoice : '',
     quoteStyles: Array.isArray(raw.quoteStyles)
