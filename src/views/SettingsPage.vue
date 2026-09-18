@@ -262,6 +262,42 @@
       </el-tab-pane>
 
       <!-- Backup / restore tab -->
+      <!-- TTS 朗读 tab -->
+      <el-tab-pane :label="t('settings.ttsTab')" name="tts">
+        <el-form class="settings-form" label-width="140px">
+          <el-form-item :label="t('settings.ttsProvider')">
+            <el-select v-model="ttsProviderLocal" style="width: 280px" @change="onTtsProviderChange">
+              <el-option value="edge" :label="t('settings.ttsEdge')" />
+              <el-option value="system" :label="t('settings.ttsSystem')" />
+            </el-select>
+            <span class="backup-hint inline-hint">{{ t('settings.ttsProviderHint') }}</span>
+          </el-form-item>
+          <el-form-item :label="t('settings.ttsVoice')">
+            <el-select v-model="ttsVoiceLocal" filterable style="width: 280px" @change="onTtsVoiceChange">
+              <el-option v-for="v in voiceOptions" :key="v.id" :value="v.id" :label="v.label" />
+            </el-select>
+          </el-form-item>
+          <el-form-item :label="t('settings.ttsRate')">
+            <el-slider v-model="ttsRateLocal" :min="0.5" :max="2" :step="0.05" style="width: 280px" @change="onTtsParamsChange" />
+          </el-form-item>
+          <el-form-item :label="t('settings.ttsPitch')">
+            <el-slider v-model="ttsPitchLocal" :min="0.5" :max="1.5" :step="0.05" style="width: 280px" @change="onTtsParamsChange" />
+          </el-form-item>
+          <el-form-item :label="t('settings.ttsVolume')">
+            <el-slider v-model="ttsVolumeLocal" :min="0" :max="100" :step="5" style="width: 280px" @change="onTtsParamsChange" />
+          </el-form-item>
+          <el-form-item :label="t('settings.ttsAutoNext')">
+            <el-switch v-model="ttsAutoNextLocal" @change="onTtsAutoNextChange" />
+            <span class="backup-hint inline-hint">{{ t('settings.ttsAutoNextHint') }}</span>
+          </el-form-item>
+          <el-form-item :label="t('settings.ttsPreview')">
+            <el-button type="primary" plain size="small" :loading="ttsPreviewing" @click="previewTts">
+              {{ t('settings.ttsPreviewPlay') }}
+            </el-button>
+          </el-form-item>
+        </el-form>
+      </el-tab-pane>
+
       <el-tab-pane :label="t('settings.backup')" name="backup">
         <el-form class="settings-form" label-width="130px">
           <el-form-item :label="t('settings.backupData')">
@@ -298,6 +334,7 @@ import type { PdfBackground, AutoBackup } from '@/stores/settingsStore'
 import { useVocabBookStore } from '@/stores/vocabBookStore'
 import { type StepNum } from '@/types/pdfSteps'
 import { speakWord, type SpeechAccent } from '@/utils/speech'
+import { ttsPlayer } from '@/utils/ttsPlayer'
 import { isAndroid } from '@/utils/platform'
 import { currentLocale, t, setLocale, type Locale } from '@/i18n'
 import { AI_PROVIDER_PRESETS, getAiProvider } from '@/config/aiProviders'
@@ -424,6 +461,83 @@ function onAccentChange(accent: SpeechAccent) {
 
 function onTestAccent() {
   speakWord('hello', settingsStore.speechAccent)
+}
+
+// ===== TTS 朗读设置 =====
+const ttsProviderLocal = ref(settingsStore.ttsProvider)
+const ttsVoiceLocal = ref(settingsStore.ttsVoice)
+const ttsRateLocal = ref(settingsStore.ttsRate)
+const ttsPitchLocal = ref(settingsStore.ttsPitch)
+const ttsVolumeLocal = ref(settingsStore.ttsVolume)
+const ttsAutoNextLocal = ref(settingsStore.ttsAutoNext)
+const voiceOptions = ref<Array<{ id: string; label: string }>>([])
+const ttsPreviewing = ref(false)
+
+async function loadVoiceOptions(): Promise<void> {
+  if (ttsProviderLocal.value === 'edge') {
+    try {
+      const list = await invoke<Array<[string, string, string]>>('tts_voices')
+      voiceOptions.value = list.map(([id, name, lang]) => ({ id, label: `${name} (${lang})` }))
+    } catch {
+      voiceOptions.value = []
+    }
+  } else {
+    const synth = window.speechSynthesis
+    const voices = synth ? synth.getVoices() : []
+    voiceOptions.value = [
+      { id: '', label: t('settings.ttsSystemDefault') },
+      ...voices.map((v) => ({ id: v.name, label: `${v.name} (${v.lang})` })),
+    ]
+  }
+}
+
+function onTtsProviderChange(v: 'edge' | 'system'): void {
+  ttsProviderLocal.value = v
+  void settingsStore.setTtsSettings({ ttsProvider: v })
+  if (v === 'edge') {
+    ttsVoiceLocal.value = 'zh-CN-XiaoxiaoNeural'
+  } else {
+    ttsVoiceLocal.value = ''
+  }
+  void settingsStore.setTtsSettings({ ttsVoice: ttsVoiceLocal.value })
+  void loadVoiceOptions()
+}
+
+function onTtsVoiceChange(v: string): void {
+  void settingsStore.setTtsSettings({ ttsVoice: v })
+}
+
+function onTtsParamsChange(): void {
+  void settingsStore.setTtsSettings({
+    ttsRate: ttsRateLocal.value,
+    ttsPitch: ttsPitchLocal.value,
+    ttsVolume: ttsVolumeLocal.value,
+  })
+}
+
+function onTtsAutoNextChange(v: boolean | string | number | undefined): void {
+  void settingsStore.setTtsSettings({ ttsAutoNext: Boolean(v) })
+}
+
+async function previewTts(): Promise<void> {
+  const voice = ttsVoiceLocal.value
+  const sample = voice.startsWith('zh')
+    ? '你好，这是词阅的语音朗读试听。'
+    : 'Hello, this is a voice reading preview from CiYue.'
+  ttsPreviewing.value = true
+  try {
+    await ttsPlayer.start([sample], {
+      provider: ttsProviderLocal.value,
+      voice,
+      rate: ttsRateLocal.value,
+      pitch: ttsPitchLocal.value,
+      volume: ttsVolumeLocal.value,
+    })
+  } catch (e) {
+    ElMessage.error(String(e && (e as Error).message ? (e as Error).message : e))
+  } finally {
+    ttsPreviewing.value = false
+  }
 }
 
 /** DeepLX 端点本地编辑态（change 时持久化，留空恢复默认） */
@@ -644,6 +758,7 @@ async function onRestore() {
 }
 
 onMounted(() => {
+  void loadVoiceOptions()
   if (vocabBookStore.books.length === 0) {
     vocabBookStore.fetchAll()
   }

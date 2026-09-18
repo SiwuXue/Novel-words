@@ -87,6 +87,20 @@
         >
           {{ t('wordTap.toggle') }}
         </el-button>
+        <el-button
+          v-if="!wordTapMode"
+          size="small"
+          :type="ttsState === 'playing' ? 'warning' : 'default'"
+          @click="toggleTtsReading"
+        >
+          {{ ttsLabel }}
+        </el-button>
+        <el-button v-if="!wordTapMode && ttsState !== 'idle'" size="small" @click="stopTtsReading">
+          {{ t('reading.ttsStop') }}
+        </el-button>
+        <span v-if="!wordTapMode && ttsState !== 'idle'" class="tts-progress-label" role="status">
+          {{ ttsProgressLabel }}
+        </span>
         <el-button size="small" @click="exitReadingMode">
           {{ t('ui.editContent') }}
         </el-button>
@@ -142,6 +156,7 @@
           :content="editorContent"
           :novel-id="currentNovelId"
           :chapter-id="editorStore.chapterList[editorStore.activeChapterIndex]?.id ?? null"
+          @tts-next="onWordTapTtsNext"
         />
         <NovelEditor
           v-else
@@ -312,6 +327,7 @@ const WordTapReader = defineAsyncComponent(() => import('@/components/novel/Word
 import ChapterList from '@/components/novel/ChapterList.vue'
 import PreviewPanel from '@/components/novel/PreviewPanel.vue'
 import { buildHtml as buildPreviewHtml } from '@/utils/pdfPreview'
+import { ttsPlayer, splitSentences } from '@/utils/ttsPlayer'
 import { useSplitLayout } from '@/composables/useSplitLayout'
 import { t } from '@/i18n'
 
@@ -365,6 +381,72 @@ const pdfTemplateLabel = computed(() => t(pdfTemplateType.value === 'card' ? 'ed
 const isEnglishMode = computed(() => store.currentNovel?.language === 'en')
 /** 英文逐词阅读模式（仅专注阅读 + 英文小说时可用） */
 const wordTapMode = ref(false)
+
+// ===== TTS 朗读（普通阅读模式） =====
+const ttsState = computed(() => ttsPlayer.state)
+const ttsLabel = computed(() => {
+  if (ttsState.value === 'playing') return t('reading.ttsPause')
+  if (ttsState.value === 'paused') return t('reading.ttsResume')
+  return t('reading.ttsPlay')
+})
+const ttsProgressLabel = computed(() => {
+  const i = ttsPlayer.currentIndex.value
+  const n = ttsPlayer.totalSentences.value
+  return n > 0 ? `${Math.max(1, i + 1)}/${n}` : ''
+})
+
+function htmlToPlainText(html: string): string {
+  const doc = new DOMParser().parseFromString(html || '', 'text/html')
+  return (doc.body.textContent ?? '').replace(/\s+/g, ' ').trim()
+}
+
+function currentTtsSettings() {
+  return {
+    provider: settingsStore.ttsProvider,
+    voice: settingsStore.ttsVoice,
+    rate: settingsStore.ttsRate,
+    pitch: settingsStore.ttsPitch,
+    volume: settingsStore.ttsVolume,
+  }
+}
+
+async function toggleTtsReading(): Promise<void> {
+  if (ttsState.value === 'playing') {
+    ttsPlayer.pause()
+    return
+  }
+  if (ttsState.value === 'paused') {
+    ttsPlayer.resume()
+    return
+  }
+  await startTtsReading()
+}
+
+async function startTtsReading(): Promise<void> {
+  const sentences = splitSentences(htmlToPlainText(editorContent.value))
+  if (sentences.length === 0) return
+  await ttsPlayer.start(sentences, currentTtsSettings(), {
+    onFinish: (completed) => {
+      if (completed && settingsStore.ttsAutoNext && hasNextChapter.value) {
+        void (async () => {
+          await scrollToChapter(editorStore.activeChapterIndex + 1, { keepTts: true })
+          await nextTick()
+          if (readingMode.value && !wordTapMode.value) await startTtsReading()
+        })()
+      }
+    },
+  })
+}
+
+function stopTtsReading(): void {
+  ttsPlayer.stop()
+}
+
+async function onWordTapTtsNext(): Promise<void> {
+  if (hasNextChapter.value) {
+    await scrollToChapter(editorStore.activeChapterIndex + 1, { keepTts: true })
+  }
+}
 const coverEnabled = ref(false)
 const pageNumbersEnabled = ref(false)
 
@@ -485,7 +567,10 @@ async function setReadingMode(enabled: boolean) {
   const position = editorRef.value?.getScrollPercent() ?? 0
   readingMode.value = enabled
   // 退出阅读时收起逐词模式，回到编辑器视图
-  if (!enabled) wordTapMode.value = false
+  if (!enabled) {
+    wordTapMode.value = false
+    ttsPlayer.stop()
+  }
   readingSettingsOpen.value = false
   const query = { ...route.query }
   if (enabled) query.mode = 'read'
@@ -1130,9 +1215,10 @@ onBeforeRouteLeave(async (_to, _from, next) => {
   }
 })
 
-async function scrollToChapter(index: number) {
+async function scrollToChapter(index: number, opts?: { keepTts?: boolean }) {
   if (changingChapter) return
   changingChapter = true
+  if (!opts?.keepTts) ttsPlayer.stop()
   try {
     const previousChapter = currentChapter.value
     if (editorStore.isDirty) await editorStore.flushSave(currentNovelId.value, editorContent.value, previousChapter?.id || null)

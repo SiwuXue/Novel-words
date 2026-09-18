@@ -5,6 +5,7 @@ mod dictionary;
 mod license;
 mod models;
 mod pdf;
+mod tts;
 mod preset_catalog;
 mod user_vocab;
 mod utils;
@@ -66,6 +67,7 @@ use commands::vocab_word::{
 };
 use dictionary::{dict_lookup_chinese, dict_lookup_english, DictDbState};
 use dict_online::{dict_online_cambridge, dict_online_youdao, dict_translate_sentence};
+use tts::{tts_synthesize, tts_voices};
 
 /// Android packages resources as APK assets, represented by an `asset://` URI.
 /// The SQLite and import code works with normal filesystem paths, so materialize
@@ -341,6 +343,8 @@ pub fn run() {
                 lookup_word_tap_states,
                 lookup_word_tap_phrases,
                 word_tap_today_new_count,
+                tts_synthesize,
+                tts_voices,
                 import_preset_vocab_book,
                 commit_preset_clone_with_state,
                 list_preset_vocab_books,

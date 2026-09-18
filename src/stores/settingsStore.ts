@@ -5,6 +5,15 @@ import type { StepNum } from '@/types/pdfSteps'
 import { normalizeSteps, serializeSteps } from '@/types/pdfSteps'
 import type { SpeechAccent } from '@/utils/speech'
 
+interface TtsPrefs {
+  ttsProvider: 'edge' | 'system'
+  ttsVoice: string
+  ttsRate: number
+  ttsPitch: number
+  ttsVolume: number
+  ttsAutoNext: boolean
+}
+
 export type PdfBackground = 'grid' | 'dots' | 'none'
 
 export type AutoBackup = 'off' | 'daily' | 'weekly' | 'monthly'
@@ -20,6 +29,13 @@ export const useSettingsStore = defineStore('settings', () => {
   const speechAccent = ref<SpeechAccent>('us')
   /** 每日新词上限（0 = 不限），阅读中标记新词超过时提醒 */
   const dailyNewWordLimit = ref(0)
+  /** 朗读：服务商 edge/system、音色、语速/音调倍率、音量、自动连播 */
+  const ttsProvider = ref<'edge' | 'system'>('system')
+  const ttsVoice = ref('zh-CN-XiaoxiaoNeural')
+  const ttsRate = ref(1)
+  const ttsPitch = ref(1)
+  const ttsVolume = ref(100)
+  const ttsAutoNext = ref(true)
   /** DeepLX 翻译端点（空串 = 使用 Rust 端默认公共实例） */
   const deeplEndpoint = ref('')
   const loaded = ref(false)
@@ -81,6 +97,30 @@ export const useSettingsStore = defineStore('settings', () => {
                 if (Number.isFinite(n) && n >= 0) dailyNewWordLimit.value = Math.floor(n)
                 break
               }
+              case 'tts_provider':
+                if (s.value === 'edge' || s.value === 'system') ttsProvider.value = s.value
+                break
+              case 'tts_voice':
+                if (s.value) ttsVoice.value = s.value
+                break
+              case 'tts_rate': {
+                const n = Number(s.value)
+                if (Number.isFinite(n) && n >= 0.5 && n <= 2) ttsRate.value = n
+                break
+              }
+              case 'tts_pitch': {
+                const n = Number(s.value)
+                if (Number.isFinite(n) && n >= 0.5 && n <= 1.5) ttsPitch.value = n
+                break
+              }
+              case 'tts_volume': {
+                const n = Number(s.value)
+                if (Number.isFinite(n) && n >= 0 && n <= 100) ttsVolume.value = n
+                break
+              }
+              case 'tts_auto_next':
+                ttsAutoNext.value = s.value !== 'false'
+                break
               case 'deepl_endpoint':
                 deeplEndpoint.value = s.value
                 break
@@ -175,6 +215,43 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
+  function ttsPrefsTarget(): TtsPrefs {
+    return {
+      get ttsProvider() { return ttsProvider.value },
+      set ttsProvider(v: 'edge' | 'system') { ttsProvider.value = v },
+      get ttsVoice() { return ttsVoice.value },
+      set ttsVoice(v: string) { ttsVoice.value = v },
+      get ttsRate() { return ttsRate.value },
+      set ttsRate(v: number) { ttsRate.value = v },
+      get ttsPitch() { return ttsPitch.value },
+      set ttsPitch(v: number) { ttsPitch.value = v },
+      get ttsVolume() { return ttsVolume.value },
+      set ttsVolume(v: number) { ttsVolume.value = v },
+      get ttsAutoNext() { return ttsAutoNext.value },
+      set ttsAutoNext(v: boolean) { ttsAutoNext.value = v },
+    }
+  }
+
+  async function setTtsSettings(patch: Partial<Pick<TtsPrefs, 'ttsProvider' | 'ttsVoice' | 'ttsRate' | 'ttsPitch' | 'ttsVolume' | 'ttsAutoNext'>>) {
+    Object.assign(ttsPrefsTarget(), patch)
+    const keyMap: Partial<Record<keyof TtsPrefs, string>> = {
+      ttsProvider: 'tts_provider',
+      ttsVoice: 'tts_voice',
+      ttsRate: 'tts_rate',
+      ttsPitch: 'tts_pitch',
+      ttsVolume: 'tts_volume',
+      ttsAutoNext: 'tts_auto_next',
+    }
+    try {
+      for (const [k, v] of Object.entries(patch)) {
+        const settingKey = keyMap[k as keyof TtsPrefs]
+        if (settingKey) await invoke('set_setting', { key: settingKey, value: String(v) })
+      }
+    } catch (e) {
+      console.error('[settingsStore] setTtsSettings failed:', e)
+    }
+  }
+
   async function setDailyNewWordLimit(n: number) {
     dailyNewWordLimit.value = n
     try {
@@ -212,6 +289,12 @@ export const useSettingsStore = defineStore('settings', () => {
     reviewDailyGoal,
     speechAccent,
     dailyNewWordLimit,
+    ttsProvider,
+    ttsVoice,
+    ttsRate,
+    ttsPitch,
+    ttsVolume,
+    ttsAutoNext,
     deeplEndpoint,
     loaded,
     load,
@@ -225,5 +308,6 @@ export const useSettingsStore = defineStore('settings', () => {
     setSpeechAccent,
     setDeeplEndpoint,
     setDailyNewWordLimit,
+    setTtsSettings,
   }
 })

@@ -2,6 +2,22 @@
   <div class="word-tap-reader">
     <!-- 计数条 + 短语操作 + 读完操作 -->
     <div class="wt-toolbar">
+      <span class="wt-tts-controls">
+        <el-button
+          size="small"
+          :type="ttsState === 'idle' ? 'default' : 'warning'"
+          :disabled="finishing"
+          @click="toggleTts"
+        >
+          {{ ttsLabel }}
+        </el-button>
+        <el-button v-if="ttsState !== 'idle'" size="small" @click="stopTts">
+          {{ t('wordTap.ttsStop') }}
+        </el-button>
+        <span v-if="ttsState !== 'idle'" class="wt-tts-progress" role="status">
+          {{ ttsProgress }}
+        </span>
+      </span>
       <span class="wt-counts" role="status" :aria-label="t('wordTap.countsLabel')">
         <span class="wt-c wt-c-new">{{ t('wordTap.new') }} {{ counts.new }}</span>
         <span class="wt-c wt-c-unknown">{{ t('wordTap.unknown') }} {{ counts.unknown }}</span>
@@ -43,8 +59,9 @@
             <span
               v-if="token.type === 'word' || token.type === 'phrase'"
               class="wt-word"
-              :class="stateClass(states[token.key])"
+              :class="[stateClass(states[token.key ?? '']), isSpeaking(token as SerialToken) ? 'wt-speaking' : '']"
               :data-key="token.key"
+              :data-tok="token.serial"
               @click="onWordClick($event, token)"
             >{{ token.text }}</span>
             <template v-else>{{ token.text }}</template>
@@ -69,7 +86,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
@@ -77,6 +94,7 @@ import DictLookupPopover from './DictLookupPopover.vue'
 import { useDictionaryStore } from '@/stores/dictionaryStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { speakWord } from '@/utils/speech'
+import { ttsPlayer, splitSentenceSpans, type SentenceSpan } from '@/utils/ttsPlayer'
 import {
   parseWordTapBlocks,
   collectWordKeys,
@@ -98,6 +116,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'mark', payload: { word: string; proficiency: Proficiency }): void
+  (e: 'ttsNext'): void
 }>()
 
 /** 单次渲染的块数（滚动到底自动加载） */
@@ -127,7 +146,38 @@ const todayNewCount = ref(0)
 const displayedBlocks = computed<WordTapBlock[]>(() =>
   mergePhrases(blocks.value, phrases.value),
 )
-const visibleBlocks = computed(() => displayedBlocks.value.slice(0, visibleCount.value))
+
+interface SerialToken {
+  type: 'word' | 'text' | 'phrase'
+  text: string
+  key?: string
+  serial?: number
+  start: number
+  end: number
+}
+
+/** 带全局 token 序号与字符偏移的渲染块（朗读高亮映射用） */
+const renderInfo = computed(() => {
+  let serial = 0
+  let offset = 0
+  const parts: string[] = []
+  const blocks = displayedBlocks.value.map((block) => ({
+    tag: block.tag,
+    tokens: block.tokens.map<SerialToken>((t) => {
+      const start = offset
+      offset += t.text.length
+      parts.push(t.text)
+      if (t.type === 'word' || t.type === 'phrase') {
+        return { type: t.type, text: t.text, key: t.key, serial: serial++, start, end: offset }
+      }
+      return { type: 'text', text: t.text, start, end: offset }
+    }),
+  }))
+  parts.push('\n\n')
+  return { blocks, fullText: parts.join(''), tokenCount: serial }
+})
+const fullText = computed(() => renderInfo.value.fullText)
+const visibleBlocks = computed(() => renderInfo.value.blocks.slice(0, visibleCount.value))
 const visibleBlocksWithIndex = computed(() =>
   visibleBlocks.value.map((block, index) => ({ block, index })),
 )
@@ -246,7 +296,7 @@ function clearSelection() {
   selection.value = null
 }
 
-function onWordClick(e: MouseEvent, token: WordToken | PhraseToken) {
+function onWordClick(e: MouseEvent, token: WordToken | PhraseToken | SerialToken) {
   const el = e.currentTarget as HTMLElement
   // 已保存短语：直接打开弹窗（快捷标记/收藏用），不参与组词
   if (token.type === 'phrase') {
@@ -266,7 +316,7 @@ function onWordClick(e: MouseEvent, token: WordToken | PhraseToken) {
     }
     el.classList.add('wt-selecting')
     selection.value.els.push(el)
-    selection.value.keys.push(token.key)
+    selection.value.keys.push(token.key ?? wordKey(token.text))
     selection.value.texts.push(token.text)
     lastWordEl = el
     popover.value = { ...popover.value, visible: false }
@@ -299,6 +349,108 @@ function onMarked(payload: { word: string; proficiency: Proficiency }) {
   if (isNew) noteNewWordIfNeeded(key)
   emit('mark', payload)
 }
+
+// ---------- 朗读（TTS） ----------
+
+const speakingRange = ref<{ from: number; to: number } | null>(null)
+const autoRestart = ref(false)
+const ttsState = computed(() => ttsPlayer.state)
+const sentenceSpans = computed(() => splitSentenceSpans(fullText.value))
+const ttsProgress = computed(() => {
+  const i = ttsPlayer.currentIndex.value
+  const n = ttsPlayer.totalSentences.value
+  return n > 0 ? `${Math.max(1, i + 1)}/${n}` : ''
+})
+const ttsLabel = computed(() => {
+  if (ttsState.value === 'playing') return t('wordTap.ttsPause')
+  if (ttsState.value === 'paused') return t('wordTap.ttsResume')
+  return t('wordTap.ttsPlay')
+})
+
+function isSpeaking(token: SerialToken): boolean {
+  if (!speakingRange.value || token.serial === undefined) return false
+  return token.serial >= speakingRange.value.from && token.serial <= speakingRange.value.to
+}
+
+function highlightSentence(index: number): void {
+  const span: SentenceSpan | undefined = sentenceSpans.value[index]
+  if (!span) {
+    speakingRange.value = null
+    return
+  }
+  let from = -1
+  let to = -1
+  for (const block of renderInfo.value.blocks) {
+    for (const token of block.tokens) {
+      if (token.serial === undefined) continue
+      if (token.start < span.end && token.end > span.start) {
+        if (from === -1) from = token.serial
+        to = token.serial
+      }
+    }
+  }
+  speakingRange.value = from === -1 ? null : { from, to }
+  void nextTick(() => {
+    if (from === -1) return
+    const first = document.querySelector(`.wt-word[data-tok="${from}"]`)
+    first?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  })
+}
+
+function currentTtsSettings() {
+  return {
+    provider: settingsStore.ttsProvider,
+    voice: settingsStore.ttsVoice,
+    rate: settingsStore.ttsRate,
+    pitch: settingsStore.ttsPitch,
+    volume: settingsStore.ttsVolume,
+  }
+}
+
+async function toggleTts(): Promise<void> {
+  if (ttsPlayer.state === 'playing') {
+    ttsPlayer.pause()
+    return
+  }
+  if (ttsPlayer.state === 'paused') {
+    ttsPlayer.resume()
+    return
+  }
+  await startTts()
+}
+
+async function startTts(): Promise<void> {
+  const sentences = sentenceSpans.value.map((s) => s.text)
+  if (sentences.length === 0) return
+  await ttsPlayer.start(sentences, currentTtsSettings(), {
+    onSentenceStart: (i) => highlightSentence(i),
+    onFinish: (completed) => {
+      speakingRange.value = null
+      if (completed && settingsStore.ttsAutoNext) {
+        autoRestart.value = true
+        emit('ttsNext')
+      }
+    },
+  })
+}
+
+function stopTts(): void {
+  autoRestart.value = false
+  ttsPlayer.stop()
+  speakingRange.value = null
+}
+
+// 章节内容变化（连播切章）→ 因连播触发时自动重新开始朗读
+watch(
+  () => props.content,
+  () => {
+    speakingRange.value = null
+    if (autoRestart.value) {
+      autoRestart.value = false
+      void nextTick(() => void startTts())
+    }
+  },
+)
 
 // ---------- 保存短语 ----------
 
