@@ -489,6 +489,8 @@ export default {
   'reading.autoScrollSpeedVerySlow': '很慢 · {s} 秒',
   'reading.autoScrollStepLine': '每次一行',
   'reading.autoScrollStepScreen': '每次一屏',
+  'reading.autoScrollInterval': '自动滚动间隔',
+  'reading.autoScrollStep': '自动滚动步进',
 
   // ---- Import dialog ----
   'import.customRule': '自定义章节规则',

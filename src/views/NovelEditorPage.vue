@@ -30,6 +30,18 @@
           <span>{{ readingRemainingLabel }}</span>
           <span class="reading-hotkey-hint">{{ t('reading.shortcutHint') }}</span>
         </div>
+        <el-tooltip :content="isTimedScrollActive ? t('reading.autoScrollActive') : t('reading.autoScroll')" placement="bottom">
+          <el-button
+            v-if="!wordTapMode"
+            size="small"
+            circle
+            :type="isTimedScrollActive ? 'primary' : ''"
+            :aria-label="t('reading.autoScroll')"
+            @click="toggleAutoScroll"
+          >
+            <el-icon><Bottom /></el-icon>
+          </el-button>
+        </el-tooltip>
         <el-popover v-model:visible="readingSettingsOpen" placement="bottom-end" :width="320" trigger="click">
           <template #reference>
             <el-button size="small" circle :aria-label="t('reading.settings')" :title="t('reading.settings')">
@@ -60,6 +72,33 @@
                 <el-radio-button :value="620">{{ t('ui.widthNarrow') }}</el-radio-button>
                 <el-radio-button :value="760">{{ t('ui.widthMedium') }}</el-radio-button>
                 <el-radio-button :value="920">{{ t('ui.widthWide') }}</el-radio-button>
+              </el-radio-group>
+            </label>
+            <label class="reading-setting-row">
+              <span>{{ t('reading.autoScrollInterval') }}</span>
+              <el-select
+                :model-value="settingsStore.autoScrollIntervalMs"
+                size="small"
+                style="width: 150px"
+                @change="(v: number) => settingsStore.setAutoScrollSettings({ intervalMs: v })"
+              >
+                <el-option
+                  v-for="p in TIMED_SCROLL_SPEED_PRESETS"
+                  :key="p.intervalMs"
+                  :value="p.intervalMs"
+                  :label="t(p.labelKey, { s: p.intervalMs / 1000 })"
+                />
+              </el-select>
+            </label>
+            <label class="reading-setting-row">
+              <span>{{ t('reading.autoScrollStep') }}</span>
+              <el-radio-group
+                :model-value="settingsStore.autoScrollRange"
+                size="small"
+                @update:model-value="(v: TimedScrollRange) => settingsStore.setAutoScrollSettings({ range: v })"
+              >
+                <el-radio-button value="line">{{ t('reading.autoScrollStepLine') }}</el-radio-button>
+                <el-radio-button value="screen">{{ t('reading.autoScrollStepScreen') }}</el-radio-button>
               </el-radio-group>
             </label>
           </div>
@@ -266,49 +305,6 @@
       <el-button text :aria-label="t('reading.previousChapter')" :disabled="!hasPreviousChapter" @click="goToPreviousChapter">
         <el-icon><ArrowLeft /></el-icon> {{ t('reading.previousChapter') }}
       </el-button>
-      <span class="auto-scroll-group">
-        <el-tooltip :content="isTimedScrollActive ? t('reading.autoScrollActive') : t('reading.autoScroll')" placement="top">
-          <button
-            type="button"
-            class="auto-scroll-toggle"
-            :class="{ 'auto-scroll-on': isTimedScrollActive }"
-            :aria-label="t('reading.autoScroll')"
-            @click="toggleAutoScroll"
-          >
-            <el-icon><Bottom /></el-icon>
-          </button>
-        </el-tooltip>
-        <el-dropdown trigger="click" popper-class="auto-scroll-popper" @command="onAutoScrollCommand">
-          <button type="button" class="auto-scroll-caret" :aria-label="t('reading.autoScroll')">
-            <el-icon><ArrowDown /></el-icon>
-          </button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item
-                v-for="p in TIMED_SCROLL_SPEED_PRESETS"
-                :key="p.intervalMs"
-                :command="`speed:${p.intervalMs}`"
-                :class="{ 'is-current-speed': settingsStore.autoScrollIntervalMs === p.intervalMs }"
-              >
-                {{ t(p.labelKey, { s: p.intervalMs / 1000 }) }}
-              </el-dropdown-item>
-              <el-dropdown-item
-                divided
-                :command="'range:line'"
-                :class="{ 'is-current-speed': settingsStore.autoScrollRange === 'line' }"
-              >
-                {{ t('reading.autoScrollStepLine') }}
-              </el-dropdown-item>
-              <el-dropdown-item
-                :command="'range:screen'"
-                :class="{ 'is-current-speed': settingsStore.autoScrollRange === 'screen' }"
-              >
-                {{ t('reading.autoScrollStepScreen') }}
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
-      </span>
       <div class="reading-progress-wrap" :title="t('reading.shortcutHint')">
         <el-progress :percentage="readingPercent" :stroke-width="5" :show-text="false" />
         <span>{{ currentChapterTitle }} · {{ readingPercent }}%</span>
@@ -380,7 +376,6 @@ import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import {
   ArrowLeft,
   ArrowRight,
-  ArrowDown,
   Bottom,
   Loading,
   Printer,
@@ -615,23 +610,13 @@ const {
   getScrollEl: () => editorRef.value?.getScrollEl() ?? null,
   settings: timedScrollSettings,
   canStart: () =>
-    readingMode.value && loadState.value === 'loaded' && !!editorRef.value?.isContentReady(),
+    readingMode.value && !wordTapMode.value && loadState.value === 'loaded' && !!editorRef.value?.isContentReady(),
 })
 
 /** 开自动滚动前先停朗读（朗读开启侧由 watch(ttsState) 兜底互斥） */
 function toggleAutoScroll(): void {
   if (!isTimedScrollActive.value && ttsState.value === 'playing') stopTtsReading()
   toggleTimedScroll()
-}
-
-function onAutoScrollCommand(command: string | number | object): void {
-  const [kind, raw] = String(command).split(':')
-  if (kind === 'speed') {
-    const n = Number(raw)
-    if (Number.isFinite(n)) void settingsStore.setAutoScrollSettings({ intervalMs: n })
-  } else if (kind === 'range') {
-    void settingsStore.setAutoScrollSettings({ range: raw as TimedScrollRange })
-  }
 }
 
 // 朗读开始即停自动滚动（覆盖控制条/所有朗读入口）
@@ -1703,31 +1688,6 @@ function attachScrollListener() {
 .reading-bottom-bar > * {
   pointer-events: auto;
 }
-/* 自动滚动：text 图标组（主键 toggle + 箭头下拉），与上下章按钮同语言 */
-.auto-scroll-group { display: inline-flex; align-items: center; }
-.auto-scroll-toggle,
-.auto-scroll-caret {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 24px;
-  padding: 0 7px;
-  border: none;
-  background: transparent;
-  color: var(--text-primary, #303133);
-  cursor: pointer;
-  border-radius: 6px;
-}
-.auto-scroll-toggle { font-size: 17px; }
-.auto-scroll-caret { font-size: 12px; color: var(--text-secondary, #909399); }
-.auto-scroll-toggle:hover,
-.auto-scroll-caret:hover {
-  background: color-mix(in srgb, var(--text-primary, #303133) 8%, transparent);
-}
-.auto-scroll-toggle.auto-scroll-on { color: var(--accent-color, #409eff); }
-.auto-scroll-toggle.auto-scroll-on:hover {
-  background: color-mix(in srgb, var(--accent-color, #409eff) 12%, transparent);
-}
 .reading-progress-wrap {
   width: min(36vw, 420px);
   padding: 8px 14px;
@@ -1905,10 +1865,4 @@ function attachScrollListener() {
 .editor-topbar .novel-title { flex:1; min-width:80px; }
 .reading-topbar-meta { display:none; }
 @media(max-width:600px) { .editor-topbar { padding:8px; }.reading-mode .save-status { display:none; } }
-/* 自动滚动下拉菜单 teleport 到 body，需全局样式 */
-:global(.el-dropdown-menu__item.is-current-speed) {
-  color: var(--accent-color, #409eff);
-  font-weight: 600;
-  background: color-mix(in srgb, var(--accent-color, #409eff) 8%, transparent);
-}
 </style>

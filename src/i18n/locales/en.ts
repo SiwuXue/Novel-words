@@ -489,6 +489,8 @@ export default {
   'reading.autoScrollSpeedVerySlow': 'Very slow · {s}s',
   'reading.autoScrollStepLine': 'Scroll by line',
   'reading.autoScrollStepScreen': 'Scroll by screen',
+  'reading.autoScrollInterval': 'Auto-scroll interval',
+  'reading.autoScrollStep': 'Auto-scroll step',
 
   // ---- Import dialog ----
   'import.customRule': 'Custom chapter rule',
