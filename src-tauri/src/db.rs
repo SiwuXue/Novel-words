@@ -195,6 +195,39 @@ pub fn migrate_connection(conn: &mut Connection) -> Result<(), String> {
         }
     }
 
+    // Migration: 角色表补充 AI 抽取所需元信息（aliases/source/confidence/evidence）。
+    // 逐列探测 + 容错：ADD COLUMN 的默认值必须是常量，故 aliases 用 '[]'。
+    for (column, ddl) in [
+        (
+            "aliases",
+            "ALTER TABLE novel_characters ADD COLUMN aliases TEXT NOT NULL DEFAULT '[]';",
+        ),
+        (
+            "source",
+            "ALTER TABLE novel_characters ADD COLUMN source TEXT NOT NULL DEFAULT 'manual';",
+        ),
+        (
+            "confidence",
+            "ALTER TABLE novel_characters ADD COLUMN confidence REAL NOT NULL DEFAULT 0;",
+        ),
+        (
+            "evidence",
+            "ALTER TABLE novel_characters ADD COLUMN evidence TEXT NOT NULL DEFAULT '';",
+        ),
+    ] {
+        let has_col: bool = conn
+            .prepare(&format!(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info('novel_characters') WHERE name = '{}'",
+                column
+            ))
+            .and_then(|mut s| s.query_row([], |r| r.get(0)))
+            .unwrap_or(false);
+        if !has_col {
+            conn.execute_batch(ddl)
+                .map_err(|e| format!("迁移 novel_characters.{} 失败: {}", column, e))?;
+        }
+    }
+
     // Migration: preset concept on vocab_book (read-only bundled lists like CET4)
     // plus a cloned_from_preset_key back-reference on the user clone.
     {
@@ -344,12 +377,21 @@ CREATE TABLE IF NOT EXISTS app_settings (
 
 -- 多角色朗读：每本小说的说话人 → 音色/性别映射（TTS 二期）。
 -- name 来自对白识别或 AI 分析；voice 为空表示跟随章节默认音色。
+-- aliases/source/confidence/evidence 为 P1（AI 角色抽取）新增：
+--   aliases    JSON 数组，同一角色的其它称呼（归因时一并匹配）
+--   source     ai | manual | heuristic
+--   confidence AI 置信度 0-1
+--   evidence   判定依据的原文片段
 CREATE TABLE IF NOT EXISTS novel_characters (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     novel_id   INTEGER NOT NULL,
     name       TEXT    NOT NULL,
     gender     TEXT    NOT NULL DEFAULT 'unknown',
     voice      TEXT    NOT NULL DEFAULT '',
+    aliases    TEXT    NOT NULL DEFAULT '[]',
+    source     TEXT    NOT NULL DEFAULT 'manual',
+    confidence REAL    NOT NULL DEFAULT 0,
+    evidence   TEXT    NOT NULL DEFAULT '',
     updated_at TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
     UNIQUE(novel_id, name),
     FOREIGN KEY (novel_id) REFERENCES novel(id) ON DELETE CASCADE

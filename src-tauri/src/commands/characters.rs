@@ -19,15 +19,31 @@ pub struct NovelCharacter {
     pub gender: String,
     /// 音色 id（空 = 跟随章节默认音色）
     pub voice: String,
+    /// 同一角色的其它称呼（归因时一并匹配）
+    pub aliases: Vec<String>,
+    /// ai | manual | heuristic
+    pub source: String,
+    /// AI 置信度 0-1
+    pub confidence: f64,
+    /// 判定依据的原文片段
+    pub evidence: String,
 }
 
+/// 角色表统一 SELECT 列（顺序须与 row_to_character 一致）。
+const CHARACTER_COLUMNS: &str = "id, novel_id, name, gender, voice, aliases, source, confidence, evidence";
+
 fn row_to_character(row: &rusqlite::Row) -> rusqlite::Result<NovelCharacter> {
+    let aliases_raw: String = row.get(5)?;
     Ok(NovelCharacter {
         id: row.get(0)?,
         novel_id: row.get(1)?,
         name: row.get(2)?,
         gender: row.get(3)?,
         voice: row.get(4)?,
+        aliases: serde_json::from_str::<Vec<String>>(&aliases_raw).unwrap_or_default(),
+        source: row.get(6)?,
+        confidence: row.get(7)?,
+        evidence: row.get(8)?,
     })
 }
 
@@ -42,11 +58,9 @@ pub fn list_novel_characters(
 ) -> Result<Vec<NovelCharacter>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let mut stmt = db
-        .prepare(
-            "SELECT id, novel_id, name, gender, voice
-             FROM novel_characters WHERE novel_id = ?1
-             ORDER BY name",
-        )
+        .prepare(&format!(
+            "SELECT {CHARACTER_COLUMNS} FROM novel_characters WHERE novel_id = ?1 ORDER BY name"
+        ))
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([novel_id], row_to_character)
@@ -86,7 +100,7 @@ pub fn upsert_novel_character(
     let id = db.last_insert_rowid();
     let character = db
         .query_row(
-            "SELECT id, novel_id, name, gender, voice FROM novel_characters WHERE id = ?1",
+            &format!("SELECT {CHARACTER_COLUMNS} FROM novel_characters WHERE id = ?1"),
             [id],
             row_to_character,
         )
@@ -190,10 +204,9 @@ fn merge_characters(
         .map_err(|e| format!("合并角色失败: {}", e))?;
     }
     let mut stmt = db
-        .prepare(
-            "SELECT id, novel_id, name, gender, voice
-             FROM novel_characters WHERE novel_id = ?1 ORDER BY name",
-        )
+        .prepare(&format!(
+            "SELECT {CHARACTER_COLUMNS} FROM novel_characters WHERE novel_id = ?1 ORDER BY name"
+        ))
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([novel_id], row_to_character)
