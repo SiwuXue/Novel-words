@@ -616,7 +616,16 @@ const {
 /** 开自动滚动前先停朗读（朗读开启侧由 watch(ttsState) 兜底互斥） */
 function toggleAutoScroll(): void {
   if (!isTimedScrollActive.value && ttsState.value === 'playing') stopTtsReading()
-  toggleTimedScroll()
+  const result = toggleTimedScroll()
+  if (result === 'blocked') {
+    ElMessage.info(t('reading.autoScrollBlocked'))
+    console.debug('[auto-scroll] blocked:', {
+      readingMode: readingMode.value,
+      wordTapMode: wordTapMode.value,
+      loadState: loadState.value,
+      contentReady: editorRef.value?.isContentReady() ?? null,
+    })
+  }
 }
 
 // 朗读开始即停自动滚动（覆盖控制条/所有朗读入口）

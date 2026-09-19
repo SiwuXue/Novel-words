@@ -45,17 +45,19 @@ export function useTimedScroll(deps: {
   }
 
   function startTimedScroll() {
-    if (active.value || !deps.canStart()) return
+    if (active.value || !deps.canStart()) return false
     active.value = true
     startTimer()
+    return true
   }
 
-  function toggleTimedScroll() {
+  /** 返回 'started' | 'stopped' | 'blocked'（canStart 未通过时 blocked，便于调用方提示） */
+  function toggleTimedScroll(): 'started' | 'stopped' | 'blocked' {
     if (active.value) {
       stopTimedScroll()
-      return
+      return 'stopped'
     }
-    startTimedScroll()
+    return startTimedScroll() ? 'started' : 'blocked'
   }
 
   function viewportAtBottom(el: HTMLElement): boolean {
@@ -67,18 +69,33 @@ export function useTimedScroll(deps: {
     return Number.isFinite(lh) && lh > 0 ? lh : 24
   }
 
+  let stallCount = 0
+
   function tick() {
     if (!active.value) return
     const el = deps.getScrollEl()
-    if (!el) return
+    // 容器丢失/无滚动空间：直接停，避免「按钮亮着却永远不动」的假活状态
+    if (!el || el.scrollHeight <= el.clientHeight) {
+      stopTimedScroll()
+      return
+    }
     if (viewportAtBottom(el)) {
       stopTimedScroll()
       return
     }
-    if (deps.settings.value.range === 'line') {
-      el.scrollBy({ top: lineHeightOf(el), behavior: 'auto' })
+    const before = el.scrollTop
+    const delta =
+      deps.settings.value.range === 'line'
+        ? lineHeightOf(el)
+        : Math.max(160, el.clientHeight * 0.82)
+    // 直接赋值（即时滚动，与 ColorTxt scrollByDeltaY 一致；scrollBy smooth 在部分容器内会被打断）
+    el.scrollTop = before + delta
+    if (el.scrollTop === before) {
+      // 赋值无效（容器实际不可滚）连续 2 次即停
+      stallCount += 1
+      if (stallCount >= 2) stopTimedScroll()
     } else {
-      el.scrollBy({ top: el.clientHeight * 0.82, behavior: 'smooth' })
+      stallCount = 0
     }
   }
 

@@ -491,6 +491,7 @@ export default {
   'reading.autoScrollStepScreen': 'Scroll by screen',
   'reading.autoScrollInterval': 'Auto-scroll interval',
   'reading.autoScrollStep': 'Auto-scroll step',
+  'reading.autoScrollBlocked': 'Auto-scroll unavailable: content not ready or nothing to scroll',
 
   // ---- Import dialog ----
   'import.customRule': 'Custom chapter rule',

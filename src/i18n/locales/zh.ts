@@ -491,6 +491,7 @@ export default {
   'reading.autoScrollStepScreen': '每次一屏',
   'reading.autoScrollInterval': '自动滚动间隔',
   'reading.autoScrollStep': '自动滚动步进',
+  'reading.autoScrollBlocked': '当前无法自动滚动：内容未就绪或页面无滚动空间',
 
   // ---- Import dialog ----
   'import.customRule': '自定义章节规则',
