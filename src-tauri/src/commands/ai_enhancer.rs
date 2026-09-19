@@ -577,7 +577,7 @@ where
         return Ok(Vec::new());
     }
     let total_batches = items.len().div_ceil(BATCH_SIZE);
-    let system = "You validate English vocabulary selected from a Chinese novel. Return one JSON object only. Every contextDefinition must start with the correct English part-of-speech abbreviation copied from the input definition (for example: n., v., adj., adv., pron., conj., prep., modal verb.). You may shorten an example, but must preserve its facts and an exact matched Chinese term. Never invent story facts.";
+    let system = "You validate English vocabulary selected from a Chinese novel. Return one JSON object only. Every contextDefinition must start with the correct English part-of-speech abbreviation copied from the input definition (for example: n., v., adj., adv., pron., conj., prep., modal verb.). You may shorten an example, but must preserve its facts and an exact matched Chinese term. Never invent story facts. Emit compact JSON and never insert raw line breaks or control characters inside string values.";
     let mut decisions = Vec::with_capacity(items.len());
 
     // Report the AI stage before the first network request. Otherwise the UI
@@ -607,24 +607,68 @@ where
     Ok(decisions)
 }
 
+/// 模型偶尔会在 JSON 字符串值里输出未转义的控制字符（典型：重写长例句时
+/// 直接在字符串内部换行），严格 JSON 解析会整体失败。把字符串内部的原始
+/// 控制字符转义为合法转义序列；字符串外的换行/缩进（格式化空白）原样保留。
+fn sanitize_json_control_chars(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len() + 16);
+    let mut in_string = false;
+    let mut escaped = false;
+    for c in raw.chars() {
+        if !in_string {
+            if c == '"' {
+                in_string = true;
+            }
+            out.push(c);
+            continue;
+        }
+        if escaped {
+            // 已有转义符的下一字符原样保留（\n \" \\ 等）
+            escaped = false;
+            out.push(c);
+            continue;
+        }
+        match c {
+            '\\' => {
+                escaped = true;
+                out.push(c);
+            }
+            '"' => {
+                in_string = false;
+                out.push(c);
+            }
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{8}' => out.push_str("\\b"),
+            '\u{c}' => out.push_str("\\f"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 fn parse_decisions(text: &str) -> Result<Vec<AiWordDecision>, String> {
     let trimmed = text
         .trim()
         .trim_start_matches("```json")
         .trim_start_matches("```");
     let trimmed = trimmed.trim_end_matches("```").trim();
-    let start = trimmed
+    // 先净化字符串值内的原始控制字符（合法 JSON 不受影响），再走严格解析
+    let sanitized = sanitize_json_control_chars(trimmed);
+    let start = sanitized
         .find('[')
         .ok_or_else(|| "AI 响应中未找到 JSON 数组".to_string())?;
-    let end = trimmed
+    let end = sanitized
         .rfind(']')
         .ok_or_else(|| "AI 响应中的 JSON 数组不完整".to_string())?;
-    if let Ok(decisions) = serde_json::from_str(&trimmed[start..=end]) {
+    if let Ok(decisions) = serde_json::from_str(&sanitized[start..=end]) {
         return Ok(decisions);
     }
 
     let value: Value =
-        serde_json::from_str(trimmed).map_err(|e| format!("解析 AI 精选结果失败: {}", e))?;
+        serde_json::from_str(&sanitized).map_err(|e| format!("解析 AI 精选结果失败: {}", e))?;
     for key in ["items", "results", "decisions", "data"] {
         if let Some(array) = value.get(key) {
             return serde_json::from_value(array.clone())
@@ -684,6 +728,45 @@ mod tests {
         assert_eq!(parsed[0].word, "gift");
         assert_eq!(parsed[0].context_definition, "天赋");
         assert_eq!(parsed[0].example_sentence, "他展现了绘画天赋。");
+    }
+
+    /// 模型在字符串值内部直接换行（未转义控制字符）——
+    /// 「control character found while parsing a string」报错场景
+    #[test]
+    fn parses_object_with_unescaped_newline_inside_string() {
+        let raw = concat!(
+            "{\n",
+            "  \"items\": [\n",
+            "    {\n",
+            "      \"word\": \"gift\",\n",
+            "      \"keep\": true,\n",
+            "      \"contextDefinition\": \"n. 天赋\",\n",
+            "      \"exampleSentence\": \"他展现了绘画\n天赋，令人惊叹。\"\n",
+            "    }\n",
+            "  ]\n",
+            "}"
+        );
+        let parsed = parse_decisions(raw).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].word, "gift");
+        assert_eq!(parsed[0].example_sentence, "他展现了绘画\n天赋，令人惊叹。");
+    }
+
+    #[test]
+    fn parses_array_with_unescaped_newline_inside_string() {
+        let parsed = parse_decisions(
+            "```json\n[{\"word\":\"gift\",\"keep\":true,\"contextDefinition\":\"n. 绘\n画天赋\",\"exampleSentence\":\"他展现了绘画天赋。\"}]\n```",
+        )
+        .unwrap();
+        assert_eq!(parsed[0].context_definition, "n. 绘\n画天赋");
+    }
+
+    /// 字符串外的格式化空白必须原样保留（合法 JSON 不能被净化破坏）
+    #[test]
+    fn sanitize_keeps_whitespace_outside_strings() {
+        let raw = "{\n  \"items\": []\n}";
+        let parsed = parse_decisions(raw).unwrap();
+        assert!(parsed.is_empty());
     }
 
     #[test]
