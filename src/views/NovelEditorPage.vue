@@ -266,42 +266,49 @@
       <el-button text :aria-label="t('reading.previousChapter')" :disabled="!hasPreviousChapter" @click="goToPreviousChapter">
         <el-icon><ArrowLeft /></el-icon> {{ t('reading.previousChapter') }}
       </el-button>
-      <el-dropdown
-        split-button
-        size="small"
-        class="auto-scroll-dropdown"
-        :class="{ 'auto-scroll-active': isTimedScrollActive }"
-        :title="t('reading.autoScroll')"
-        @click="toggleAutoScroll"
-        @command="onAutoScrollCommand"
-      >
-        {{ t('reading.autoScroll') }}
-        <template #dropdown>
-          <el-dropdown-menu>
-            <el-dropdown-item
-              v-for="p in TIMED_SCROLL_SPEED_PRESETS"
-              :key="p.intervalMs"
-              :command="`speed:${p.intervalMs}`"
-              :class="{ 'is-current-speed': settingsStore.autoScrollIntervalMs === p.intervalMs }"
-            >
-              {{ t(p.labelKey, { s: p.intervalMs / 1000 }) }}
-            </el-dropdown-item>
-            <el-dropdown-item
-              divided
-              :command="'range:line'"
-              :class="{ 'is-current-speed': settingsStore.autoScrollRange === 'line' }"
-            >
-              {{ t('reading.autoScrollStepLine') }}
-            </el-dropdown-item>
-            <el-dropdown-item
-              :command="'range:screen'"
-              :class="{ 'is-current-speed': settingsStore.autoScrollRange === 'screen' }"
-            >
-              {{ t('reading.autoScrollStepScreen') }}
-            </el-dropdown-item>
-          </el-dropdown-menu>
-        </template>
-      </el-dropdown>
+      <span class="auto-scroll-group">
+        <el-tooltip :content="isTimedScrollActive ? t('reading.autoScrollActive') : t('reading.autoScroll')" placement="top">
+          <button
+            type="button"
+            class="auto-scroll-toggle"
+            :class="{ 'auto-scroll-on': isTimedScrollActive }"
+            :aria-label="t('reading.autoScroll')"
+            @click="toggleAutoScroll"
+          >
+            <el-icon><Bottom /></el-icon>
+          </button>
+        </el-tooltip>
+        <el-dropdown trigger="click" popper-class="auto-scroll-popper" @command="onAutoScrollCommand">
+          <button type="button" class="auto-scroll-caret" :aria-label="t('reading.autoScroll')">
+            <el-icon><ArrowDown /></el-icon>
+          </button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item
+                v-for="p in TIMED_SCROLL_SPEED_PRESETS"
+                :key="p.intervalMs"
+                :command="`speed:${p.intervalMs}`"
+                :class="{ 'is-current-speed': settingsStore.autoScrollIntervalMs === p.intervalMs }"
+              >
+                {{ t(p.labelKey, { s: p.intervalMs / 1000 }) }}
+              </el-dropdown-item>
+              <el-dropdown-item
+                divided
+                :command="'range:line'"
+                :class="{ 'is-current-speed': settingsStore.autoScrollRange === 'line' }"
+              >
+                {{ t('reading.autoScrollStepLine') }}
+              </el-dropdown-item>
+              <el-dropdown-item
+                :command="'range:screen'"
+                :class="{ 'is-current-speed': settingsStore.autoScrollRange === 'screen' }"
+              >
+                {{ t('reading.autoScrollStepScreen') }}
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+      </span>
       <div class="reading-progress-wrap" :title="t('reading.shortcutHint')">
         <el-progress :percentage="readingPercent" :stroke-width="5" :show-text="false" />
         <span>{{ currentChapterTitle }} · {{ readingPercent }}%</span>
@@ -373,6 +380,8 @@ import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import {
   ArrowLeft,
   ArrowRight,
+  ArrowDown,
+  Bottom,
   Loading,
   Printer,
   Reading,
@@ -1694,14 +1703,30 @@ function attachScrollListener() {
 .reading-bottom-bar > * {
   pointer-events: auto;
 }
-/* 自动滚动 split-button：主键开启/停止，箭头下拉速度与步进 */
-.auto-scroll-dropdown :deep(> .el-button-group > .el-button) {
-  border-color: var(--border-color, #ebeef5);
-  background: var(--bg-primary);
+/* 自动滚动：text 图标组（主键 toggle + 箭头下拉），与上下章按钮同语言 */
+.auto-scroll-group { display: inline-flex; align-items: center; }
+.auto-scroll-toggle,
+.auto-scroll-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 7px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary, #303133);
+  cursor: pointer;
+  border-radius: 6px;
 }
-.auto-scroll-active :deep(> .el-button-group > .el-button:first-child) {
-  border-color: var(--accent-color, #409eff);
-  color: var(--accent-color, #409eff);
+.auto-scroll-toggle { font-size: 17px; }
+.auto-scroll-caret { font-size: 12px; color: var(--text-secondary, #909399); }
+.auto-scroll-toggle:hover,
+.auto-scroll-caret:hover {
+  background: color-mix(in srgb, var(--text-primary, #303133) 8%, transparent);
+}
+.auto-scroll-toggle.auto-scroll-on { color: var(--accent-color, #409eff); }
+.auto-scroll-toggle.auto-scroll-on:hover {
+  background: color-mix(in srgb, var(--accent-color, #409eff) 12%, transparent);
 }
 .reading-progress-wrap {
   width: min(36vw, 420px);

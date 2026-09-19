@@ -481,6 +481,7 @@ export default {
   'reading.nextChapter': '下一章',
   'reading.shortcutHint': 'Space 翻页 · Alt + ←/→ 切换章节',
   'reading.autoScroll': '自动滚动',
+  'reading.autoScrollActive': '滚动中 · 点击停止',
   'reading.autoScrollSpeedVeryFast': '极快 · {s} 秒',
   'reading.autoScrollSpeedFast': '快 · {s} 秒',
   'reading.autoScrollSpeedNormal': '适中 · {s} 秒',

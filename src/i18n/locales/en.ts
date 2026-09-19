@@ -481,6 +481,7 @@ export default {
   'reading.nextChapter': 'Next',
   'reading.shortcutHint': 'Space pages · Alt + ←/→ changes chapters',
   'reading.autoScroll': 'Auto scroll',
+  'reading.autoScrollActive': 'Scrolling · click to stop',
   'reading.autoScrollSpeedVeryFast': 'Very fast · {s}s',
   'reading.autoScrollSpeedFast': 'Fast · {s}s',
   'reading.autoScrollSpeedNormal': 'Normal · {s}s',
