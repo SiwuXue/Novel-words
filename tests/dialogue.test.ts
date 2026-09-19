@@ -5,6 +5,7 @@ import {
   collectCandidates,
   collectSpeakers,
   guessGenders,
+  mergeKinshipVariants,
   speakerForSpan,
   splitDialogueSegments,
 } from '@/utils/dialogue'
@@ -295,13 +296,29 @@ describe('归因净化（动词表 / 修饰动作词 / 代词群体词过滤）'
     ).toBe('Tom')
   })
 
-  it('「…，说道：」句式不再把动词当角色（真实语料回归）', () => {
-    // 「名字 + 逗号 + 动作词 + 道」时名字被逗号断开，正则只能退到单字「道」，
-    // 旧实现会把动词本身（说/笑/喝/感慨/劝慰）当成说话人
-    expect(collectSpeakers('　　母亲点头，感慨道："铁柱啊。"')).toEqual([])
+  it('「…，说道：」句式：宽容匹配恢复真实名字，超长残片仍被拒绝', () => {
+    // 旧实现把动词本身（说/笑/感慨）当说话人；现在严格匹配失败后退到宽容匹配，
+    // 从「名字+神态，+动词」中恢复真实说话人（真实语料：《仙逆》第1章）
+    expect(collectSpeakers('　　母亲点头，感慨道："铁柱啊。"').map((s) => s.name)).toEqual([
+      '母亲',
+    ])
+    expect(collectSpeakers('　　铁柱的四叔，眉头一皱，喝道："王卓。"').map((s) => s.name)).toEqual([
+      '四叔',
+    ])
+    expect(
+      collectSpeakers('　　铁柱娘爱怜的望着自己儿子，劝慰道："铁柱。"').map((s) => s.name),
+    ).toEqual(['铁柱娘'])
+    // 名字被超长动作从句淹没（头部截取后为空）→ 保持拒绝
     expect(collectSpeakers('　　四叔哈哈一笑，拍了拍铁柱肩膀，说道："行了。"')).toEqual([])
-    expect(collectSpeakers('　　铁柱的四叔，眉头一皱，喝道："王卓。"')).toEqual([])
-    expect(collectSpeakers('　　铁柱娘爱怜的望着自己儿子，劝慰道："铁柱。"')).toEqual([])
+  })
+
+  it('多层逗号隔断（名字+神态，+动作，+说道）也能归因', () => {
+    const segs = splitDialogueSegments('中年汉子面色严肃，望着铁柱，说道："你。"')
+    expect(segs.find((s) => s.type === 'dialogue')?.speaker).toBe('中年汉子')
+    // 「随后疾言厉色的对铁柱说道」：头部截取后无名字 → 拒绝
+    expect(
+      collectSpeakers('　　随后疾言厉色的对铁柱说道："你要去哪儿。"'),
+    ).toEqual([])
   })
 
   it('紧邻动词的真名保留，单字动词残片与动作词被拒绝', () => {
@@ -324,5 +341,73 @@ describe('collectCandidates', () => {
       '王小明',
       '李老师',
     ])
+  })
+})
+
+describe('宽容归因：名字与动词被「，+短动作从句」隔开', () => {
+  it('「名字+喜极，急忙说道」（《仙逆》第1章）', () => {
+    const segs = splitDialogueSegments('铁柱母亲喜极，急忙说道：“老四，这……这……”')
+    expect(segs.find((s) => s.type === 'dialogue')?.speaker).toBe('铁柱母亲')
+  })
+
+  it('「名字+叹息，说道」', () => {
+    const segs = splitDialogueSegments('铁柱父亲叹息，说道：“走吧。”')
+    expect(segs.find((s) => s.type === 'dialogue')?.speaker).toBe('铁柱父亲')
+  })
+
+  it('「名字+神态，望着XX，说道」', () => {
+    const segs = splitDialogueSegments('中年汉子面色严肃，望着铁柱，说道：“你。”')
+    expect(segs.find((s) => s.type === 'dialogue')?.speaker).toBe('中年汉子')
+  })
+
+  it('对白后置说话人不受影响', () => {
+    const segs = splitDialogueSegments('“行了。”铁柱他娘说着说着，眼泪就流了下来。')
+    expect(segs.find((s) => s.type === 'dialogue')?.speaker).toBe('铁柱他娘')
+  })
+})
+
+describe('mergeKinshipVariants 称谓聚类', () => {
+  it('同一父母的多种叫法合并（裸称谓为规范名，其余进 variants）', () => {
+    const merged = mergeKinshipVariants([
+      { name: '铁柱', count: 2 },
+      { name: '母亲', count: 1 },
+      { name: '铁柱母亲', count: 1 },
+      { name: '铁柱他娘', count: 1 },
+    ])
+    const mother = merged.find((m) => m.name === '母亲')
+    expect(mother?.count).toBe(3)
+    expect(mother?.variants).toEqual(['铁柱母亲', '铁柱他娘'])
+    const tie = merged.find((m) => m.name === '铁柱')
+    expect(tie?.count).toBe(2)
+    expect(tie?.variants).toEqual([])
+  })
+
+  it('前缀不同可能是两个人，不合并', () => {
+    const merged = mergeKinshipVariants([
+      { name: '铁柱母亲', count: 1 },
+      { name: '王林母亲', count: 1 },
+    ])
+    expect(merged.map((m) => m.name).sort()).toEqual(['王林母亲', '铁柱母亲'])
+    expect(merged.every((m) => m.variants.length === 0)).toBe(true)
+  })
+
+  it('无裸称谓时取最短变体为规范名，同长度优先不含他/她', () => {
+    const merged = mergeKinshipVariants([
+      { name: '铁柱他娘', count: 2 },
+      { name: '铁柱母亲', count: 1 },
+    ])
+    expect(merged[0].name).toBe('铁柱母亲')
+    expect(merged[0].count).toBe(3)
+    expect(merged[0].variants).toEqual(['铁柱他娘'])
+  })
+
+  it('collectCandidates 聚合后跨过 minCount 门槛（《仙逆》第1章回归）', () => {
+    const text =
+      '　　母亲点头，感慨道：“铁柱啊。”\n' +
+      '　　“儿啊。”铁柱他娘说着说着，眼泪就流了下来。\n' +
+      '　　铁柱母亲喜极，急忙说道：“老四。”'
+    const mother = collectCandidates(text).find((c) => c.name === '母亲')
+    expect(mother?.count).toBe(3)
+    expect(mother?.variants).toContain('铁柱他娘')
   })
 })

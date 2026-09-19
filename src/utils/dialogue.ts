@@ -236,7 +236,23 @@ function attributeSpeaker(text: string, openIdx: number, endIdx: number): string
   for (const verb of CN_VERBS) {
     const re = new RegExp(`(${NAME_CHARS})${verb}\\s*[:：“"]?\\s*$`)
     const m = before.match(re)
-    if (m && m[1]) return cleanName(m[1])
+    if (m && m[1]) {
+      // 匹配到即定论：更短动词只会剥出更脏的名字
+      const name = cleanName(m[1])
+      if (name) return name
+      // 严格命中但被清洗拒绝（残片如「急忙」「叹息」）——退到宽容匹配再试一次
+      const m2 = before.match(relaxedSpeakerRe(verb))
+      if (m2 && m2[1]) return cleanName(headNameOf(m2[1]))
+      return null
+    }
+    // 严格未命中：真实小说高频句式「名字+神态动作，+动词」
+    // （「母亲点头，感慨道：」「铁柱母亲喜极，急忙说道：」），名字与动词被逗号隔开
+    const m3 = before.match(relaxedSpeakerRe(verb))
+    if (m3 && m3[1]) {
+      const name = cleanName(headNameOf(m3[1]))
+      if (name) return name
+      return null
+    }
   }
   for (const verb of EN_VERBS) {
     const re = new RegExp(
@@ -246,6 +262,43 @@ function attributeSpeaker(text: string, openIdx: number, endIdx: number): string
     if (m && m[1]) return cleanName(m[1])
   }
   return null
+}
+
+/**
+ * 宽容归因：名字 +（「，」+ 短动作/神态从句）¹ⁿ + 说话动词。
+ * 「铁柱父亲叹息，说道：」「中年汉子面色严肃，望着铁柱，说道：」均靠它命中；
+ * 每段从句限 6 字以内防止把整个叙述从句当前缀。
+ */
+function relaxedSpeakerRe(verb: string): RegExp {
+  return new RegExp(`(${NAME_CHARS})(?:[，,]\\s*[一-龥]{0,6}?)+${verb}\\s*[:：“"]?\\s*$`)
+}
+
+/**
+ * 叙述性动作/神态标记：宽容匹配抓到的串往往是「真名 + 动作描述」
+ * （「王林目光坚定」「老人望着铁柱」「铁柱娘爱怜的望着自己儿子」），
+ * 从串内**最早出现**的标记处截断，取头部才是纯名字。
+ * 只收录绝不出现在人名开头的二字动词/神态词。
+ */
+const NARRATIVE_MARKERS = [
+  '望着', '看着', '看向', '望向', '盯着', '瞧着', '瞧向', '冲着', '对着', '朝着', '冲他', '对他', '对她', '望了', '看了', '挥了',
+  '面色', '目光', '神色', '表情', '语气', '眼中', '眼里', '脸上', '眉头', '嘴角',
+  '摇头', '点头', '抬头', '低头', '转身', '回头', '起身', '站起', '坐下', '蹲下',
+  '叹息', '叹气', '沉吟', '喜极', '一笑', '苦笑', '微笑', '冷笑', '大笑', '笑了', '笑笑', '哈哈', '嘿嘿', '呵呵',
+  '拍了', '拉起', '摸了', '碰了', '握着', '拉着', '指着', '瞪了', '挥挥', '招手', '摆手', '颔首', '皱眉', '皱了', '拍拍',
+  '鞠躬', '叩首', '磕头', '拱手', '抱拳', '挥手', '招了', '摆了',
+  '爱怜', '慈祥', '关切', '焦急', '急切', '高兴', '激动', '惊喜', '惊讶', '欣喜', '满意', '欣慰', '心疼', '不舍', '无奈', '感慨', '赞叹', '赞赏', '诚恳', '急忙', '连忙', '慌忙', '赶忙',
+  '大步', '快步', '缓步',
+  '随后', '继续', '接着', '终于', '这才', '于是', '不由', '不禁', '忍不住', '对',
+]
+
+/** 从「名字+动作描述」串中截取头部纯名字；截不出去时原样返回（交给 cleanName 把关）。 */
+function headNameOf(run: string): string {
+  let cut = run.length
+  for (const marker of NARRATIVE_MARKERS) {
+    const i = run.indexOf(marker)
+    if (i !== -1 && i < cut) cut = i
+  }
+  return run.slice(0, cut)
 }
 
 /** 代词：不是角色名（「他感慨道」应归因为无说话人）。 */
@@ -353,6 +406,14 @@ const MODIFIER_WORDS = [
   '小声',
   '正色',
   '失声',
+  // 宽容匹配实证（《仙逆》第1章）：「铁柱母亲喜极，急忙说道」「铁柱父亲叹息，说道」
+  // 「中年汉子面色严肃，望着铁柱，说道」「中年汉子沉吟少许，面色一肃，说道」
+  '喜极',
+  '叹息',
+  '面色严肃',
+  '沉吟少许',
+  '沉吟片刻',
+  '少许',
 ]
 
 /** 虚词残留：候选里出现即判为非人名（「船人不在意在铁柱耳边」「铁柱和小明」）。 */
@@ -489,19 +550,97 @@ export function collectSpeakers(
     .sort((a, b) => b.count - a.count)
 }
 
+/** 称谓聚类结果：规范名 + 合并后计数 + 同一角色的其它叫法（确认入库时写入 aliases）。 */
+export interface SpeakerCandidate {
+  name: string
+  count: number
+  variants: string[]
+}
+
 /**
- * 角色面板候选（比 collectSpeakers 更严）：再按「出现次数」与「名字长度」过滤，
- * 单次出现的疑似残片不进候选列表。
+ * 称谓聚类：只合并父母双亲（全书唯一，且叫法随上下文漂移——
+ * 「母亲 / 铁柱母亲 / 铁柱他娘」实为一人，各计 1 次会被 minCount=2 全部滤掉）。
+ * 兄弟姐妹有排行（大哥/二哥）、长辈有亲缘限定（姑妈/舅妈），一律不合并。
+ */
+const KINSHIP_GROUPS: Array<{ title: string; suffixes: string[] }> = [
+  { title: '母亲', suffixes: ['母亲', '他娘', '亲娘', '娘亲', '妈妈', '他妈', '老妈'] },
+  { title: '父亲', suffixes: ['父亲', '他爹', '亲爹', '爹爹', '爸爸', '他爸', '老爸', '老爹'] },
+]
+
+/** 名字 → 所属称谓组 + 前缀（「铁柱母亲」→ prefix「铁柱」；裸称谓前缀为空）。 */
+function kinshipOf(name: string): { group: number; prefix: string } | null {
+  for (let g = 0; g < KINSHIP_GROUPS.length; g++) {
+    for (const suffix of KINSHIP_GROUPS[g].suffixes) {
+      if (name === suffix) return { group: g, prefix: '' }
+      if (name.length > suffix.length && name.endsWith(suffix)) {
+        return { group: g, prefix: name.slice(0, name.length - suffix.length) }
+      }
+    }
+  }
+  return null
+}
+
+/** 把说话人计数按称谓组聚类；前缀一致（或存在裸称谓）才合并。 */
+export function mergeKinshipVariants(
+  speakers: Array<{ name: string; count: number }>,
+): SpeakerCandidate[] {
+  const out: SpeakerCandidate[] = []
+  const consumed = new Set<string>()
+  for (let g = 0; g < KINSHIP_GROUPS.length; g++) {
+    const members = speakers.filter((s) => !consumed.has(s.name) && kinshipOf(s.name)?.group === g)
+    if (members.length === 0) continue
+    const bare = members.find((s) => kinshipOf(s.name)?.prefix === '')
+    const prefixed = members.filter((s) => (kinshipOf(s.name)?.prefix ?? '') !== '')
+    const prefixes = new Set(prefixed.map((s) => kinshipOf(s.name)?.prefix ?? ''))
+    // 前缀不止一个（「铁柱母亲」与「王林母亲」同章）：可能是不同人，不合并；
+    // 裸称谓在多前缀下归属不明，同样不合并。
+    const mergeable = prefixed.length > 0 && prefixes.size === 1
+    if (!mergeable && members.length === 1) {
+      out.push({ name: members[0].name, count: members[0].count, variants: [] })
+      members.forEach((s) => consumed.add(s.name))
+      continue
+    }
+    if (!mergeable) {
+      // 前缀冲突且无聚类意义：全部按原样输出，不做合并
+      for (const s of members) {
+        out.push({ name: s.name, count: s.count, variants: [] })
+        consumed.add(s.name)
+      }
+      continue
+    }
+    let picks = prefixed
+    if (!bare) {
+      // 无裸称谓：取最短变体为规范名；同长度优先不含「他/她」的（铁柱母亲 > 铁柱他娘）
+      const shortest = Math.min(...prefixed.map((s) => s.name.length))
+      picks = prefixed.filter((s) => s.name.length === shortest)
+      const noPronoun = picks.filter((s) => !/[他她]/.test(s.name))
+      if (noPronoun.length) picks = noPronoun
+    }
+    const name = bare ? bare.name : picks[0].name
+    const count = members.reduce((sum, s) => sum + s.count, 0)
+    const variants = members.map((s) => s.name).filter((n) => n !== name)
+    out.push({ name, count, variants })
+    members.forEach((s) => consumed.add(s.name))
+  }
+  for (const s of speakers) {
+    if (!consumed.has(s.name)) out.push({ name: s.name, count: s.count, variants: [] })
+  }
+  return out.sort((a, b) => b.count - a.count)
+}
+
+/**
+ * 角色面板候选（比 collectSpeakers 更严）：先做称谓聚类，再按「出现次数」与
+ * 「名字长度」过滤，单次出现的疑似残片不进候选列表。
  * collectSpeakers 语义保持不变——guessGenders 依赖它识别只出现一次的对白角色。
  */
 export function collectCandidates(
   text: string,
   enabledOpens?: ReadonlyArray<string>,
   opts: { minCount?: number; maxNameLen?: number } = {},
-): Array<{ name: string; count: number }> {
+): SpeakerCandidate[] {
   const minCount = opts.minCount ?? 2
   const maxNameLen = opts.maxNameLen ?? 6
-  return collectSpeakers(text, enabledOpens).filter(
+  return mergeKinshipVariants(collectSpeakers(text, enabledOpens)).filter(
     (item) => item.count >= minCount && item.name.length <= maxNameLen,
   )
 }

@@ -78,6 +78,7 @@ pub fn upsert_novel_character(
     name: String,
     gender: String,
     voice: String,
+    aliases: Option<Vec<String>>,
 ) -> Result<NovelCharacter, String> {
     let name = name.trim().to_string();
     if name.is_empty() {
@@ -97,7 +98,41 @@ pub fn upsert_novel_character(
         params![novel_id, name, gender, voice.trim()],
     )
     .map_err(|e| format!("保存角色失败: {}", e))?;
-    let id = db.last_insert_rowid();
+    // upsert 走冲突更新时 last_insert_rowid 不可靠，按唯一键回读 id
+    let id: i64 = db
+        .query_row(
+            "SELECT id FROM novel_characters WHERE novel_id = ?1 AND name = ?2",
+            params![novel_id, name],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("保存角色后读取失败: {}", e))?;
+    // 别名合并（并集去重，排除主名本身）；传入 None 时保持原值不动
+    if let Some(list) = aliases {
+        let existing: Vec<String> = db
+            .query_row(
+                "SELECT aliases FROM novel_characters WHERE id = ?1",
+                [id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+            .flatten()
+            .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
+            .unwrap_or_default();
+        let mut merged = existing;
+        for alias in list {
+            let alias = alias.trim().to_string();
+            if !alias.is_empty() && alias != name && !merged.contains(&alias) {
+                merged.push(alias);
+            }
+        }
+        let json = serde_json::to_string(&merged).map_err(|e| e.to_string())?;
+        db.execute(
+            "UPDATE novel_characters SET aliases = ?1, updated_at = datetime('now', 'localtime') WHERE id = ?2",
+            params![json, id],
+        )
+        .map_err(|e| format!("保存角色别名失败: {}", e))?;
+    }
     let character = db
         .query_row(
             &format!("SELECT {CHARACTER_COLUMNS} FROM novel_characters WHERE id = ?1"),

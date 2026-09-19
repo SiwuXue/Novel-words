@@ -87,6 +87,7 @@
         <template #default="{ row }">
           <span>{{ row.name }}</span>
           <span v-if="row.count" class="cv-count">{{ t('characters.count', { n: row.count }) }}</span>
+          <span v-if="row.aliases.length" class="cv-ai-hint">（{{ row.aliases.join('、') }}）</span>
         </template>
       </el-table-column>
       <el-table-column width="150" align="right">
@@ -288,9 +289,18 @@ function toRow(c: SavedCharacter, count: number): CharRow {
 /** 数据库角色 + 本章候选合并展示（候选仅出现在「待确认」分组） */
 async function loadCharacters(): Promise<void> {
   const rowsMap = new Map<string, CharRow>()
-  const counts = new Map<string, number>()
+  // 候选可能带变体（「母亲」← 铁柱母亲/铁柱他娘）：计数与命中都要按变体聚合
+  const candidateInfo = new Map<string, { count: number; variants: string[] }>()
   for (const sp of collectCandidates(props.chapterText, settingsStore.ttsQuoteStyles)) {
-    counts.set(sp.name, sp.count)
+    candidateInfo.set(sp.name, { count: sp.count, variants: sp.variants })
+  }
+  const countFor = (name: string): number => {
+    const direct = candidateInfo.get(name)
+    if (direct) return direct.count
+    for (const info of candidateInfo.values()) {
+      if (info.variants.includes(name)) return info.count
+    }
+    return 0
   }
   if (props.novelId != null) {
     try {
@@ -298,23 +308,25 @@ async function loadCharacters(): Promise<void> {
         novelId: props.novelId,
       })
       for (const c of saved) {
-        rowsMap.set(c.name, toRow(c, counts.get(c.name) ?? 0))
+        rowsMap.set(c.name, toRow(c, countFor(c.name)))
       }
     } catch (e) {
       console.error('[CharacterVoicePanel] load failed:', e)
     }
   }
-  // 只把"出现在 ≥2 段对白 + 名字不超长"的候选并入列表，避免单次出现的动词残片（说/笑/感慨）进面板
-  for (const [name, count] of counts) {
-    if (rowsMap.has(name)) continue
+  // 只把"出现在 ≥2 段对白 + 名字不超长"的候选并入列表，避免单次出现的动词残片（说/笑/感慨）进面板；
+  // 名字或任一变体已入库的不再作为候选（避免同一角色出现两行）
+  const savedNames = new Set(rowsMap.keys())
+  for (const [name, info] of candidateInfo) {
+    if (rowsMap.has(name) || info.variants.some((v) => savedNames.has(v))) continue
     rowsMap.set(name, {
       name,
       gender: 'unknown',
       voice: '',
       id: null,
-      count,
+      count: info.count,
       source: 'candidate',
-      aliases: [],
+      aliases: info.variants,
       confidence: 0,
       evidence: '',
     })
@@ -345,14 +357,17 @@ function onDialogueToggle(): void {
 async function saveRow(row: CharRow): Promise<void> {
   if (props.novelId == null) return
   try {
-    const saved = await invoke<{ id: number }>('upsert_novel_character', {
+    const saved = await invoke<{ id: number; aliases?: string[] }>('upsert_novel_character', {
       novelId: props.novelId,
       name: row.name,
       gender: row.gender,
       voice: row.voice,
+      // 候选确认时把变体叫法（铁柱母亲/铁柱他娘…）一并写进别名，朗读按别名命中
+      aliases: row.aliases.length ? row.aliases : undefined,
     })
     row.id = saved.id
     row.source = row.source === 'ai' ? 'ai' : 'manual'
+    if (saved.aliases && saved.aliases.length > row.aliases.length) row.aliases = saved.aliases
     emitUpdated()
   } catch (e) {
     ElMessage.error(String(e))
