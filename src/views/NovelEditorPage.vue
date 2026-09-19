@@ -613,9 +613,8 @@ const {
     readingMode.value && !wordTapMode.value && loadState.value === 'loaded' && !!editorRef.value?.isContentReady(),
 })
 
-/** 开自动滚动前先停朗读（朗读开启侧由 watch(ttsState) 兜底互斥） */
+/** 开自动滚动（与朗读并行：朗读照读、滚动照滚，互不干扰） */
 function toggleAutoScroll(): void {
-  if (!isTimedScrollActive.value && ttsState.value === 'playing') stopTtsReading()
   const result = toggleTimedScroll()
   if (result === 'blocked') {
     ElMessage.info(t('reading.autoScrollBlocked'))
@@ -627,11 +626,6 @@ function toggleAutoScroll(): void {
     })
   }
 }
-
-// 朗读开始即停自动滚动（覆盖控制条/所有朗读入口）
-watch(ttsState, (s) => {
-  if (s === 'playing' && isTimedScrollActive.value) stopTimedScroll()
-})
 
 async function onWordTapTtsNext(): Promise<void> {
   if (hasNextChapter.value) {
