@@ -516,7 +516,7 @@ async function loadCharacters(): Promise<void> {
   if (props.novelId == null) return
   try {
     const saved = await invoke<
-      Array<{ name: string; gender: string; voice: string }>
+      Array<{ name: string; gender: string; voice: string; aliases?: string[] }>
     >('list_novel_characters', { novelId: props.novelId })
     applyCharacters(saved)
   } catch {
@@ -525,13 +525,17 @@ async function loadCharacters(): Promise<void> {
 }
 
 function applyCharacters(
-  saved: Array<{ name: string; gender: string; voice: string }>,
+  saved: Array<{ name: string; gender: string; voice: string; aliases?: string[] }>,
 ): void {
   const voices: Record<string, string> = {}
   const genders: Record<string, 'male' | 'female' | 'unknown'> = {}
   for (const c of saved) {
-    if (c.voice) voices[c.name] = c.voice
-    genders[c.name] = (c.gender as 'male' | 'female' | 'unknown') ?? 'unknown'
+    const gender = (c.gender as 'male' | 'female' | 'unknown') ?? 'unknown'
+    // 名字与所有别名都指向同一音色/性别：正文用别名说话时也能命中
+    for (const key of [c.name, ...(c.aliases ?? [])]) {
+      if (c.voice) voices[key] = c.voice
+      genders[key] = gender
+    }
   }
   charVoices.value = voices
   charGenders.value = genders
