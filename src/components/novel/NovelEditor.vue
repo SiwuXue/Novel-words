@@ -101,6 +101,8 @@
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useEditor, EditorContent } from '@tiptap/vue-3'
 import type { EditorView } from '@tiptap/pm/view'
+import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import { List, Tickets, RefreshLeft, RefreshRight } from '@element-plus/icons-vue'
@@ -478,20 +480,70 @@ function scrollToText(keyword: string): boolean {
   }
 }
 
-// ===== 朗读跟随滚动（读到哪里滚到哪里） =====
+// ===== 朗读跟随滚动 + 朗读高亮（读到哪里滚到哪里、亮到哪里） =====
 
 let lastRevealPos = 0
 
+const ttsHighlightKey = new PluginKey<DecorationSet>('tts-highlight')
+let ttsPluginRegistered = false
+
+function ensureTtsHighlightPlugin(): void {
+  const ed = editor.value
+  if (!ed || ttsPluginRegistered) return
+  ed.registerPlugin(
+    new Plugin<DecorationSet>({
+      key: ttsHighlightKey,
+      state: {
+        init: () => DecorationSet.empty,
+        apply: (tr, set) => {
+          const meta = tr.getMeta(ttsHighlightKey)
+          if (meta !== undefined) return meta
+          return set.map(tr.mapping, tr.doc)
+        },
+      },
+      props: {
+        decorations: (state) => ttsHighlightKey.getState(state),
+      },
+    }),
+  )
+  ttsPluginRegistered = true
+}
+
+watch(editor, (ed) => { if (ed) ensureTtsHighlightPlugin() }, { immediate: true })
+
+/** 设置/清除当前朗读句高亮（Decoration.inline，不改文档内容） */
+function setTtsHighlight(range: { from: number; to: number } | null): void {
+  const ed = editor.value
+  if (!ed) return
+  ensureTtsHighlightPlugin()
+  try {
+    const view = (ed as unknown as { view: EditorView }).view
+    const deco = range
+      ? DecorationSet.create(view.state.doc, [
+          Decoration.inline(range.from, range.to, { class: 'tts-speaking-sentence' }),
+        ])
+      : DecorationSet.empty
+    view.dispatch(view.state.tr.setMeta(ttsHighlightKey, deco))
+  } catch (e) {
+    console.warn('[NovelEditor] setTtsHighlight failed:', e)
+  }
+}
+
+function clearTtsHighlight(): void {
+  setTtsHighlight(null)
+}
+
 function resetReveal(): void {
   lastRevealPos = 0
+  clearTtsHighlight()
 }
 
 /**
- * 把包含 keyword 的文本滚到视口上部舒适区（不 focus、不移动光标）。
+ * 高亮并（可选）滚动到包含 keyword 的文本。
  * 优先从上次朗读位置向后搜索——短句（「他说：」）在文中大量重复时，
  * 增量搜索总能命中当前位置；回跳/重播时向后搜不到再全文兜底。
  */
-function revealText(keyword: string): boolean {
+function revealText(keyword: string, opts?: { scroll?: boolean }): boolean {
   if (!editor.value || !keyword.trim()) return false
   try {
     const doc = editor.value.state.doc
@@ -514,6 +566,8 @@ function revealText(keyword: string): boolean {
     if (foundPos === null && lastRevealPos > 0) search(0)
     if (foundPos === null) return false
     lastRevealPos = foundPos + keyword.length
+    setTtsHighlight({ from: foundPos, to: foundPos + keyword.length })
+    if (opts?.scroll === false) return true
     const view = (editor.value as unknown as { view: EditorView }).view
     const coords = view.coordsAtPos(foundPos)
     const scrollEl = getScrollEl()
@@ -580,7 +634,7 @@ function setScrollPercent(p: number) {
   el.scrollTop = max * Math.min(1, Math.max(0, p))
 }
 
-defineExpose({ waitUntilReady, isContentReady, scrollToText, highlightText, getScrollEl, getScrollPercent, setScrollPercent, revealText, resetReveal })
+defineExpose({ waitUntilReady, isContentReady, scrollToText, highlightText, getScrollEl, getScrollPercent, setScrollPercent, revealText, resetReveal, clearTtsHighlight })
 </script>
 
 <style scoped>
@@ -668,6 +722,13 @@ defineExpose({ waitUntilReady, isContentReady, scrollToText, highlightText, getS
   font-size: 15px;
   line-height: 1.8;
   color: var(--text-regular, #303133);
+}
+
+/* 朗读高亮（ProseMirror Decoration 动态 span，不随文档内容持久化） */
+:deep(.tiptap-editor .ProseMirror .tts-speaking-sentence) {
+  background: color-mix(in srgb, var(--accent-color, #409eff) 22%, transparent);
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-color, #409eff) 32%, transparent);
 }
 
 :deep(.tiptap-editor .ProseMirror h1) {

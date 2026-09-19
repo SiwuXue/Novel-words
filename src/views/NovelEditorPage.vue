@@ -580,11 +580,12 @@ async function startTtsReading(): Promise<void> {
       dialogueEnabled: dialogueVoiceEnabled.value,
     },
     {
-      // 朗读跟随滚动：句首单元开始时把该句滚到视口舒适区（对白句中片段不滚）
+      // 朗读跟随：每个片段实时高亮当前位置；滚动只在句首（对白句中片段不滚）
       onUnitStart: (unit) => {
-        if (unit?.startsSentence) editorRef.value?.revealText(unit.text)
+        if (unit) editorRef.value?.revealText(unit.text, { scroll: unit.startsSentence })
       },
       onFinish: (completed) => {
+        if (completed) editorRef.value?.clearTtsHighlight()
         if (completed && settingsStore.ttsAutoNext && hasNextChapter.value) {
           void (async () => {
             await scrollToChapter(editorStore.activeChapterIndex + 1, { keepTts: true })
@@ -599,6 +600,7 @@ async function startTtsReading(): Promise<void> {
 
 function stopTtsReading(): void {
   stopTtsSession()
+  editorRef.value?.clearTtsHighlight()
 }
 
 // ===== 定时自动滚动（参考 ColorTxt useAppTimedScroll；与朗读互斥：后开者胜） =====
