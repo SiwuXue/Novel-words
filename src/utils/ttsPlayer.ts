@@ -8,6 +8,9 @@
  * - system / Web Audio 不可用 / 解码失败：回退串行队列（合成 → 播放 → 下一段）。
  *
  * - start(sentences, settings, handlers, voiceOverrides)：任何 start/stop 都使旧队列令牌失效。
+ * - jumpTo(index)/restart()：按最近一次 start 的参数从任意单元重启（上一句/下一句/重新合成），
+ *   onSentenceStart 的 index 保持绝对下标，播完自然 onFinish(true)（连播语义不变）。
+ * - replaceSettings/setVolumeLive：播放中热更新合成参数（下一单元起生效）。
  * - pause/resume：在线走 AudioContext.suspend/resume（时间线冻结，无需重排），系统语音走
  *   speechSynthesis.pause/resume。
  * - onSentenceStart(index, total, text)：单元真正开始播放时触发（高亮/滚动跟随用）。
@@ -96,11 +99,26 @@ class SynthCache {
     this.inflight.set(key, request)
     return request
   }
+
+  /** 清空已完成的缓存（inflight 请求保留，让其自然完成）——「重新合成」用 */
+  clear(): void {
+    this.cache.clear()
+  }
 }
 
 export interface TtsHandlers {
   onSentenceStart?: (index: number, total: number, text: string) => void
   onFinish?: (completed: boolean) => void
+}
+
+/** start 时保存的启动参数（jumpTo/重新合成时按其重启播放） */
+interface TtsLastPayload {
+  sentences: string[]
+  /** 引用可被 replaceSettings 整体替换：播放循环每单元读同一引用，下一单元即生效 */
+  settings: TtsSettings
+  handlers: TtsHandlers
+  voiceOverrides?: Array<string | undefined>
+  options?: TtsQueueOptions
 }
 
 export interface TtsQueueOptions {
@@ -242,6 +260,8 @@ class TtsPlayer {
   private audio: HTMLAudioElement | null = null
   private currentUtterance: SpeechSynthesisUtterance | null = null
   private readonly synthCache = new SynthCache()
+  /** 最近一次 start 的启动参数（stop 不清空，jumpTo/重新合成需要） */
+  private lastPayload: TtsLastPayload | null = null
 
   // --- Web Audio 时间线（参考 ColorTxt）---
   private audioCtx: AudioContext | null = null
@@ -272,6 +292,7 @@ class TtsPlayer {
       handlers.onFinish?.(false)
       return
     }
+    this.lastPayload = { sentences, settings, handlers, voiceOverrides, options }
     this.paused = false
     this._state.value = 'playing'
     this.totalSentences.value = sentences.length
@@ -292,13 +313,87 @@ class TtsPlayer {
     }
   }
 
-  /** 单元 i 开始前的停顿（毫秒）：优先用逐单元覆盖，缺省走设置。 */
+  /**
+   * 从第 index 个单元重启播放（上一句/下一句/重新合成的底层能力）。
+   * 复用最近一次 start 的参数（settings/handlers/overrides/options）；
+   * onSentenceStart 的 index 仍是绝对下标，高亮/进度映射无需偏移；
+   * 播到队尾自然触发 onFinish(true)，连播语义与 start 完全一致。
+   */
+  async jumpTo(index: number): Promise<void> {
+    const payload = this.lastPayload
+    if (!payload || payload.sentences.length === 0) return
+    const from = Math.max(0, Math.min(index, payload.sentences.length - 1))
+    this.stop(true) // 掐断旧时间线/音频；stop 不触发 onFinish
+    const myToken = ++this.token
+    this.paused = false
+    this._state.value = 'playing'
+    this.totalSentences.value = payload.sentences.length
+    this.currentIndex.value = from
+
+    const timeline = payload.settings.provider !== 'system' ? this.ensureAudioContext() : null
+    if (timeline) {
+      await this.runTimeline(
+        timeline,
+        payload.sentences,
+        payload.settings,
+        payload.handlers,
+        payload.voiceOverrides,
+        myToken,
+        payload.options,
+        from,
+      )
+    } else {
+      await this.runSerial(
+        payload.sentences,
+        payload.settings,
+        payload.handlers,
+        payload.voiceOverrides,
+        myToken,
+        payload.options,
+        from,
+      )
+    }
+
+    if (myToken === this.token) {
+      this._state.value = 'idle'
+      this.currentIndex.value = -1
+      payload.handlers.onFinish?.(true)
+    }
+  }
+
+  /** 从头重播（无历史启动参数时静默忽略） */
+  async restart(): Promise<void> {
+    await this.jumpTo(0)
+  }
+
+  /** 是否有可跳转的历史启动参数 */
+  hasPayload(): boolean {
+    return this.lastPayload !== null
+  }
+
+  /** 播放中热更新合成参数：下一单元起生效（时间线上已排播的音频不受影响） */
+  replaceSettings(next: TtsSettings): void {
+    if (this.lastPayload) this.lastPayload.settings = next
+  }
+
+  /** 音量即时生效（Web Audio 时间线路径；串行路径下一句生效） */
+  setVolumeLive(volume: number): void {
+    if (this.gain) this.gain.gain.value = Math.min(1, Math.max(0, volume / 100))
+  }
+
+  /** 清空合成缓存（「重新合成」：同参数强制重试） */
+  clearSynthCache(): void {
+    this.synthCache.clear()
+  }
+
+  /** 单元 i 开始前的停顿（毫秒）：优先用逐单元覆盖，缺省走设置。from = 播放起点（起点句不引入前置停顿） */
   private pauseBeforeMs(
     i: number,
     settings: TtsSettings,
     options: TtsQueueOptions | undefined,
+    from = 0,
   ): number {
-    if (i <= 0) return 0
+    if (i <= 0 || i === from) return 0
     const custom = options?.pauseBeforeMs?.[i]
     if (typeof custom === 'number') return scaledPauseMs(custom, settings.rate)
     return scaledPauseMs(settings.sentencePauseMs, settings.rate)
@@ -316,10 +411,11 @@ class TtsPlayer {
     voiceOverrides: Array<string | undefined> | undefined,
     myToken: number,
     options?: TtsQueueOptions,
+    from = 0,
   ): Promise<void> {
     const gain = this.gain
     if (!gain) {
-      await this.runSerial(sentences, settings, handlers, voiceOverrides, myToken, options)
+      await this.runSerial(sentences, settings, handlers, voiceOverrides, myToken, options, from)
       return
     }
     try {
@@ -332,7 +428,7 @@ class TtsPlayer {
     // 生产者：把 i..i+PRELOAD_UNITS-1 的合成提前发出（并发受限），结果放 ready
     const ready = new Map<number, Promise<AudioBuffer | null>>()
     const pending: Array<Promise<unknown>> = []
-    let queued = 0
+    let queued = from // 预取起点与播放起点对齐：跳转后不再从 0 合成
     const track = (task: Promise<unknown>): void => {
       const wrapped = task
         .catch(() => {})
@@ -356,7 +452,7 @@ class TtsPlayer {
     }
 
     this.scheduledEnd = ctx.currentTime
-    for (let i = 0; i < sentences.length; i++) {
+    for (let i = from; i < sentences.length; i++) {
       if (myToken !== this.token) return
       while (this.paused && myToken === this.token) {
         await this.sleep(80)
@@ -375,7 +471,7 @@ class TtsPlayer {
 
       if (buffer) {
         // 排播到时间线：上段结束（+停顿）后立即接上，可感知间隙 ≈ 0
-        const pauseSec = this.pauseBeforeMs(i, settings, options) / 1000
+        const pauseSec = this.pauseBeforeMs(i, settings, options, from) / 1000
         const startAt = Math.max(ctx.currentTime + 0.01, this.scheduledEnd + pauseSec)
         gain.gain.value = Math.min(1, Math.max(0, settings.volume / 100))
         const src = ctx.createBufferSource()
@@ -428,8 +524,9 @@ class TtsPlayer {
     voiceOverrides: Array<string | undefined> | undefined,
     myToken: number,
     options?: TtsQueueOptions,
+    from = 0,
   ): Promise<void> {
-    for (let i = 0; i < sentences.length; i++) {
+    for (let i = from; i < sentences.length; i++) {
       if (myToken !== this.token) return // 被新的 start/stop 中断
       while (this.paused && myToken === this.token) {
         await this.sleep(120)
@@ -478,7 +575,7 @@ class TtsPlayer {
 
       // 段后停顿 = 下一段的「开始前停顿」（1x 语速基准，随语速缩放）
       if (i < sentences.length - 1 && myToken === this.token) {
-        const pause = this.pauseBeforeMs(i + 1, settings, options)
+        const pause = this.pauseBeforeMs(i + 1, settings, options, from)
         if (pause > 0) {
           await this.sleep(pause)
           if (myToken !== this.token) return
