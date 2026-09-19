@@ -36,12 +36,12 @@ jobs:
             tauri-args: '--target aarch64-apple-darwin'
 
           - name: Linux x64
-            os: ubuntu-22.04
+            os: ubuntu-24.04
             rust-target: x86_64-unknown-linux-gnu
             tauri-args: '--target x86_64-unknown-linux-gnu'
 
           - name: Android arm64
-            os: ubuntu-22.04
+            os: ubuntu-24.04
             rust-target: aarch64-linux-android
             tauri-args: '--target aarch64 --apk --aab'
             mobile: android
@@ -56,7 +56,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
+            libayatana-appindicator3-dev \
             librsvg2-dev \
             patchelf \
             xdg-utils
