@@ -266,6 +266,42 @@
       <el-button text :aria-label="t('reading.previousChapter')" :disabled="!hasPreviousChapter" @click="goToPreviousChapter">
         <el-icon><ArrowLeft /></el-icon> {{ t('reading.previousChapter') }}
       </el-button>
+      <el-dropdown
+        split-button
+        size="small"
+        class="auto-scroll-dropdown"
+        :class="{ 'auto-scroll-active': isTimedScrollActive }"
+        :title="t('reading.autoScroll')"
+        @click="toggleAutoScroll"
+        @command="onAutoScrollCommand"
+      >
+        {{ t('reading.autoScroll') }}
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item
+              v-for="p in TIMED_SCROLL_SPEED_PRESETS"
+              :key="p.intervalMs"
+              :command="`speed:${p.intervalMs}`"
+              :class="{ 'is-current-speed': settingsStore.autoScrollIntervalMs === p.intervalMs }"
+            >
+              {{ t(p.labelKey, { s: p.intervalMs / 1000 }) }}
+            </el-dropdown-item>
+            <el-dropdown-item
+              divided
+              :command="'range:line'"
+              :class="{ 'is-current-speed': settingsStore.autoScrollRange === 'line' }"
+            >
+              {{ t('reading.autoScrollStepLine') }}
+            </el-dropdown-item>
+            <el-dropdown-item
+              :command="'range:screen'"
+              :class="{ 'is-current-speed': settingsStore.autoScrollRange === 'screen' }"
+            >
+              {{ t('reading.autoScrollStepScreen') }}
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
       <div class="reading-progress-wrap" :title="t('reading.shortcutHint')">
         <el-progress :percentage="readingPercent" :stroke-width="5" :show-text="false" />
         <span>{{ currentChapterTitle }} · {{ readingPercent }}%</span>
@@ -362,6 +398,8 @@ import PreviewPanel from '@/components/novel/PreviewPanel.vue'
 import { buildHtml as buildPreviewHtml } from '@/utils/pdfPreview'
 import { ttsPlayer } from '@/utils/ttsPlayer'
 import { useTtsSession, currentTtsSettings } from '@/composables/useTtsSession'
+import { useTimedScroll } from '@/composables/useTimedScroll'
+import { TIMED_SCROLL_SPEED_PRESETS, type TimedScrollRange } from '@/utils/timedScroll'
 import TtsControlBar from '@/components/novel/tts-bar/TtsControlBar.vue'
 import CharacterVoicePanel from '@/components/novel/CharacterVoicePanel.vue'
 import { useSplitLayout } from '@/composables/useSplitLayout'
@@ -553,6 +591,44 @@ async function startTtsReading(): Promise<void> {
 function stopTtsReading(): void {
   stopTtsSession()
 }
+
+// ===== 定时自动滚动（参考 ColorTxt useAppTimedScroll；与朗读互斥：后开者胜） =====
+const timedScrollSettings = computed(() => ({
+  range: settingsStore.autoScrollRange,
+  intervalMs: settingsStore.autoScrollIntervalMs,
+}))
+const {
+  isTimedScrollActive,
+  toggleTimedScroll,
+  stopTimedScroll,
+  nudgeTimedScrollTimer,
+} = useTimedScroll({
+  getScrollEl: () => editorRef.value?.getScrollEl() ?? null,
+  settings: timedScrollSettings,
+  canStart: () =>
+    readingMode.value && loadState.value === 'loaded' && !!editorRef.value?.isContentReady(),
+})
+
+/** 开自动滚动前先停朗读（朗读开启侧由 watch(ttsState) 兜底互斥） */
+function toggleAutoScroll(): void {
+  if (!isTimedScrollActive.value && ttsState.value === 'playing') stopTtsReading()
+  toggleTimedScroll()
+}
+
+function onAutoScrollCommand(command: string | number | object): void {
+  const [kind, raw] = String(command).split(':')
+  if (kind === 'speed') {
+    const n = Number(raw)
+    if (Number.isFinite(n)) void settingsStore.setAutoScrollSettings({ intervalMs: n })
+  } else if (kind === 'range') {
+    void settingsStore.setAutoScrollSettings({ range: raw as TimedScrollRange })
+  }
+}
+
+// 朗读开始即停自动滚动（覆盖控制条/所有朗读入口）
+watch(ttsState, (s) => {
+  if (s === 'playing' && isTimedScrollActive.value) stopTimedScroll()
+})
 
 async function onWordTapTtsNext(): Promise<void> {
   if (hasNextChapter.value) {
@@ -1349,6 +1425,7 @@ async function scrollToChapter(index: number, opts?: { keepTts?: boolean }) {
   } finally {
     changingChapter = false
   }
+  stopTimedScroll()
   scheduleSaveReadingPos()
 }
 
@@ -1435,6 +1512,7 @@ function attachScrollListener() {
   const onScroll = () => {
     updateReadingState()
     scheduleSaveReadingPos()
+    nudgeTimedScrollTimer()
   }
   el.addEventListener('scroll', onScroll, { passive: true })
   updateReadingState()
@@ -1616,6 +1694,15 @@ function attachScrollListener() {
 .reading-bottom-bar > * {
   pointer-events: auto;
 }
+/* 自动滚动 split-button：主键开启/停止，箭头下拉速度与步进 */
+.auto-scroll-dropdown :deep(> .el-button-group > .el-button) {
+  border-color: var(--border-color, #ebeef5);
+  background: var(--bg-primary);
+}
+.auto-scroll-active :deep(> .el-button-group > .el-button:first-child) {
+  border-color: var(--accent-color, #409eff);
+  color: var(--accent-color, #409eff);
+}
 .reading-progress-wrap {
   width: min(36vw, 420px);
   padding: 8px 14px;
@@ -1793,4 +1880,10 @@ function attachScrollListener() {
 .editor-topbar .novel-title { flex:1; min-width:80px; }
 .reading-topbar-meta { display:none; }
 @media(max-width:600px) { .editor-topbar { padding:8px; }.reading-mode .save-status { display:none; } }
+/* 自动滚动下拉菜单 teleport 到 body，需全局样式 */
+:global(.el-dropdown-menu__item.is-current-speed) {
+  color: var(--accent-color, #409eff);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--accent-color, #409eff) 8%, transparent);
+}
 </style>

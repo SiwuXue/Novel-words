@@ -480,6 +480,14 @@ export default {
   'reading.previousChapter': 'Previous',
   'reading.nextChapter': 'Next',
   'reading.shortcutHint': 'Space pages · Alt + ←/→ changes chapters',
+  'reading.autoScroll': 'Auto scroll',
+  'reading.autoScrollSpeedVeryFast': 'Very fast · {s}s',
+  'reading.autoScrollSpeedFast': 'Fast · {s}s',
+  'reading.autoScrollSpeedNormal': 'Normal · {s}s',
+  'reading.autoScrollSpeedSlow': 'Slow · {s}s',
+  'reading.autoScrollSpeedVerySlow': 'Very slow · {s}s',
+  'reading.autoScrollStepLine': 'Scroll by line',
+  'reading.autoScrollStepScreen': 'Scroll by screen',
 
   // ---- Import dialog ----
   'import.customRule': 'Custom chapter rule',

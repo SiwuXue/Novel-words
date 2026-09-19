@@ -4,6 +4,13 @@ import { invoke } from '@tauri-apps/api/core'
 import type { StepNum } from '@/types/pdfSteps'
 import { normalizeSteps, serializeSteps } from '@/types/pdfSteps'
 import type { SpeechAccent } from '@/utils/speech'
+import {
+  clampTimedScrollIntervalMs,
+  defaultTimedScrollIntervalMs,
+  defaultTimedScrollRange,
+  type TimedScrollRange,
+  type TimedScrollSettings,
+} from '@/utils/timedScroll'
 import type { TtsProvider } from '@/utils/ttsPlayer'
 import type { TtsVoiceMode } from '@/utils/ttsProfile'
 import {
@@ -82,6 +89,10 @@ export const useSettingsStore = defineStore('settings', () => {
   const ttsActiveProfile = ref('')
   /** DeepLX 翻译端点（空串 = 使用 Rust 端默认公共实例） */
   const deeplEndpoint = ref('')
+  /** 自动滚动：间隔毫秒（阅读模式定时滚屏） */
+  const autoScrollIntervalMs = ref(defaultTimedScrollIntervalMs)
+  /** 自动滚动步进：screen = 一屏；line = 一行 */
+  const autoScrollRange = ref<TimedScrollRange>(defaultTimedScrollRange)
   const loaded = ref(false)
   let loadPromise: Promise<void> | null = null
 
@@ -226,6 +237,14 @@ export const useSettingsStore = defineStore('settings', () => {
                 break
               case 'deepl_endpoint':
                 deeplEndpoint.value = s.value
+                break
+              case 'auto_scroll_interval': {
+                const n = Number(s.value)
+                if (Number.isFinite(n)) autoScrollIntervalMs.value = clampTimedScrollIntervalMs(n)
+                break
+              }
+              case 'auto_scroll_range':
+                if (s.value === 'line' || s.value === 'screen') autoScrollRange.value = s.value
                 break
             }
           }
@@ -518,6 +537,25 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
+  async function setAutoScrollSettings(patch: Partial<TimedScrollSettings>) {
+    if (patch.intervalMs !== undefined) {
+      autoScrollIntervalMs.value = clampTimedScrollIntervalMs(patch.intervalMs)
+    }
+    if (patch.range !== undefined) {
+      autoScrollRange.value = patch.range
+    }
+    try {
+      if (patch.intervalMs !== undefined) {
+        await invoke('set_setting', { key: 'auto_scroll_interval', value: String(autoScrollIntervalMs.value) })
+      }
+      if (patch.range !== undefined) {
+        await invoke('set_setting', { key: 'auto_scroll_range', value: autoScrollRange.value })
+      }
+    } catch (e) {
+      console.error('[settingsStore] setAutoScrollSettings failed:', e)
+    }
+  }
+
   return {
     theme,
     defaultExportFolder,
@@ -547,6 +585,8 @@ export const useSettingsStore = defineStore('settings', () => {
     ttsProfiles,
     ttsActiveProfile,
     deeplEndpoint,
+    autoScrollIntervalMs,
+    autoScrollRange,
     loaded,
     load,
     setTheme,
@@ -558,6 +598,7 @@ export const useSettingsStore = defineStore('settings', () => {
     setReviewDailyGoal,
     setSpeechAccent,
     setDeeplEndpoint,
+    setAutoScrollSettings,
     setDailyNewWordLimit,
     setTtsSettings,
     ttsApiKey,

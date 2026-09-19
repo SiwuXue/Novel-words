@@ -480,6 +480,14 @@ export default {
   'reading.previousChapter': '上一章',
   'reading.nextChapter': '下一章',
   'reading.shortcutHint': 'Space 翻页 · Alt + ←/→ 切换章节',
+  'reading.autoScroll': '自动滚动',
+  'reading.autoScrollSpeedVeryFast': '极快 · {s} 秒',
+  'reading.autoScrollSpeedFast': '快 · {s} 秒',
+  'reading.autoScrollSpeedNormal': '适中 · {s} 秒',
+  'reading.autoScrollSpeedSlow': '慢 · {s} 秒',
+  'reading.autoScrollSpeedVerySlow': '很慢 · {s} 秒',
+  'reading.autoScrollStepLine': '每次一行',
+  'reading.autoScrollStepScreen': '每次一屏',
 
   // ---- Import dialog ----
   'import.customRule': '自定义章节规则',
