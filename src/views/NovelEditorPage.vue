@@ -275,12 +275,11 @@
       </el-button>
     </div>
 
-    <!-- TTS 悬浮控制条（普通阅读模式；逐词模式由 WordTapReader 内部挂载） -->
+    <!-- TTS 悬浮控制条（普通阅读模式；逐词模式由 WordTapReader 内部挂载）：常驻，idle 态主控键=开始朗读 -->
     <TtsControlBar
       v-if="readingMode && !wordTapMode"
       class="tts-control-bar-page"
-      :visible="ttsState !== 'idle'"
-      :mode="ttsState === 'playing' ? 'playing' : 'paused'"
+      :mode="ttsBarMode"
       :toolbar-rate="toolbarRate"
       :toolbar-volume="toolbarVolume"
       :can-prev-line="canPrev"
@@ -421,6 +420,8 @@ const wordTapMode = ref(false)
 
 // ===== TTS 朗读（普通阅读模式，悬浮控制条 + useTtsSession） =====
 const ttsState = computed(() => ttsPlayer.state)
+/** 控制条三态：idle → 'off'（常驻显示，主控键=开始朗读入口） */
+const ttsBarMode = computed(() => (ttsState.value === 'idle' ? 'off' : ttsState.value))
 const ttsProgressLabel = computed(() => {
   const i = ttsPlayer.currentIndex.value
   const n = ttsPlayer.totalSentences.value

@@ -18,8 +18,8 @@ import { icons } from './icons'
 type ToolbarLayer = 'playback' | 'settings'
 
 const props = defineProps<{
-  /** false 时整条隐藏（idle 态） */
-  visible: boolean
+  /** false 时整条隐藏；缺省常驻（idle 态仅主控键与齿轮可用，作为开始朗读的入口） */
+  visible?: boolean
   /** off ↔ ttsPlayer.state 'idle' */
   mode: 'off' | 'playing' | 'paused'
   /** 0.5–2.0 */
@@ -42,6 +42,9 @@ const emit = defineEmits<{
 }>()
 
 const toolbarLayer = ref<ToolbarLayer>('playback')
+
+/** idle 态：无朗读会话，仅主控键（开始朗读）与齿轮可用 */
+const isOff = computed(() => props.mode === 'off')
 
 const showSettingsLayer = computed(() => toolbarLayer.value === 'settings')
 
@@ -73,7 +76,7 @@ const playLabel = computed(() =>
                   :icon-html="icons.prev"
                   :title="t('ttsBar.prev')"
                   :aria-label="t('ttsBar.prev')"
-                  :disabled="!canPrevLine"
+                  :disabled="isOff || !canPrevLine"
                   @click="emit('prevLine')"
                 />
                 <TtsIconButton
@@ -81,6 +84,7 @@ const playLabel = computed(() =>
                   :icon-html="icons.refresh"
                   :title="t('ttsBar.regenerate')"
                   :aria-label="t('ttsBar.regenerate')"
+                  :disabled="isOff"
                   @click="emit('regenerate')"
                 />
                 <div class="playSpacer" aria-hidden="true" />
@@ -89,6 +93,7 @@ const playLabel = computed(() =>
                   :icon-html="icons.stop"
                   :title="t('ttsBar.stop')"
                   :aria-label="t('ttsBar.stop')"
+                  :disabled="isOff"
                   @click="emit('stop')"
                 />
                 <TtsIconButton
@@ -96,7 +101,7 @@ const playLabel = computed(() =>
                   :icon-html="icons.next"
                   :title="t('ttsBar.next')"
                   :aria-label="t('ttsBar.next')"
-                  :disabled="!canNextLine"
+                  :disabled="isOff || !canNextLine"
                   @click="emit('nextLine')"
                 />
               </div>

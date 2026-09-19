@@ -99,10 +99,9 @@
       @updated="onCharVoicesUpdated"
     />
 
-    <!-- TTS 悬浮控制条（移植自 ColorTxt VoiceReadToolbar） -->
+    <!-- TTS 悬浮控制条（移植自 ColorTxt VoiceReadToolbar）：常驻，idle 态主控键=开始朗读 -->
     <TtsControlBar
-      :visible="ttsState !== 'idle'"
-      :mode="ttsState === 'playing' ? 'playing' : 'paused'"
+      :mode="ttsBarMode"
       :toolbar-rate="toolbarRate"
       :toolbar-volume="toolbarVolume"
       :can-prev-line="canPrev"
@@ -390,6 +389,8 @@ function onMarked(payload: { word: string; proficiency: Proficiency }) {
 const speakingRange = ref<{ from: number; to: number } | null>(null)
 const autoRestart = ref(false)
 const ttsState = computed(() => ttsPlayer.state)
+/** 控制条三态：idle → 'off'（常驻显示，主控键=开始朗读入口） */
+const ttsBarMode = computed(() => (ttsState.value === 'idle' ? 'off' : ttsState.value))
 const ttsProgress = computed(() => {
   const i = ttsPlayer.currentIndex.value
   const n = ttsPlayer.totalSentences.value
