@@ -311,7 +311,12 @@ async function loadCharacters(): Promise<void> {
         novelId: props.novelId,
       })
       for (const c of saved) {
-        rowsMap.set(c.name, toRow(c, countFor(c.name)))
+        // 对白数 = 本名 + 直接命中的别名（改名合并后计数跨名累计；别名仅是变体时不重复计）
+        let count = countFor(c.name)
+        for (const a of c.aliases ?? []) {
+          if (a && a !== c.name && candidateInfo.has(a)) count += candidateInfo.get(a)?.count ?? 0
+        }
+        rowsMap.set(c.name, toRow(c, count))
       }
     } catch (e) {
       console.error('[CharacterVoicePanel] load failed:', e)
@@ -454,6 +459,19 @@ async function addManual(): Promise<void> {
   void saveRow(row)
 }
 
+/** 把 src 行合并进 dst 行：dst 吸收 src 的对白计数与别名，src 移除。
+ *  dst 已入库时同步写库，让 src 的名字立即参与朗读命中 */
+function mergeRows(dst: CharRow, src: CharRow): void {
+  const incoming = [src.name, ...src.aliases].filter(
+    (a) => a && a !== dst.name && !dst.aliases.includes(a),
+  )
+  dst.aliases = [...dst.aliases, ...incoming]
+  dst.count += src.count
+  rows.value = rows.value.filter((r) => r !== src)
+  if (dst.id != null) void saveRow(dst)
+  emitUpdated()
+}
+
 /** 候选改名：把归因残片名（如「王卓连忙恭敬」）修成真名后再确认入库。
  *  旧名转存为别名——归因产出的说话名就是残片，保留别名才能让这些对白命中音色 */
 async function renameCandidate(row: CharRow): Promise<void> {
@@ -471,8 +489,11 @@ async function renameCandidate(row: CharRow): Promise<void> {
     return // 用户取消
   }
   if (!next || next === row.name) return
-  if (rows.value.some((r) => r !== row && r.name === next)) {
-    ElMessage.warning(t('characters.nameExists'))
+  // 目标名已存在（候选或已入库角色）→ 合并而不是拒绝：
+  // 两行并一行、对白计数累加、旧名进别名（朗读按别名命中）
+  const existing = rows.value.find((r) => r !== row && r.name === next)
+  if (existing) {
+    mergeRows(existing, row)
     return
   }
   const old = row.name
