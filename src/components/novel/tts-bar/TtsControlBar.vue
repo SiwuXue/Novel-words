@@ -17,18 +17,21 @@ import { icons } from './icons'
 
 type ToolbarLayer = 'playback' | 'settings'
 
-const props = defineProps<{
-  /** false 时整条隐藏；缺省常驻（idle 态仅主控键与齿轮可用，作为开始朗读的入口） */
-  visible?: boolean
-  /** off ↔ ttsPlayer.state 'idle' */
-  mode: 'off' | 'playing' | 'paused'
-  /** 0.5–2.0 */
-  toolbarRate: number
-  /** 0–100（ColorTxt 是 0–1，词阅域直接使用） */
-  toolbarVolume: number
-  canPrevLine?: boolean
-  canNextLine?: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    /** false 时整条隐藏；缺省常驻（idle 态仅主控键与齿轮可用，作为开始朗读的入口） */
+    visible?: boolean
+    /** off ↔ ttsPlayer.state 'idle' */
+    mode: 'off' | 'playing' | 'paused'
+    /** 0.5–2.0 */
+    toolbarRate: number
+    /** 0–100（ColorTxt 是 0–1，词阅域直接使用） */
+    toolbarVolume: number
+    canPrevLine?: boolean
+    canNextLine?: boolean
+  }>(),
+  { visible: true },
+)
 
 const emit = defineEmits<{
   'update:toolbarRate': [v: number]
