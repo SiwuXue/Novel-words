@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildSpeechUnits,
   buildVoiceOverrides,
+  collectCandidates,
   collectSpeakers,
   guessGenders,
   speakerForSpan,
@@ -255,5 +256,56 @@ describe('buildSpeechUnits（旁白/对白片段级分音色）', () => {
     expect(plain).toHaveLength(1)
     expect(plain[0].voice).toBeUndefined()
     expect(plain[0].text).toBe(text)
+  })
+})
+
+describe('归因净化（动词表 / 修饰动作词 / 代词群体词过滤）', () => {
+  it('动作词被长动词吃掉，名字保持干净', () => {
+    expect(collectSpeakers('铁柱父亲摇头道："这孩子，唉。"').map((s) => s.name)).toEqual([
+      '铁柱父亲',
+    ])
+    expect(collectSpeakers('中年汉子摇头道："不成不成。"').map((s) => s.name)).toEqual([
+      '中年汉子',
+    ])
+  })
+
+  it('代词 / 群体词 / 动词残片不产生角色', () => {
+    // 「他感慨道」：长动词吃掉"感慨"，剩下代词 → 无角色（不再出现"他感慨"）
+    expect(collectSpeakers('他感慨道："人这一辈子啊。"')).toEqual([])
+    expect(collectSpeakers('众人笑道："好！"')).toEqual([])
+    expect(collectSpeakers('她笑着说："你也来啦。"')).toEqual([])
+  })
+
+  it('长状语短语被长度上限拒绝', () => {
+    expect(collectSpeakers('船人不在意在铁柱耳边说："别出声。"')).toEqual([])
+  })
+
+  it('修饰短语剥离后得到真实称谓（男生一脸关切的问道 → 男生）', () => {
+    const text =
+      '男生一脸关切的问道："身体不舒服吗？要多喝热水。"\n女生淡淡道："你人还怪好的嘞。"'
+    expect(collectSpeakers(text).map((s) => s.name)).toEqual(['男生', '女生'])
+  })
+
+  it('正常角色与英文名不受影响', () => {
+    expect(collectSpeakers('铁柱说："先坐下吧。"').map((s) => s.name)).toEqual(['铁柱'])
+    expect(collectSpeakers('老人叹道："天要黑了。"').map((s) => s.name)).toEqual(['老人'])
+    expect(
+      splitDialogueSegments('"It is a fine day," said Tom.').find((s) => s.type === 'dialogue')
+        ?.speaker,
+    ).toBe('Tom')
+  })
+})
+
+describe('collectCandidates', () => {
+  it('按出现次数与名字长度过滤候选，且不改动 collectSpeakers 语义', () => {
+    const text = '“A。”王小明说。“B。”王小明又说。“C。”李老师问。'
+    expect(collectCandidates(text).map((c) => c.name)).toEqual(['王小明'])
+    // 未过滤版本仍保留只出现一次的角色（guessGenders 依赖它推断性别）
+    expect(collectSpeakers(text).map((c) => c.name)).toEqual(['王小明', '李老师'])
+    // 阈值可覆盖
+    expect(collectCandidates(text, undefined, { minCount: 1 }).map((c) => c.name)).toEqual([
+      '王小明',
+      '李老师',
+    ])
   })
 })

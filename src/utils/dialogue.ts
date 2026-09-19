@@ -89,8 +89,58 @@ export function splitDialogueSegments(
   return segments
 }
 
-/** 常见说话动词（长词在前，避免短词截断长词）。 */
-const CN_VERBS = [
+/**
+ * 常见说话动词。**按长度降序匹配**（长词优先），否则「铁柱父亲摇头道」会被「道」
+ * 截断成「铁柱父亲摇头」、把动作词混进人名。
+ * 特意收录「动作/神态 + 说|道」组合，让动作词被动词吃掉而不是留在名字里。
+ */
+const CN_VERB_LIST = [
+  // 动作/神态 + 说|道
+  '摇了摇头说',
+  '摇了摇头道',
+  '摇头道',
+  '摇头说',
+  '点头道',
+  '点头说',
+  '笑着说',
+  '笑着道',
+  '苦笑道',
+  '冷笑道',
+  '冷笑说',
+  '皱眉道',
+  '叹口气道',
+  '叹气道',
+  '沉吟道',
+  // 心理 / 言语
+  '感慨道',
+  '自语道',
+  '自语',
+  '心想',
+  '喃喃道',
+  '喃喃',
+  '低声道',
+  '轻声道',
+  '沉声道',
+  '大声道',
+  '高声说',
+  '高声说道',
+  '缓缓道',
+  '缓缓说道',
+  '接着说道',
+  '继续说道',
+  '正色道',
+  '失声道',
+  '低声说',
+  '轻声说',
+  '大声说',
+  '解释道',
+  '提醒道',
+  '追问道',
+  '补充道',
+  '接口道',
+  '插嘴道',
+  '接着说',
+  // 基础动词
   '说道',
   '问道',
   '喊道',
@@ -99,23 +149,21 @@ const CN_VERBS = [
   '吼道',
   '叹道',
   '答道',
-  '低声道',
-  '轻声道',
-  '大声道',
-  '低声说',
-  '轻声说',
-  '大声说',
-  '接着说',
+  '骂道',
+  '念道',
   '又说',
   '再说',
   '嘀咕',
+  '咕哝',
   '说',
   '问',
   '喊',
   '叫',
   '答',
   '道',
+  '念',
 ]
+const CN_VERBS: readonly string[] = [...new Set(CN_VERB_LIST)].sort((a, b) => b.length - a.length)
 const EN_VERBS = [
   'whispered',
   'exclaimed',
@@ -140,20 +188,15 @@ function attributeSpeaker(text: string, openIdx: number, endIdx: number): string
   for (const verb of CN_VERBS) {
     const re = new RegExp(`^\\s*[，,。、！]?\\s*(${NAME_CHARS}?)${verb}`)
     const m = after.match(re)
-    if (m && m[1]) {
-      const name = cleanName(m[1])
-      if (name) return name
-    }
+    // 动词按长度降序尝试：一旦匹配到非空名字段即定论——更短的动词只会剥出更脏的名字
+    if (m && m[1]) return cleanName(m[1])
   }
   for (const verb of EN_VERBS) {
     const re = new RegExp(
       `^\\s*,?\\s*${verb}\\s+(?:the\\s+)?([A-Z][A-Za-z]*(?:\\s[A-Z][A-Za-z]*)?)`,
     )
     const m = after.match(re)
-    if (m && m[1]) {
-      const name = cleanName(m[1])
-      if (name) return name
-    }
+    if (m && m[1]) return cleanName(m[1])
   }
   // 英文对白后缀·名字在前："…," Tom said.
   for (const verb of EN_VERBS) {
@@ -161,10 +204,7 @@ function attributeSpeaker(text: string, openIdx: number, endIdx: number): string
       `^\\s*,?\\s*([A-Z][A-Za-z]*(?:\\s[A-Z][A-Za-z]*)?)\\s+${verb}\\b`,
     )
     const m = after.match(re)
-    if (m && m[1]) {
-      const name = cleanName(m[1])
-      if (name) return name
-    }
+    if (m && m[1]) return cleanName(m[1])
   }
 
   // --- 对白前：开头引号前的 30 字窗口（不跨行，只看当前行；允许结尾残留冒号/引号） ---
@@ -172,28 +212,141 @@ function attributeSpeaker(text: string, openIdx: number, endIdx: number): string
   for (const verb of CN_VERBS) {
     const re = new RegExp(`(${NAME_CHARS})${verb}\\s*[:：“"]?\\s*$`)
     const m = before.match(re)
-    if (m && m[1]) {
-      const name = cleanName(m[1])
-      if (name) return name
-    }
+    if (m && m[1]) return cleanName(m[1])
   }
   for (const verb of EN_VERBS) {
     const re = new RegExp(
       `([A-Z][A-Za-z]*(?:\\s[A-Z][A-Za-z]*)?)\\s*${verb}\\s*[,;:]?\\s*$`,
     )
     const m = before.match(re)
-    if (m && m[1]) {
-      const name = cleanName(m[1])
-      if (name) return name
-    }
+    if (m && m[1]) return cleanName(m[1])
   }
   return null
 }
 
-/** 清洗名字：去两端装饰符，过滤数字/单字符无意义片段。 */
+/** 代词：不是角色名（「他感慨道」应归因为无说话人）。 */
+const PRONOUN_WORDS = new Set([
+  '他',
+  '她',
+  '它',
+  '牠',
+  '祂',
+  '我',
+  '你',
+  '咱',
+  '他们',
+  '她们',
+  '它们',
+  '我们',
+  '你们',
+  '咱们',
+  '自己',
+  '对方',
+  '彼此',
+])
+
+/** 群体/泛称：给群体分配音色没有意义。 */
+const COLLECTIVE_WORDS = new Set([
+  '众人',
+  '大家',
+  '有人',
+  '那人',
+  '旁人',
+  '所有人',
+  '人们',
+  '村人',
+  '路人',
+  '俩人',
+  '两人',
+  '一群人',
+  '全场',
+  '众女',
+  '众男',
+])
+
+/** 修饰/动作词：出现在候选里即删除（「铁柱父亲摇头」→「铁柱父亲」）。 */
+const MODIFIER_WORDS = [
+  '一脸',
+  '满脸',
+  '一身',
+  '一声',
+  '一阵',
+  '淡淡',
+  '冷冷',
+  '缓缓',
+  '重重',
+  '轻轻',
+  '默默',
+  '悄悄',
+  '微笑',
+  '苦笑',
+  '冷笑',
+  '笑着',
+  '摇头',
+  '点头',
+  '皱眉',
+  '叹气',
+  '沉吟',
+  '顿了顿',
+  '继续',
+  '接着',
+  '随后',
+  '终于',
+  '这才',
+  '于是',
+  '不由',
+  '不禁',
+  '忍不住',
+  '关切',
+  '严肃',
+  '平静',
+  '得意',
+  '疑惑',
+  '惊讶',
+  '诧异',
+  '沉默',
+  '慌张',
+  '无奈',
+  '兴奋',
+  '低声',
+  '轻声',
+  '大声',
+  '高声',
+  '沉声',
+  '小声',
+  '正色',
+  '失声',
+]
+
+/** 虚词残留：候选里出现即判为非人名（「船人不在意在铁柱耳边」「铁柱和小明」）。 */
+const FUNCTION_CHARS = /[不在了就都也还又把被让向对与跟及同和这那很太更么嘛啦呀]/
+
+/**
+ * 清洗说话人候选：删修饰/动作词、按助词边界取名词段，并拒绝代词、群体词、虚词残留与超长串。
+ * 返回 null 表示"这段文字不是人名"——宁可漏，也不要把动词残片当成角色。
+ */
 function cleanName(raw: string): string | null {
-  const name = raw.replace(/^[的与和及同对跟让让]+/, '').replace(/[的地了着]+$/, '').trim()
-  if (!name || name.length > 12) return null
+  let name = raw.trim()
+  if (!name) return null
+  // 助词边界：取最后一个「的/地/得」之后的片段（「路过的同学」→「同学」）；
+  // 若其后为空（「男生一脸关切的」），保留原串交给下一步删修饰词
+  const cut = Math.max(name.lastIndexOf('的'), name.lastIndexOf('地'), name.lastIndexOf('得'))
+  if (cut >= 0 && cut + 1 < name.length) name = name.slice(cut + 1)
+  // 删除修饰/动作词
+  for (const word of MODIFIER_WORDS) name = name.split(word).join('')
+  // 去掉首尾助词（不再剥离"和/同/向"这类字——它们可能是姓氏或词首，如「同学」「向明」）
+  name = name
+    .replace(/^[的地得着了过]+/, '')
+    .replace(/[的地得着了过]+$/, '')
+    .trim()
+  if (!name) return null
+  // 中文人名不会以代词开头；整串是代词/群体词同样拒绝
+  if (/^[他她它牠祂我你咱]/.test(name)) return null
+  if (PRONOUN_WORDS.has(name) || COLLECTIVE_WORDS.has(name)) return null
+  if (FUNCTION_CHARS.test(name)) return null
+  // 中文名（含称谓）不超过 6 字，英文名放宽
+  const ascii = /^[\x20-\x7E]+$/.test(name)
+  if (name.length > (ascii ? 24 : 6)) return null
   if (/^[0-9]+$/.test(name)) return null
   if (!/[\u4e00-\u9fff\u3040-\u30ffA-Za-z]/.test(name)) return null
   return name
@@ -232,6 +385,23 @@ export function collectSpeakers(
   return [...counts.entries()]
     .map(([name, count]) => ({ name, count }))
     .sort((a, b) => b.count - a.count)
+}
+
+/**
+ * 角色面板候选（比 collectSpeakers 更严）：再按「出现次数」与「名字长度」过滤，
+ * 单次出现的疑似残片不进候选列表。
+ * collectSpeakers 语义保持不变——guessGenders 依赖它识别只出现一次的对白角色。
+ */
+export function collectCandidates(
+  text: string,
+  enabledOpens?: ReadonlyArray<string>,
+  opts: { minCount?: number; maxNameLen?: number } = {},
+): Array<{ name: string; count: number }> {
+  const minCount = opts.minCount ?? 2
+  const maxNameLen = opts.maxNameLen ?? 6
+  return collectSpeakers(text, enabledOpens).filter(
+    (item) => item.count >= minCount && item.name.length <= maxNameLen,
+  )
 }
 
 /** 性别关键词：称呼词判断（「男生」→男、「妈妈」→女）。 */

@@ -75,7 +75,7 @@ import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
 import { useSettingsStore } from '@/stores/settingsStore'
-import { collectSpeakers } from '@/utils/dialogue'
+import { collectCandidates } from '@/utils/dialogue'
 import { t } from '@/i18n'
 import type { TtsProvider } from '@/utils/ttsPlayer'
 import { getVoices, voiceOptionLabel } from '@/utils/ttsVoices'
@@ -198,7 +198,8 @@ async function loadCharacters(): Promise<void> {
       console.error('[CharacterVoicePanel] load failed:', e)
     }
   }
-  for (const sp of collectSpeakers(props.chapterText, settingsStore.ttsQuoteStyles)) {
+  // 只把"出现在 ≥2 段对白 + 名字不超长"的候选并入列表，避免单次出现的动词残片（说/笑/感慨）进面板
+  for (const sp of collectCandidates(props.chapterText, settingsStore.ttsQuoteStyles)) {
     const existing = rowsMap.get(sp.name)
     if (existing) existing.count = sp.count
     else rowsMap.set(sp.name, { name: sp.name, gender: 'unknown', voice: '', id: null, count: sp.count })
