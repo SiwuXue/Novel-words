@@ -40,6 +40,8 @@ export interface PresetCloneItem {
   phonetic: string
   exampleSentence: string
   hitCount: number
+  /** 预览实际命中的词块（后端以此为准提交）；confirm 时需原样回传 */
+  matchedTerms: string[]
 }
 
 /** Result of preview_preset_clone. */

@@ -42,7 +42,10 @@ pub struct PresetCloneItem {
     pub phonetic: String,
     pub example_sentence: String,
     pub hit_count: i64,
-    #[serde(default, skip_serializing)]
+    /// 预览 tailor() 实际命中且出现在小说里的词块（词典释义 ∩ 主释义 ∩ 小说文本）。
+    /// 随预览结果回传、commit 时以此为准——AI 复核会改写释义，commit 若按释义重算
+    /// 会得到与预览不一致的词块，误报「匹配依据已失效」
+    #[serde(default)]
     pub matched_terms: Vec<String>,
 }
 
@@ -523,6 +526,60 @@ mod tests {
         assert_eq!(progress_json["requestId"], "request-1");
     }
 
+    /// AI 复核改写释义后，commit 必须沿用预览回传的 matched_terms，
+    /// 而不是按改写后的释义重算（重算词块与预览不一致会误报失效）
+    #[test]
+    fn commit_items_keeps_preview_matched_terms_after_ai_rewrite() {
+        let dir = std::env::temp_dir().join(format!(
+            "nw-preset-commit-{}",
+            chrono::Utc::now().timestamp_nanos_opt().unwrap()
+        ));
+        let state = crate::db::init_db(&dir).unwrap();
+        let mut db = state.db.lock().unwrap();
+        db.execute(
+            "INSERT INTO vocab_book(name,is_preset,preset_key) VALUES ('CET4测试',1,'test-preset')",
+            [],
+        )
+        .unwrap();
+        let preset_id = db.last_insert_rowid();
+        // 主释义只含连续词块「第一」；AI 改写后的释义产生「第一的」「最初的」等新词块
+        db.execute(
+            "INSERT INTO vocab_word(vocab_book_id,word,word_key,definition,source_keys) \
+             VALUES (?1,'first','first','adv. 第一；首先','[]')",
+            [preset_id],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO novel(title,cleaned_text) VALUES ('测试小说','他第一次就成功了。')",
+            [],
+        )
+        .unwrap();
+        let novel_id = db.last_insert_rowid();
+
+        let item = PresetCloneItem {
+            word: "first".into(),
+            definition: "第一的；最初的".into(),
+            phonetic: String::new(),
+            example_sentence: String::new(),
+            hit_count: 1,
+            matched_terms: vec!["第一".into()],
+        };
+        let result =
+            super::commit_items(&mut db, preset_id, novel_id, Some("裁剪本"), &[item]).unwrap();
+        assert_eq!(result.counts.imported, 1);
+        let terms: String = db
+            .query_row(
+                "SELECT match_terms FROM vocab_word WHERE vocab_book_id=?1",
+                [result.book_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(terms, "[\"第一\"]");
+        drop(db);
+        drop(state);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn extracts_chinese_sentence_on_utf8_boundaries() {
         let text = "前一句。神通者在雨夜中前行！后一句。";
@@ -888,15 +945,26 @@ pub(crate) fn commit_items(
             .split('【')
             .next()
             .unwrap_or(&source.definition);
-        let terms: Vec<_> = extract_cjk_terms(
-            item.definition
-                .split('【')
-                .next()
-                .unwrap_or(&item.definition),
-        )
-        .into_iter()
-        .filter(|term| primary.contains(term) && novel_text.contains(term))
-        .collect();
+        // 以预览回传的 matched_terms 为准（tailor 真正命中的词块），仅按当前小说文本复核；
+        // 缺失时才退回按释义重算。AI 复核会改写释义，按释义重算出的连续词块与预览命中的
+        // 不一致（如「第一」被改写成「第一的」），会把正常匹配误判为「匹配依据已失效」
+        let mut terms: Vec<String> = item
+            .matched_terms
+            .iter()
+            .filter(|term| !term.is_empty() && novel_text.contains(term.as_str()))
+            .cloned()
+            .collect();
+        if terms.is_empty() {
+            terms = extract_cjk_terms(
+                item.definition
+                    .split('【')
+                    .next()
+                    .unwrap_or(&item.definition),
+            )
+            .into_iter()
+            .filter(|term| primary.contains(term) && novel_text.contains(term))
+            .collect();
+        }
         if terms.is_empty() {
             return Err(format!("{} 的匹配依据已失效，请重新计算", item.word));
         }
