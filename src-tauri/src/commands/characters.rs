@@ -277,7 +277,7 @@ async fn extract_characters(
     config: &super::ai_enhancer::AiConfig,
     text: &str,
 ) -> Result<Vec<DetectedCharacter>, String> {
-    let content = chat_completion(config, AI_CHARACTER_PROMPT, text).await?;
+    let content = chat_completion(config, AI_CHARACTER_PROMPT, text, true).await?;
     parse_detected_characters(&content).ok_or_else(|| "AI 返回内容无法解析为角色列表".to_string())
 }
 

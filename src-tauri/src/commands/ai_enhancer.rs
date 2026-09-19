@@ -284,7 +284,12 @@ struct ChatMessage<'a> {
     content: &'a str,
 }
 
-pub(crate) async fn chat_completion(config: &AiConfig, system: &str, user: &str) -> Result<String, String> {
+pub(crate) async fn chat_completion(
+    config: &AiConfig,
+    system: &str,
+    user: &str,
+    json_mode: bool,
+) -> Result<String, String> {
     config.validate()?;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(120))
@@ -296,39 +301,7 @@ pub(crate) async fn chat_completion(config: &AiConfig, system: &str, user: &str)
         .user_agent("novel-words/0.1")
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
-    let mut payload = json!({
-        "model": config.model.trim(),
-        "messages": [
-            ChatMessage { role: "system", content: system },
-            ChatMessage { role: "user", content: user }
-        ],
-        "stream": false
-    });
-    if let Some(value) = config.temperature {
-        payload["temperature"] = json!(value);
-    }
-    if let Some(value) = config.top_p {
-        payload["top_p"] = json!(value);
-    }
-    if let Some(value) = config.max_tokens {
-        payload["max_tokens"] = json!(value);
-    }
-    let is_deepseek_v4 = config.provider.eq_ignore_ascii_case("deepseek")
-        && config
-            .model
-            .trim()
-            .to_ascii_lowercase()
-            .starts_with("deepseek-v4");
-    if is_deepseek_v4 {
-        // DeepSeek V4 enables thinking by default. Vocabulary validation is a
-        // short structured-output task; disabling thinking prevents a very
-        // large hidden reasoning response and substantially reduces latency.
-        payload["thinking"] = json!({ "type": "disabled" });
-        payload["response_format"] = json!({ "type": "json_object" });
-        if config.max_tokens.is_none() {
-            payload["max_tokens"] = json!(4096);
-        }
-    }
+    let payload = build_chat_payload(config, system, user, json_mode);
     const MAX_TRANSPORT_ATTEMPTS: usize = 2;
     let mut completed_body = None;
     for attempt in 1..=MAX_TRANSPORT_ATTEMPTS {
@@ -404,6 +377,59 @@ pub(crate) async fn chat_completion(config: &AiConfig, system: &str, user: &str)
         .pointer("/choices/0/message/content")
         .ok_or_else(|| "模型响应缺少 choices[0].message.content".to_string())?;
     content_to_text(content).ok_or_else(|| "模型响应内容为空".to_string())
+}
+
+/// Builds the chat/completions request body. `json_mode` opts the caller into
+/// strict JSON output; it is honoured only for DeepSeek V4 models, where it
+/// also keeps the provider rule satisfied: DeepSeek rejects
+/// `response_format: json_object` unless the prompt itself mentions "json".
+fn build_chat_payload(config: &AiConfig, system: &str, user: &str, json_mode: bool) -> Value {
+    let mut payload = json!({
+        "model": config.model.trim(),
+        "messages": [
+            ChatMessage { role: "system", content: system },
+            ChatMessage { role: "user", content: user }
+        ],
+        "stream": false
+    });
+    if let Some(value) = config.temperature {
+        payload["temperature"] = json!(value);
+    }
+    if let Some(value) = config.top_p {
+        payload["top_p"] = json!(value);
+    }
+    if let Some(value) = config.max_tokens {
+        payload["max_tokens"] = json!(value);
+    }
+    let is_deepseek_v4 = config.provider.eq_ignore_ascii_case("deepseek")
+        && config
+            .model
+            .trim()
+            .to_ascii_lowercase()
+            .starts_with("deepseek-v4");
+    if is_deepseek_v4 {
+        // DeepSeek V4 enables thinking by default. Vocabulary validation and
+        // similar short tasks pay a large hidden reasoning latency, so
+        // thinking is disabled explicitly.
+        payload["thinking"] = json!({ "type": "disabled" });
+        if config.max_tokens.is_none() {
+            payload["max_tokens"] = json!(4096);
+        }
+        if json_mode {
+            payload["response_format"] = json!({ "type": "json_object" });
+            // Callers normally describe the expected JSON shape in their
+            // prompts; append a fallback instruction when they do not, or the
+            // provider rejects the request with HTTP 400.
+            if !format!("{}\n{}", system, user)
+                .to_ascii_lowercase()
+                .contains("json")
+            {
+                payload["messages"][0]["content"] =
+                    json!(format!("{}\nRespond with a single JSON object.", system));
+            }
+        }
+    }
+    payload
 }
 
 fn content_to_text(content: &Value) -> Option<String> {
@@ -532,6 +558,7 @@ pub async fn test_ai_connection(
         &config,
         "You are a connection test. Follow the user's output instruction exactly.",
         "Reply with exactly: OK",
+        false,
     )
     .await?;
     Ok(format!("连接成功：{}", answer.trim()))
@@ -573,7 +600,7 @@ where
             "Review every item below. `keep` is false only when the matched Chinese term does not express a valid sense of the English word in that sentence. `contextDefinition` must use the format `<part-of-speech> <concise Chinese meaning>` (for example `n. 天赋`), retain the contextually correct part of speech from the input definition, be concise (max 30 characters total), and contain one exact string from matchedTerms. `exampleSentence` must be a natural, concise Chinese rewrite (max 80 Chinese characters) grounded only in the original exampleSentence and contain one exact string from matchedTerms. Return one item per input in the same order as a JSON object shaped exactly like {{\"items\":[{{\"word\":\"...\",\"keep\":true,\"contextDefinition\":\"n. ...\",\"exampleSentence\":\"...\"}}]}}.\n\n{}",
             serde_json::to_string(&compact).map_err(|e| e.to_string())?
         );
-        let answer = chat_completion(config, system, &user).await?;
+        let answer = chat_completion(config, system, &user, true).await?;
         decisions.extend(parse_decisions(&answer)?);
         progress(batch_index + 1, total_batches);
     }
@@ -609,7 +636,20 @@ fn parse_decisions(text: &str) -> Result<Vec<AiWordDecision>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_decisions, AiConfig};
+    use super::{build_chat_payload, parse_decisions, AiConfig};
+
+    fn deepseek_v4_config() -> AiConfig {
+        AiConfig {
+            enabled: true,
+            provider: "deepseek".into(),
+            base_url: "https://api.deepseek.com/v1".into(),
+            api_key: String::new(),
+            model: "deepseek-v4-flash".into(),
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+        }
+    }
 
     #[test]
     fn normalizes_chat_completions_endpoint() {
@@ -654,5 +694,55 @@ mod tests {
         .unwrap();
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].word, "gift");
+    }
+
+    #[test]
+    fn json_mode_appends_json_hint_when_prompt_lacks_it() {
+        let payload = build_chat_payload(
+            &deepseek_v4_config(),
+            "You are a connection test.",
+            "Reply with exactly: OK",
+            true,
+        );
+        assert_eq!(payload["response_format"]["type"], "json_object");
+        let system = payload["messages"][0]["content"].as_str().unwrap();
+        assert!(system.to_ascii_lowercase().contains("json"));
+    }
+
+    #[test]
+    fn json_mode_keeps_prompt_when_it_already_mentions_json() {
+        let payload = build_chat_payload(
+            &deepseek_v4_config(),
+            "Return one JSON object only.",
+            "Review every item below.",
+            true,
+        );
+        assert_eq!(payload["response_format"]["type"], "json_object");
+        assert_eq!(
+            payload["messages"][0]["content"],
+            "Return one JSON object only."
+        );
+    }
+
+    #[test]
+    fn connection_test_omits_response_format() {
+        let payload = build_chat_payload(
+            &deepseek_v4_config(),
+            "You are a connection test.",
+            "Reply with exactly: OK",
+            false,
+        );
+        assert!(payload.get("response_format").is_none());
+        assert_eq!(payload["thinking"]["type"], "disabled");
+    }
+
+    #[test]
+    fn non_deepseek_payload_has_no_deepseek_extras() {
+        let mut config = deepseek_v4_config();
+        config.provider = "openai".into();
+        config.model = "gpt-4o-mini".into();
+        let payload = build_chat_payload(&config, "sys", "user", true);
+        assert!(payload.get("response_format").is_none());
+        assert!(payload.get("thinking").is_none());
     }
 }
