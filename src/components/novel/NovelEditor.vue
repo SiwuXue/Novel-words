@@ -478,6 +478,60 @@ function scrollToText(keyword: string): boolean {
   }
 }
 
+// ===== 朗读跟随滚动（读到哪里滚到哪里） =====
+
+let lastRevealPos = 0
+
+function resetReveal(): void {
+  lastRevealPos = 0
+}
+
+/**
+ * 把包含 keyword 的文本滚到视口上部舒适区（不 focus、不移动光标）。
+ * 优先从上次朗读位置向后搜索——短句（「他说：」）在文中大量重复时，
+ * 增量搜索总能命中当前位置；回跳/重播时向后搜不到再全文兜底。
+ */
+function revealText(keyword: string): boolean {
+  if (!editor.value || !keyword.trim()) return false
+  try {
+    const doc = editor.value.state.doc
+    const normalized = keyword.toLocaleLowerCase()
+    let foundPos: number | null = null
+    const search = (fromPos: number) => {
+      doc.descendants((node, pos) => {
+        if (foundPos !== null) return false
+        if (node.isText && pos >= fromPos) {
+          const idx = (node.text || '').toLocaleLowerCase().indexOf(normalized)
+          if (idx >= 0) {
+            foundPos = pos + idx
+            return false
+          }
+        }
+        return true
+      })
+    }
+    search(lastRevealPos)
+    if (foundPos === null && lastRevealPos > 0) search(0)
+    if (foundPos === null) return false
+    lastRevealPos = foundPos + keyword.length
+    const view = (editor.value as unknown as { view: EditorView }).view
+    const coords = view.coordsAtPos(foundPos)
+    const scrollEl = getScrollEl()
+    if (!scrollEl) return true
+    const rect = scrollEl.getBoundingClientRect()
+    // 已在舒适区（上 22% ~ 下 35% 之间）不滚，避免用户手动翻阅时被拽回
+    if (coords.top >= rect.top + rect.height * 0.22 && coords.top <= rect.bottom - rect.height * 0.35) {
+      return true
+    }
+    const target = scrollEl.scrollTop + (coords.top - (rect.top + rect.height * 0.3))
+    scrollEl.scrollTo({ top: Math.max(0, target), behavior: 'smooth' })
+    return true
+  } catch (e) {
+    console.warn('[NovelEditor] revealText failed:', e)
+    return false
+  }
+}
+
 /** Scroll to and temporarily emphasize a source word without changing the document. */
 function highlightText(keyword: string, duration = 5000): boolean {
   const view = (editor.value as any)?.view as EditorView | undefined
@@ -526,7 +580,7 @@ function setScrollPercent(p: number) {
   el.scrollTop = max * Math.min(1, Math.max(0, p))
 }
 
-defineExpose({ waitUntilReady, isContentReady, scrollToText, highlightText, getScrollEl, getScrollPercent, setScrollPercent })
+defineExpose({ waitUntilReady, isContentReady, scrollToText, highlightText, getScrollEl, getScrollPercent, setScrollPercent, revealText, resetReveal })
 </script>
 
 <style scoped>

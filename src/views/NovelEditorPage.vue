@@ -571,6 +571,7 @@ async function toggleTtsReading(): Promise<void> {
 }
 
 async function startTtsReading(): Promise<void> {
+  editorRef.value?.resetReveal()
   await startTtsSession(
     plainChapterText.value,
     {
@@ -579,6 +580,10 @@ async function startTtsReading(): Promise<void> {
       dialogueEnabled: dialogueVoiceEnabled.value,
     },
     {
+      // 朗读跟随滚动：句首单元开始时把该句滚到视口舒适区（对白句中片段不滚）
+      onUnitStart: (unit) => {
+        if (unit?.startsSentence) editorRef.value?.revealText(unit.text)
+      },
       onFinish: (completed) => {
         if (completed && settingsStore.ttsAutoNext && hasNextChapter.value) {
           void (async () => {
@@ -626,6 +631,11 @@ function toggleAutoScroll(): void {
     })
   }
 }
+
+// 朗读播放时定时滚动让位（跟随滚动接管，两个滚动源不打架）
+watch(ttsState, (s) => {
+  if (s === 'playing' && isTimedScrollActive.value) stopTimedScroll()
+})
 
 async function onWordTapTtsNext(): Promise<void> {
   if (hasNextChapter.value) {
