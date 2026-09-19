@@ -90,10 +90,13 @@
           <span v-if="row.aliases.length" class="cv-ai-hint">（{{ row.aliases.join('、') }}）</span>
         </template>
       </el-table-column>
-      <el-table-column width="150" align="right">
+      <el-table-column width="170" align="right">
         <template #default="{ row }">
           <el-button size="small" type="primary" plain @click="confirmCandidate(row)">
             {{ t('characters.confirm') }}
+          </el-button>
+          <el-button size="small" link @click="renameCandidate(row)">
+            {{ t('characters.rename') }}
           </el-button>
           <el-button size="small" link @click="ignoreCandidate(row)">
             {{ t('characters.ignore') }}
@@ -114,7 +117,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { collectCandidates } from '@/utils/dialogue'
@@ -315,10 +318,15 @@ async function loadCharacters(): Promise<void> {
     }
   }
   // 只把"出现在 ≥2 段对白 + 名字不超长"的候选并入列表，避免单次出现的动词残片（说/笑/感慨）进面板；
-  // 名字或任一变体已入库的不再作为候选（避免同一角色出现两行）
-  const savedNames = new Set(rowsMap.keys())
+  // 名字或任一变体已入库的不再作为候选（避免同一角色出现两行）。
+  // 已入库角色的别名同样占用：候选改名确认后旧残片名会作为别名入库，不应再冒出新候选
+  const savedNames = new Set<string>()
+  for (const r of rowsMap.values()) {
+    savedNames.add(r.name)
+    for (const a of r.aliases) if (a && a !== r.name) savedNames.add(a)
+  }
   for (const [name, info] of candidateInfo) {
-    if (rowsMap.has(name) || info.variants.some((v) => savedNames.has(v))) continue
+    if (savedNames.has(name) || info.variants.some((v) => savedNames.has(v))) continue
     rowsMap.set(name, {
       name,
       gender: 'unknown',
@@ -408,13 +416,31 @@ async function removeRow(row: CharRow): Promise<void> {
   emitUpdated()
 }
 
-function addManual(): void {
-  const name = window.prompt(t('characters.name'))
-  if (!name || !name.trim()) return
-  const trimmed = name.trim()
-  if (rows.value.some((r) => r.name === trimmed)) return
+async function addManual(): Promise<void> {
+  let name = ''
+  try {
+    const r = await ElMessageBox.prompt(t('characters.name'), t('characters.addChar'), {
+      confirmButtonText: t('characters.confirm'),
+      cancelButtonText: t('preset.cancel'),
+      inputPattern: /\S+/,
+      inputErrorMessage: t('characters.nameRequired'),
+    })
+    name = String(r.value ?? '').trim()
+  } catch {
+    return // 用户取消
+  }
+  if (!name) return
+  if (rows.value.some((r) => r.name === name)) {
+    ElMessage.warning(t('characters.nameExists'))
+    return
+  }
+  // 手工添加的角色若曾被忽略，先解除（否则 id 未入库前会从两个分组同时消失）
+  if (ignored.value.has(name)) {
+    ignored.value.delete(name)
+    persistIgnored()
+  }
   const row: CharRow = {
-    name: trimmed,
+    name,
     gender: 'unknown',
     voice: '',
     id: null,
@@ -426,6 +452,39 @@ function addManual(): void {
   }
   rows.value.push(row)
   void saveRow(row)
+}
+
+/** 候选改名：把归因残片名（如「王卓连忙恭敬」）修成真名后再确认入库。
+ *  旧名转存为别名——归因产出的说话名就是残片，保留别名才能让这些对白命中音色 */
+async function renameCandidate(row: CharRow): Promise<void> {
+  let next = ''
+  try {
+    const r = await ElMessageBox.prompt(t('characters.name'), t('characters.rename'), {
+      inputValue: row.name,
+      confirmButtonText: t('characters.confirm'),
+      cancelButtonText: t('preset.cancel'),
+      inputPattern: /\S+/,
+      inputErrorMessage: t('characters.nameRequired'),
+    })
+    next = String(r.value ?? '').trim()
+  } catch {
+    return // 用户取消
+  }
+  if (!next || next === row.name) return
+  if (rows.value.some((r) => r !== row && r.name === next)) {
+    ElMessage.warning(t('characters.nameExists'))
+    return
+  }
+  const old = row.name
+  row.name = next
+  // 新名字若在别名里（避免自己别名叫自己），旧名追加进别名头部
+  row.aliases = row.aliases.filter((a) => a !== next)
+  if (!row.aliases.includes(old)) row.aliases.unshift(old)
+  // 新名字若曾出现在忽略列表，解除忽略（用户正在主动确认这个角色）
+  if (ignored.value.has(next)) {
+    ignored.value.delete(next)
+    persistIgnored()
+  }
 }
 
 async function onAiDetect(): Promise<void> {
