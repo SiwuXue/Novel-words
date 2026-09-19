@@ -294,6 +294,23 @@ describe('归因净化（动词表 / 修饰动作词 / 代词群体词过滤）'
         ?.speaker,
     ).toBe('Tom')
   })
+
+  it('「…，说道：」句式不再把动词当角色（真实语料回归）', () => {
+    // 「名字 + 逗号 + 动作词 + 道」时名字被逗号断开，正则只能退到单字「道」，
+    // 旧实现会把动词本身（说/笑/喝/感慨/劝慰）当成说话人
+    expect(collectSpeakers('　　母亲点头，感慨道："铁柱啊。"')).toEqual([])
+    expect(collectSpeakers('　　四叔哈哈一笑，拍了拍铁柱肩膀，说道："行了。"')).toEqual([])
+    expect(collectSpeakers('　　铁柱的四叔，眉头一皱，喝道："王卓。"')).toEqual([])
+    expect(collectSpeakers('　　铁柱娘爱怜的望着自己儿子，劝慰道："铁柱。"')).toEqual([])
+  })
+
+  it('紧邻动词的真名保留，单字动词残片与动作词被拒绝', () => {
+    const text =
+      '铁柱父亲摇头道："你四叔传来信儿。"\n' +
+      '铁柱父亲叹息，说道："老四别听你嫂子的。"\n' +
+      '铁柱抬头道："我知道了。"'
+    expect(collectSpeakers(text).map((s) => s.name)).toEqual(['铁柱父亲', '铁柱'])
+  })
 })
 
 describe('collectCandidates', () => {
