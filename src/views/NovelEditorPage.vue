@@ -102,17 +102,6 @@
             :label="p.name"
           />
         </el-select>
-        <el-button
-          v-if="!wordTapMode"
-          size="small"
-          :type="ttsState === 'playing' ? 'warning' : 'default'"
-          @click="toggleTtsReading"
-        >
-          {{ ttsLabel }}
-        </el-button>
-        <el-button v-if="!wordTapMode && ttsState !== 'idle'" size="small" @click="stopTtsReading">
-          {{ t('reading.ttsStop') }}
-        </el-button>
         <span v-if="!wordTapMode && ttsState !== 'idle'" class="tts-progress-label" role="status">
           {{ ttsProgressLabel }}
         </span>
@@ -286,6 +275,24 @@
       </el-button>
     </div>
 
+    <!-- TTS 悬浮控制条（普通阅读模式；逐词模式由 WordTapReader 内部挂载） -->
+    <TtsControlBar
+      v-if="readingMode && !wordTapMode"
+      class="tts-control-bar-page"
+      :visible="ttsState !== 'idle'"
+      :mode="ttsState === 'playing' ? 'playing' : 'paused'"
+      :toolbar-rate="toolbarRate"
+      :toolbar-volume="toolbarVolume"
+      :can-prev-line="canPrev"
+      :can-next-line="canNext"
+      @toggle-play-pause="toggleTtsReading"
+      @prev-line="prevSentence"
+      @next-line="nextSentence"
+      @regenerate="regenerate"
+      @stop="stopTtsReading"
+      @open-speak-settings="charPanel?.open()"
+    />
+
     <!-- Loading -->
     <div
       v-else-if="loadState === 'loading'"
@@ -354,8 +361,9 @@ const WordTapReader = defineAsyncComponent(() => import('@/components/novel/Word
 import ChapterList from '@/components/novel/ChapterList.vue'
 import PreviewPanel from '@/components/novel/PreviewPanel.vue'
 import { buildHtml as buildPreviewHtml } from '@/utils/pdfPreview'
-import { ttsPlayer, splitSentenceSpans } from '@/utils/ttsPlayer'
-import { buildSpeechUnits } from '@/utils/dialogue'
+import { ttsPlayer } from '@/utils/ttsPlayer'
+import { useTtsSession, currentTtsSettings } from '@/composables/useTtsSession'
+import TtsControlBar from '@/components/novel/tts-bar/TtsControlBar.vue'
 import CharacterVoicePanel from '@/components/novel/CharacterVoicePanel.vue'
 import { useSplitLayout } from '@/composables/useSplitLayout'
 import { t } from '@/i18n'
@@ -411,17 +419,39 @@ const isEnglishMode = computed(() => store.currentNovel?.language === 'en')
 /** 英文逐词阅读模式（仅专注阅读 + 英文小说时可用） */
 const wordTapMode = ref(false)
 
-// ===== TTS 朗读（普通阅读模式） =====
+// ===== TTS 朗读（普通阅读模式，悬浮控制条 + useTtsSession） =====
 const ttsState = computed(() => ttsPlayer.state)
-const ttsLabel = computed(() => {
-  if (ttsState.value === 'playing') return t('reading.ttsPause')
-  if (ttsState.value === 'paused') return t('reading.ttsResume')
-  return t('reading.ttsPlay')
-})
 const ttsProgressLabel = computed(() => {
   const i = ttsPlayer.currentIndex.value
   const n = ttsPlayer.totalSentences.value
   return n > 0 ? `${Math.max(1, i + 1)}/${n}` : ''
+})
+
+const {
+  start: startTtsSession,
+  stop: stopTtsSession,
+  canPrev,
+  canNext,
+  prevSentence,
+  nextSentence,
+  regenerate,
+} = useTtsSession()
+
+/** 控制条滑杆 ↔ settingsStore（持久化 + 播放中热更新，下一句生效） */
+const toolbarRate = computed({
+  get: () => settingsStore.ttsRate,
+  set: (v: number) => {
+    void settingsStore.setTtsSettings({ ttsRate: v })
+    ttsPlayer.replaceSettings(currentTtsSettings())
+  },
+})
+const toolbarVolume = computed({
+  get: () => settingsStore.ttsVolume,
+  set: (v: number) => {
+    void settingsStore.setTtsSettings({ ttsVolume: v })
+    ttsPlayer.replaceSettings(currentTtsSettings())
+    ttsPlayer.setVolumeLive(v)
+  },
 })
 
 function htmlToPlainText(html: string): string {
@@ -431,19 +461,6 @@ function htmlToPlainText(html: string): string {
 
 /** 当前章纯文本（角色面板与朗读共用） */
 const plainChapterText = computed(() => htmlToPlainText(editorContent.value))
-
-function currentTtsSettings() {
-  return {
-    provider: settingsStore.ttsProvider,
-    voice: settingsStore.ttsVoice,
-    rate: settingsStore.ttsRate,
-    pitch: settingsStore.ttsPitch,
-    volume: settingsStore.ttsVolume,
-    apiKey: settingsStore.ttsApiKey(),
-    groupId: settingsStore.ttsMinimaxGroupId,
-    sentencePauseMs: settingsStore.ttsPauseSentence,
-  }
-}
 
 // ---------- 角色分音色（自加载 + CharacterVoicePanel 回传） ----------
 const charPanel = ref<InstanceType<typeof CharacterVoicePanel> | null>(null)
@@ -511,33 +528,13 @@ async function toggleTtsReading(): Promise<void> {
 }
 
 async function startTtsReading(): Promise<void> {
-  const fullText = plainChapterText.value
-  const spans = splitSentenceSpans(fullText)
-  if (spans.length === 0) return
-  // 对白分音色：句子内再切旁白/对白片段——旁白走主音色，对白按说话人分音色
-  const useDialogue = dialogueVoiceEnabled.value && settingsStore.ttsVoiceMode === 'dialogue'
-  let sentences: string[]
-  let overrides: Array<string | undefined> | undefined
-  let pauseBefore: Array<number | undefined> | undefined
-  if (useDialogue) {
-    const units = buildSpeechUnits(
-      spans,
-      fullText,
-      charVoices.value,
-      charGenders.value,
-      { male: settingsStore.ttsMaleVoice, female: settingsStore.ttsFemaleVoice },
-      settingsStore.ttsQuoteStyles,
-    )
-    sentences = units.map((u) => u.text)
-    overrides = units.map((u) => u.voice)
-    // 句内片段（旁白前缀 ↔ 对白）无缝衔接，只在实际句末保留句间停顿
-    pauseBefore = units.map((u, idx) => (idx === 0 || u.startsSentence ? undefined : 0))
-  } else {
-    sentences = spans.map((s) => s.text)
-  }
-  await ttsPlayer.start(
-    sentences,
-    currentTtsSettings(),
+  await startTtsSession(
+    plainChapterText.value,
+    {
+      charVoices: charVoices.value,
+      charGenders: charGenders.value,
+      dialogueEnabled: dialogueVoiceEnabled.value,
+    },
     {
       onFinish: (completed) => {
         if (completed && settingsStore.ttsAutoNext && hasNextChapter.value) {
@@ -549,13 +546,11 @@ async function startTtsReading(): Promise<void> {
         }
       },
     },
-    overrides,
-    { pauseBeforeMs: pauseBefore },
   )
 }
 
 function stopTtsReading(): void {
-  ttsPlayer.stop()
+  stopTtsSession()
 }
 
 async function onWordTapTtsNext(): Promise<void> {
@@ -1637,6 +1632,11 @@ function attachScrollListener() {
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* TTS 悬浮控制条：位于章节导航条（bottom:16px）上方，避免重叠 */
+.tts-control-bar-page {
+  --tts-bar-bottom: 64px;
 }
 
 /* Draggable divider between panels */

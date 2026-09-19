@@ -18,17 +18,6 @@
             :label="p.name"
           />
         </el-select>
-        <el-button
-          size="small"
-          :type="ttsState === 'idle' ? 'default' : 'warning'"
-          :disabled="finishing"
-          @click="toggleTts"
-        >
-          {{ ttsLabel }}
-        </el-button>
-        <el-button v-if="ttsState !== 'idle'" size="small" @click="stopTts">
-          {{ t('wordTap.ttsStop') }}
-        </el-button>
         <span v-if="ttsState !== 'idle'" class="wt-tts-progress" role="status">
           {{ ttsProgress }}
         </span>
@@ -109,6 +98,22 @@
       :chapter-text="fullText"
       @updated="onCharVoicesUpdated"
     />
+
+    <!-- TTS 悬浮控制条（移植自 ColorTxt VoiceReadToolbar） -->
+    <TtsControlBar
+      :visible="ttsState !== 'idle'"
+      :mode="ttsState === 'playing' ? 'playing' : 'paused'"
+      :toolbar-rate="toolbarRate"
+      :toolbar-volume="toolbarVolume"
+      :can-prev-line="canPrev"
+      :can-next-line="canNext"
+      @toggle-play-pause="toggleTts"
+      @prev-line="prevSentence"
+      @next-line="nextSentence"
+      @regenerate="regenerate"
+      @stop="stopTts"
+      @open-speak-settings="charPanel?.open()"
+    />
   </div>
 </template>
 
@@ -119,11 +124,12 @@ import { invoke } from '@tauri-apps/api/core'
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
 import DictLookupPopover from './DictLookupPopover.vue'
 import CharacterVoicePanel from './CharacterVoicePanel.vue'
+import TtsControlBar from './tts-bar/TtsControlBar.vue'
 import { useDictionaryStore } from '@/stores/dictionaryStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { speakWord } from '@/utils/speech'
-import { ttsPlayer, splitSentenceSpans } from '@/utils/ttsPlayer'
-import { buildSpeechUnits } from '@/utils/dialogue'
+import { ttsPlayer } from '@/utils/ttsPlayer'
+import { useTtsSession, currentTtsSettings } from '@/composables/useTtsSession'
 import {
   parseWordTapBlocks,
   collectWordKeys,
@@ -379,21 +385,42 @@ function onMarked(payload: { word: string; proficiency: Proficiency }) {
   emit('mark', payload)
 }
 
-// ---------- 朗读（TTS） ----------
+// ---------- 朗读（TTS，悬浮控制条 + useTtsSession） ----------
 
 const speakingRange = ref<{ from: number; to: number } | null>(null)
 const autoRestart = ref(false)
 const ttsState = computed(() => ttsPlayer.state)
-const sentenceSpans = computed(() => splitSentenceSpans(fullText.value))
 const ttsProgress = computed(() => {
   const i = ttsPlayer.currentIndex.value
   const n = ttsPlayer.totalSentences.value
   return n > 0 ? `${Math.max(1, i + 1)}/${n}` : ''
 })
-const ttsLabel = computed(() => {
-  if (ttsState.value === 'playing') return t('wordTap.ttsPause')
-  if (ttsState.value === 'paused') return t('wordTap.ttsResume')
-  return t('wordTap.ttsPlay')
+
+const {
+  start: startSession,
+  stop: stopSession,
+  canPrev,
+  canNext,
+  prevSentence,
+  nextSentence,
+  regenerate,
+} = useTtsSession()
+
+/** 控制条滑杆 ↔ settingsStore（持久化 + 播放中热更新，下一句生效） */
+const toolbarRate = computed({
+  get: () => settingsStore.ttsRate,
+  set: (v: number) => {
+    void settingsStore.setTtsSettings({ ttsRate: v })
+    ttsPlayer.replaceSettings(currentTtsSettings())
+  },
+})
+const toolbarVolume = computed({
+  get: () => settingsStore.ttsVolume,
+  set: (v: number) => {
+    void settingsStore.setTtsSettings({ ttsVolume: v })
+    ttsPlayer.replaceSettings(currentTtsSettings())
+    ttsPlayer.setVolumeLive(v)
+  },
 })
 
 function isSpeaking(token: SerialToken): boolean {
@@ -425,19 +452,6 @@ function highlightSentence(unit: { start: number; end: number } | undefined): vo
   })
 }
 
-function currentTtsSettings() {
-  return {
-    provider: settingsStore.ttsProvider,
-    voice: settingsStore.ttsVoice,
-    rate: settingsStore.ttsRate,
-    pitch: settingsStore.ttsPitch,
-    volume: settingsStore.ttsVolume,
-    apiKey: settingsStore.ttsApiKey(),
-    groupId: settingsStore.ttsMinimaxGroupId,
-    sentencePauseMs: settingsStore.ttsPauseSentence,
-  }
-}
-
 /** 朗读方案快速切换（套用后立即生效，激活选择已持久化） */
 async function onSwitchProfile(id: string | undefined): Promise<void> {
   if (!id) return
@@ -461,37 +475,15 @@ async function toggleTts(): Promise<void> {
 }
 
 async function startTts(): Promise<void> {
-  const spans = sentenceSpans.value
-  if (spans.length === 0) return
-  // 对白分音色：朗读方案为多音色模式且角色面板开启时，句子内再切旁白/对白片段
-  //（旁白走主音色；对白按说话人：显式指派音色 > 性别默认音色 > 主音色）
-  const useDialogue = dialogueVoiceEnabled.value && settingsStore.ttsVoiceMode === 'dialogue'
-  let sentences: string[]
-  let overrides: Array<string | undefined> | undefined
-  let pauseBefore: Array<number | undefined> | undefined
-  let units: Array<{ start: number; end: number }> = spans
-  if (useDialogue) {
-    const built = buildSpeechUnits(
-      spans,
-      fullText.value,
-      charVoices.value,
-      charGenders.value,
-      { male: settingsStore.ttsMaleVoice, female: settingsStore.ttsFemaleVoice },
-      settingsStore.ttsQuoteStyles,
-    )
-    sentences = built.map((u) => u.text)
-    overrides = built.map((u) => u.voice)
-    // 句内片段（旁白前缀 ↔ 对白）无缝衔接，只在实际句末保留句间停顿
-    pauseBefore = built.map((u, idx) => (idx === 0 || u.startsSentence ? undefined : 0))
-    units = built
-  } else {
-    sentences = spans.map((s) => s.text)
-  }
-  await ttsPlayer.start(
-    sentences,
-    currentTtsSettings(),
+  await startSession(
+    fullText.value,
     {
-      onSentenceStart: (i) => highlightSentence(units[i]),
+      charVoices: charVoices.value,
+      charGenders: charGenders.value,
+      dialogueEnabled: dialogueVoiceEnabled.value,
+    },
+    {
+      onUnitStart: (unit) => highlightSentence(unit),
       onFinish: (completed) => {
         speakingRange.value = null
         if (completed && settingsStore.ttsAutoNext) {
@@ -500,8 +492,6 @@ async function startTts(): Promise<void> {
         }
       },
     },
-    overrides,
-    { pauseBeforeMs: pauseBefore },
   )
 }
 
@@ -565,7 +555,7 @@ watch(
 
 function stopTts(): void {
   autoRestart.value = false
-  ttsPlayer.stop()
+  stopSession()
   speakingRange.value = null
 }
 
@@ -725,6 +715,8 @@ onBeforeUnmount(() => {
   disposed.value = true
   document.removeEventListener('keydown', onKeydown)
   document.removeEventListener('mousedown', onDocMouseDown)
+  // 组件卸载兜底停播（退出逐词模式时朗读不应跨模式延续）
+  ttsPlayer.stop()
 })
 </script>
 
@@ -734,6 +726,8 @@ onBeforeUnmount(() => {
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  /* TTS 悬浮控制条的定位基准 */
+  position: relative;
 }
 
 .wt-tts-profile {
@@ -798,6 +792,8 @@ onBeforeUnmount(() => {
   flex: 1;
   overflow-y: auto;
   padding: 16px clamp(16px, 6vw, 64px);
+  /* 底部留白：避免正文被悬浮控制条遮挡 */
+  padding-bottom: 88px;
   user-select: none;
 }
 .wt-block {
@@ -821,6 +817,12 @@ onBeforeUnmount(() => {
 .wt-word.wt-selecting {
   background: var(--wt-selecting, rgba(103, 163, 95, 0.35));
   outline: 1px solid var(--wt-mastered, #67a35f);
+}
+
+/* 朗读中的句子高亮（onSentenceStart → highlightSentence） */
+.wt-word.wt-speaking {
+  background: color-mix(in srgb, var(--accent-color, #287568) 26%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-color, #287568) 45%, transparent);
 }
 
 /* 状态着色（背景微高亮 + 文本色） */
